@@ -10,7 +10,7 @@ import pid as _pid_mod
 import config as cfg
 from hardware import Motor
 
-# 设置PID最大PWM值
+# 设置 PID 最大 PWM 值
 _pid_mod.PWM_MAX = cfg.PWM_MAX
 speed_ctrl = _pid_mod.speed_ctrl
 gyro_ctrl = _pid_mod.gyro_ctrl
@@ -20,17 +20,17 @@ pos_ctrl = _pid_mod.pos_ctrl
 # ====================== 基础配置 ======================
 # 系统控制周期
 TICK_PERIOD_MS = cfg.TICK_PERIOD_MS
-# 电机PWM频率
+# 电机 PWM 频率
 MOTOR_FREQ = cfg.MOTOR_FREQ
 # 电机最大/最小有效占空比
 MOTOR_DUTY_MAX = cfg.MOTOR_DUTY_MAX
 MOTOR_DUTY_MIN = cfg.MOTOR_DUTY_MIN
-# PWM平滑滤波系数
+# PWM 平滑滤波系数
 PWM_SMOOTH_FACTOR = cfg.PWM_SMOOTH_FACTOR
-# PWM单次最大变化量（防冲击）
+# PWM 单次最大变化量（防冲击）
 MAX_PWM_CHANGE = cfg.MAX_PWM_CHANGE
 
-# 默认只开启速度环，需要方向控制时再打开陀螺仪环
+# 默认开启速度环；需要方向控制时再叠加陀螺仪环
 ENABLE_GYRO_LOOP = True
 ENABLE_OSCILLOSCOPE = False
 SHOW_DEVICE_INFO = False
@@ -52,16 +52,16 @@ TEST_LINEAR_SPEED = 5.0
 TEST_ROTATE_SPEED = 5.0
 GYRO_SIGN = 1.0
 
-# 陀螺仪Z轴校准参数
+# 陀螺仪 Z 轴标定参数
 GYRO_OFFSET_Z = 3.16
 AUTO_GYRO_OFFSET_CAL = False
 GYRO_CALIB_SAMPLES = 2000
 GYRO_CALIB_DELAY_MS = 1
 GYRO_SCALE = -1.0 / 16.54052
-GYRO_DEADBAND_DPS = 0.8 #死区阈值
-GYRO_KP = 0.32
-GYRO_KI = 0.03
-GYRO_OUTPUT_LIMIT = 10.0
+GYRO_DEADBAND_DPS = 0.8  # 陀螺仪死区阈值
+GYRO_KP = 0.15
+GYRO_KI = 0.003
+GYRO_OUTPUT_LIMIT = 5.0
 
 # 根据运动模式设置目标速度
 if BODY_TEST_MODE == "straight":
@@ -79,10 +79,10 @@ elif BODY_TEST_MODE == "rotate":
 else:
     raise ValueError("BODY_TEST_MODE 必须是 straight / translate / rotate")
 
-# IMU使能条件
+# IMU 使能条件
 ENABLE_IMU = ENABLE_GYRO_LOOP or AUTO_GYRO_OFFSET_CAL or SHOW_DEVICE_INFO
 
-# 编码器与IMU捕获配置
+# 编码器与 IMU 采样配置
 ENCODER_CAPTURE_DIV = 1
 IMU_CAPTURE_DIV = 1
 ENC_FL_INVERT = False
@@ -93,35 +93,149 @@ ENC_B_INVERT = False
 DEBUG_DIV = 20
 EXIT_CHECK_DIV = 5
 GC_DIV = 50
-TIMEOUT_SECOND = 10  # 【修改】发车后运行10秒自动退出
+FORCE_MOTOR_OFF = False  # 调试开关：True 时程序继续运行，但三个电机始终断输出
+AUTO_START_ON_BOOT = False
+AUTO_START_DELAY_MS = 2000
+TIMEOUT_SECOND = 10  # 发车后运行 10 秒自动退出
+TUNE_LOG_VERBOSE = True
 
-# 无线遥控器7通道作为退出触发
+# 无线遥控器 7 通道作为退出触发
 EXIT_TRIGGER_CHANNEL = 7
 CH7_TOLERANCE = 1.0
-CAM_ERROR_OFFSET = 120
-CAM_PACKET_TIMEOUT_MS = 200
+Cam_Error_Offset = 120
+Cam_Error_Scale = 2
+Cam_Packet_Timeout_Ms = 200
+Cam_Frame_Head = 0xFF
+Line_Packet_Tag = 0xFC
+No_Target_Marker = 0xFE
+Classify_Packet_Tag = 0xFD
+NAV_STATE_SEARCH = "SEARCH"
+NAV_STATE_SEARCH_TURN = "SEARCH_TURN_45"
+NAV_STATE_COARSE = "COARSE_APPROACH"
+NAV_STATE_FINE = "FINE_ALIGN"
+NAV_STATE_PUSH_CLASSIFY = "PUSH_CLASSIFY"
+NAV_STATE_PUSH_ORIENT = "PUSH_ORBIT"
+NAV_STATE_PUSH_PREPARE = "PUSH_PREPARE"
+NAV_STATE_PUSH = "PUSH_EXECUTE"
+NAV_STATE_PUSH_BACK = "PUSH_FINISH_BACK"
+NAV_STATE_PUSH_TURN = "PUSH_FINISH_TURN"
+ART_MODE_SEARCH_CMD = b"SEARCH\n"
+ART_MODE_COARSE_CMD = b"COARSE\n"
+ART_MODE_FINE_CMD = b"FINE\n"
+ART_MODE_CLASSIFY_CMD = b"CLASSIFY\n"
+ART_MODE_LINE_CMD = b"LINE\n"
+ART_MODE_IDLE_CMD = b"IDLE\n"
+Push_Dir_None = 0
+Push_Dir_Right = 1
+Push_Dir_Up = 2
+Push_Dir_Left = 3
+Nav_Detect_Ms = 200
+Nav_Vision_Ready_Ms = 300
+Nav_Target_Lost_Ms = 500
+Nav_Search_Turn_Yaw = 45.0
+Nav_Search_Turn_Ok_Yaw = 5.0
+Nav_Search_Turn_Ok_Ms = 120
+Nav_Search_Turn_Gyro_Th = 3.0
+Nav_Search_Turn_Max_Rate = 8.0
+Nav_Search_Turn_Gyro_Limit = 2.5
+Nav_Search_Turn_Open_Vz = 2.2
+Nav_Coarse_Exit_Y = 200
+Nav_Coarse_Ok_Ms = 30
+Nav_Fine_Ok_X = 4.5
+Nav_Fine_Ok_Y_Max = 18
+Nav_Fine_Ok_Ms = 200
+Nav_Transition_Grace_Ms = 200
+Nav_Low_Speed_Th = 30
+Nav_Coarse_Forward_Gain = 0.06
+Nav_Coarse_Lateral_Gain = 0.035		#COARSE 横移系数
+Nav_Coarse_Forward_Limit = 5.0
+Nav_Coarse_Lateral_Limit = 3.0
+Nav_Fine_Forward_Gain = 0.02
+Nav_Fine_Lateral_Gain = 0.05
+Nav_Fine_Forward_Limit = 3.5
+Nav_Fine_Lateral_Limit = 4.0
+Nav_Forward_Deadband = 4
+Nav_Lateral_Deadband = 6
+Nav_Classify_Timeout_Ms = 1500
+Nav_Push_Orient_Ok_Yaw = 12.0
+Nav_Push_Orient_Ok_Ms = 80
+Nav_Push_Orient_Relock_Yaw = 30.0
+Nav_Push_Orient_Stop_Orbit_Yaw = 18.0
+Nav_Push_Orient_Min_Turn = 35.0
+Nav_Push_Orient_Gyro_Limit = 16.0
+Nav_Push_Orient_Min_Vz = 10.0
+Nav_Push_Orient_Max_Ms = 8000
+Nav_Push_Orient_Radius_Gain = 2.0
+Nav_Push_Orient_Orbit_Vy_Max = 24.0
+Nav_Push_Orbit_Vy_Sign_Right = 1
+Nav_Push_Orbit_Vy_Sign_Up = 0
+Nav_Push_Orbit_Vy_Sign_Left = -1
+Nav_Push_Prepare_Reorient_Yaw = 10.0
+Nav_Push_Prepare_Forward_Gain = 0.012
+Nav_Push_Prepare_Lateral_Gain = 0.030
+Nav_Push_Prepare_Forward_Limit = 1.2
+Nav_Push_Prepare_Lateral_Limit = 1.6
+Nav_Push_Prepare_Ok_X = 12
+Nav_Push_Prepare_Ok_Y_Max = 10
+Nav_Push_Prepare_Ok_Yaw = 6.0
+Nav_Push_Prepare_Ok_Ms = 80
+Nav_Push_Execute_Forward_Speed = 2.2
+Nav_Push_Back_Speed = 1.2
+Nav_Push_Back_Ms = 350
+Nav_Push_Turn_Ok_Yaw = 6.0
+Nav_Push_Turn_Ok_Ms = 150
 
 # ====================== 全局状态变量 ======================
 # 运动模式索引：0=直行 1=平移 2=旋转
 motion_mode_idx = 0
 # 运动模式名称列表
 motion_mode_names = ["straight", "translate", "rotate"]
-# 小车发车启动标志：默认False=上电静止不动，True=启动运行
+# 小车启动标志：False=上电静止，True=已启动
 car_started = False
-# 上一次C14模式按键状态（消抖用）
+auto_start_done = False
+# 上一次 C14 模式键状态（用于消抖）
 last_c14_state = 1
-# 上一次C9发车按键状态（消抖用）
+# 上一次 C9 发车键状态（用于消抖）
 last_c9_state = 1
-# 上一次C8退出按键状态（消抖用）
+# 上一次 C8 退出键状态（用于消抖）
 last_c8_state = 1
 
-# 外部退出按键
+# 视觉误差与导航状态
 cam_error_x = 0
 cam_error_y = 0
 cam_target_vx = 0.0
 cam_target_vy = 0.0
 cam_last_rx_ms = utime.ticks_ms()
 cam_rx_buf = bytearray()
+cam_has_target = False
+cam_rx_started = False
+cam_rx_started_since_ms = 0
+cam_valid_target_since_ms = 0
+nav_state = NAV_STATE_SEARCH
+nav_detect_since_ms = 0
+nav_target_lost_since_ms = 0
+nav_search_turn_ok_since_ms = 0
+nav_coarse_ok_since_ms = 0
+nav_fine_ok_since_ms = 0
+nav_transition_ms = 0
+nav_push_orient_ok_since_ms = 0
+nav_push_prepare_ok_since_ms = 0
+nav_push_turn_ok_since_ms = 0
+nav_ready_for_push = False
+field_up_yaw = 0.0
+field_right_yaw = 90.0
+field_left_yaw = 270.0
+field_down_yaw = 180.0
+launch_yaw = 0.0
+search_turn_yaw_target = 45.0
+push_dir_code = Push_Dir_None
+push_dir_name = "NONE"
+push_yaw_target = 0.0
+push_return_yaw_target = 0.0
+push_face_obj_yaw = 0.0
+push_orbit_dir = 0
+push_orbit_vy_sign = 0
+line_crossed = False
 
 def wrapped_yaw_error(ref_deg, now_deg):
     err = now_deg - ref_deg
@@ -132,48 +246,536 @@ def wrapped_yaw_error(ref_deg, now_deg):
     return err
 
 
+def normalize_yaw_deg(yaw_deg):
+    while yaw_deg >= 360.0:
+        yaw_deg -= 360.0
+    while yaw_deg < 0.0:
+        yaw_deg += 360.0
+    return yaw_deg
+
+
+def push_dir_label(dir_code):
+    if dir_code == Push_Dir_Right:
+        return "RIGHT"
+    if dir_code == Push_Dir_Up:
+        return "UP"
+    if dir_code == Push_Dir_Left:
+        return "LEFT"
+    return "NONE"
+
+
+def yaw_from_field_dir(dir_code):
+    if dir_code == Push_Dir_Right:
+        return field_right_yaw
+    if dir_code == Push_Dir_Up:
+        return field_up_yaw
+    if dir_code == Push_Dir_Left:
+        return field_left_yaw
+    return field_up_yaw
+
+
+def refresh_field_reference():
+    global field_up_yaw, field_right_yaw, field_left_yaw, field_down_yaw, launch_yaw
+
+    if ENABLE_IMU and imu_runtime is not None:
+        launch_yaw = normalize_yaw_deg(imu_runtime.read_yaw())
+    else:
+        launch_yaw = 0.0
+
+    field_up_yaw = launch_yaw
+    # Measured yaw decreases when the car physically turns left.
+    field_right_yaw = normalize_yaw_deg(field_up_yaw + 90.0)
+    field_left_yaw = normalize_yaw_deg(field_up_yaw - 90.0)
+    field_down_yaw = normalize_yaw_deg(field_up_yaw + 180.0)
+    log(
+        "[FIELD] up=%.2f right=%.2f left=%.2f down=%.2f launch=%.2f"
+        % (field_up_yaw, field_right_yaw, field_left_yaw, field_down_yaw, launch_yaw)
+    )
+
+
+def push_yaw_error_deg(yaw_deg):
+    if not ENABLE_IMU:
+        return 0.0
+    return -wrapped_yaw_error(push_yaw_target, yaw_deg)
+
+
+def calc_orbit_dir(from_yaw, target_yaw):
+    err = -wrapped_yaw_error(target_yaw, from_yaw)
+    if err >= 0.0:
+        return 1
+    return -1
+
+
+def orbit_vy_sign_from_dir(dir_code):
+    if dir_code == Push_Dir_Right:
+        return Nav_Push_Orbit_Vy_Sign_Right
+    if dir_code == Push_Dir_Up:
+        return Nav_Push_Orbit_Vy_Sign_Up
+    if dir_code == Push_Dir_Left:
+        return Nav_Push_Orbit_Vy_Sign_Left
+    return 0
+
+
+def log_push_debug(prefix, yaw_deg, low_speed):
+    if nav_state not in (
+        NAV_STATE_PUSH_CLASSIFY,
+        NAV_STATE_PUSH_ORIENT,
+        NAV_STATE_PUSH_PREPARE,
+        NAV_STATE_PUSH,
+        NAV_STATE_PUSH_BACK,
+        NAV_STATE_PUSH_TURN,
+    ):
+        return
+
+    msg = (
+        "[PUSH_DBG] %s state=%s dir=%s seen=%d age=%dms line=%d field=(up=%.1f right=%.1f left=%.1f) yaw=%.2f face=%.2f yaw_tar=%.2f orbit_dir=%d vy_sign=%d ret_yaw=%.2f yaw_err=%.2f low=%d cmd_xy=(%.1f,%.1f) turn=%.2f vz=%.2f"
+        % (
+            prefix,
+            nav_state,
+            push_dir_name,
+            1 if cam_target_seen() else 0,
+            utime.ticks_diff(utime.ticks_ms(), cam_last_rx_ms),
+            1 if line_crossed else 0,
+            field_up_yaw,
+            field_right_yaw,
+            field_left_yaw,
+            yaw_deg,
+            push_face_obj_yaw,
+            push_yaw_target,
+            push_orbit_dir,
+            push_orbit_vy_sign,
+            push_return_yaw_target,
+            push_yaw_error_deg(yaw_deg),
+            1 if low_speed else 0,
+            cam_target_vx,
+            cam_target_vy,
+            last_turn_rate_cmd,
+            last_vz_cmd,
+        )
+    )
+    if nav_state == NAV_STATE_PUSH_PREPARE:
+        prep_x_ok = 1 if abs(cam_error_x) <= Nav_Push_Prepare_Ok_X else 0
+        prep_y_ok = 1 if cam_error_y <= Nav_Push_Prepare_Ok_Y_Max else 0
+        prep_yaw_ok = 1 if ((not ENABLE_IMU) or (abs(push_yaw_error_deg(yaw_deg)) <= Nav_Push_Prepare_Ok_Yaw)) else 0
+        prep_spd_ok = 1 if low_speed else 0
+        msg += " gate=(x=%d y=%d yaw=%d spd=%d)" % (
+            prep_x_ok,
+            prep_y_ok,
+            prep_yaw_ok,
+            prep_spd_ok,
+        )
+    log(msg)
+
+
 def update_cam_target(err_x, err_y):
-    global cam_error_x, cam_error_y, cam_target_vx, cam_target_vy, cam_last_rx_ms
+    global cam_error_x, cam_error_y, cam_last_rx_ms
 
     cam_error_x = int(err_x)
     cam_error_y = int(err_y)
+    cam_last_rx_ms = utime.ticks_ms()
 
-    if cam_error_y > 60 or cam_error_y < -60:
-        cam_target_vx = -cam_error_y * 0.5
-    else:
-        cam_target_vx = -cam_error_y * 0.3
+
+def cam_packet_fresh():
+    return utime.ticks_diff(utime.ticks_ms(), cam_last_rx_ms) <= Cam_Packet_Timeout_Ms
+
+
+def cam_target_seen():
+    if not cam_packet_fresh():
+        return False
+    return cam_has_target
+
+
+def send_art_mode_command(new_state):
+    if new_state == NAV_STATE_SEARCH or new_state == NAV_STATE_SEARCH_TURN:
+        cam_uart.write(ART_MODE_SEARCH_CMD)
+    elif new_state == NAV_STATE_COARSE:
+        cam_uart.write(ART_MODE_COARSE_CMD)
+    elif new_state == NAV_STATE_FINE:
+        cam_uart.write(ART_MODE_FINE_CMD)
+    elif new_state == NAV_STATE_PUSH_CLASSIFY:
+        cam_uart.write(ART_MODE_CLASSIFY_CMD)
+    elif new_state == NAV_STATE_PUSH_ORIENT:
+        cam_uart.write(ART_MODE_IDLE_CMD)
+    elif new_state == NAV_STATE_PUSH_PREPARE:
+        cam_uart.write(ART_MODE_FINE_CMD)
+    elif new_state == NAV_STATE_PUSH:
+        cam_uart.write(ART_MODE_LINE_CMD)
+    elif new_state in (NAV_STATE_PUSH_BACK, NAV_STATE_PUSH_TURN):
+        cam_uart.write(ART_MODE_IDLE_CMD)
+
+
+def nav_set_state(new_state, reason="", force=False):
+    global nav_state, nav_detect_since_ms, nav_target_lost_since_ms, nav_search_turn_ok_since_ms
+    global nav_coarse_ok_since_ms, nav_fine_ok_since_ms, nav_transition_ms
+    global nav_push_orient_ok_since_ms, nav_push_prepare_ok_since_ms, nav_push_turn_ok_since_ms
+    global nav_ready_for_push, cam_target_vx, cam_target_vy
+    global yaw_ref_deg, cam_rx_started, push_dir_code, push_dir_name
+    global line_crossed, push_return_yaw_target, search_turn_yaw_target, push_orbit_dir, push_orbit_vy_sign
+
+    if nav_state == new_state and (not force):
+        return
+
+    now = utime.ticks_ms()
+    nav_state = new_state
+    nav_detect_since_ms = 0
+    nav_target_lost_since_ms = 0
+    nav_search_turn_ok_since_ms = 0
+    nav_coarse_ok_since_ms = 0
+    nav_fine_ok_since_ms = 0
+    nav_push_orient_ok_since_ms = 0
+    nav_push_prepare_ok_since_ms = 0
+    nav_push_turn_ok_since_ms = 0
+    nav_transition_ms = now
+    nav_ready_for_push = False
+    cam_target_vx = 0.0
     cam_target_vy = 0.0
 
-    if cam_target_vx > 40:
-        cam_target_vx = 40.0
-    elif cam_target_vx < -40:
-        cam_target_vx = -40.0
+    if new_state in (NAV_STATE_SEARCH, NAV_STATE_SEARCH_TURN, NAV_STATE_PUSH, NAV_STATE_PUSH_CLASSIFY):
+        line_crossed = False
 
-    cam_last_rx_ms = utime.ticks_ms()
+    if new_state == NAV_STATE_PUSH_CLASSIFY:
+        push_dir_code = Push_Dir_None
+        push_dir_name = "NONE"
+        push_orbit_dir = 0
+        push_orbit_vy_sign = 0
+    elif new_state == NAV_STATE_PUSH_BACK:
+        push_return_yaw_target = normalize_yaw_deg(push_yaw_target + 180.0)
+
+    if ENABLE_IMU and imu_runtime is not None:
+        if new_state == NAV_STATE_SEARCH_TURN:
+            search_turn_yaw_target = normalize_yaw_deg(field_up_yaw + Nav_Search_Turn_Yaw)
+            yaw_ref_deg = search_turn_yaw_target
+        elif new_state in (NAV_STATE_COARSE, NAV_STATE_FINE, NAV_STATE_PUSH_CLASSIFY):
+            yaw_ref_deg = imu_runtime.read_yaw()
+        elif new_state in (NAV_STATE_PUSH_ORIENT, NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH, NAV_STATE_PUSH_BACK):
+            yaw_ref_deg = push_yaw_target
+        elif new_state == NAV_STATE_PUSH_TURN:
+            yaw_ref_deg = push_return_yaw_target
+
+    update_nav_led_display()
+    send_art_mode_command(new_state)
+
+    if cam_rx_started:
+        if reason:
+            log("[NAV] -> %s (%s)" % (new_state, reason))
+        else:
+            log("[NAV] -> %s" % new_state)
+
+
+def apply_nav_targets(vx, vy, vx_limit, vy_limit):
+    global cam_target_vx, cam_target_vy
+
+    if -Nav_Forward_Deadband <= cam_error_y <= Nav_Forward_Deadband:
+        vx = 0.0
+    if -Nav_Lateral_Deadband <= cam_error_x <= Nav_Lateral_Deadband:
+        vy = 0.0
+
+    if vx > vx_limit:
+        vx = vx_limit
+    elif vx < -vx_limit:
+        vx = -vx_limit
+
+    if vy > vy_limit:
+        vy = vy_limit
+    elif vy < -vy_limit:
+        vy = -vy_limit
+
+    cam_target_vx = vx
+    cam_target_vy = vy
+
+
+def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
+    global nav_detect_since_ms, nav_target_lost_since_ms, nav_search_turn_ok_since_ms
+    global nav_coarse_ok_since_ms, nav_fine_ok_since_ms, nav_push_orient_ok_since_ms
+    global nav_push_prepare_ok_since_ms, nav_push_turn_ok_since_ms
+    global nav_ready_for_push
+    global cam_target_vx, cam_target_vy, yaw_ref_deg, push_yaw_target
+    global line_crossed, push_return_yaw_target, push_face_obj_yaw, push_orbit_dir, push_orbit_vy_sign
+
+    now = utime.ticks_ms()
+    track_target_states = (
+        NAV_STATE_SEARCH,
+        NAV_STATE_SEARCH_TURN,
+        NAV_STATE_COARSE,
+        NAV_STATE_FINE,
+        NAV_STATE_PUSH_PREPARE,
+    )
+    seen = cam_target_seen() if nav_state in track_target_states else False
+
+    if nav_state in track_target_states:
+        if seen:
+            nav_target_lost_since_ms = 0
+            if nav_detect_since_ms == 0:
+                nav_detect_since_ms = now
+        else:
+            nav_detect_since_ms = 0
+            if nav_target_lost_since_ms == 0:
+                nav_target_lost_since_ms = now
+    else:
+        nav_detect_since_ms = 0
+        nav_target_lost_since_ms = 0
+
+    if nav_state == NAV_STATE_SEARCH_TURN:
+        nav_ready_for_push = False
+        cam_target_vx = 0.0
+        cam_target_vy = 0.0
+        yaw_ref_deg = search_turn_yaw_target
+        yaw_search_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg)) if ENABLE_IMU else 0.0
+        search_turn_stable = (
+            (not ENABLE_IMU)
+            or (
+                yaw_search_err_abs <= Nav_Search_Turn_Ok_Yaw
+                and abs(gyro_z) <= Nav_Search_Turn_Gyro_Th
+            )
+        )
+        if search_turn_stable:
+            if nav_search_turn_ok_since_ms == 0:
+                nav_search_turn_ok_since_ms = now
+            elif utime.ticks_diff(now, nav_search_turn_ok_since_ms) >= Nav_Search_Turn_Ok_Ms:
+                nav_set_state(NAV_STATE_SEARCH, "search_turn_done")
+        else:
+            nav_search_turn_ok_since_ms = 0
+        return
+
+    if nav_state == NAV_STATE_SEARCH:
+        cam_target_vx = 0.0
+        cam_target_vy = 0.0
+        nav_ready_for_push = False
+        if seen and nav_detect_since_ms > 0:
+            if utime.ticks_diff(now, nav_detect_since_ms) >= Nav_Detect_Ms:
+                if ENABLE_IMU:
+                    yaw_ref_deg = yaw_deg
+                nav_set_state(NAV_STATE_COARSE, "target_detected")
+        return
+
+    if nav_state in (NAV_STATE_COARSE, NAV_STATE_FINE, NAV_STATE_PUSH_PREPARE):
+        if utime.ticks_diff(now, nav_transition_ms) >= Nav_Transition_Grace_Ms:
+            if nav_target_lost_since_ms > 0:
+                if utime.ticks_diff(now, nav_target_lost_since_ms) >= Nav_Target_Lost_Ms:
+                    if nav_state == NAV_STATE_PUSH_PREPARE:
+                        nav_set_state(NAV_STATE_FINE, "%s_target_lost" % nav_state.lower())
+                    else:
+                        nav_set_state(NAV_STATE_SEARCH, "target_lost")
+                    return
+
+    if nav_state == NAV_STATE_COARSE:
+        nav_ready_for_push = False
+        blend_start = Nav_Coarse_Exit_Y + 40
+        if cam_error_y < blend_start:
+            t = float(cam_error_y - Nav_Coarse_Exit_Y) / 40.0
+            t = max(0.0, min(1.0, t))
+            fwd_gain = Nav_Fine_Forward_Gain + t * (Nav_Coarse_Forward_Gain - Nav_Fine_Forward_Gain)
+            lat_gain = Nav_Fine_Lateral_Gain + t * (Nav_Coarse_Lateral_Gain - Nav_Fine_Lateral_Gain)
+        else:
+            fwd_gain = Nav_Coarse_Forward_Gain
+            lat_gain = Nav_Coarse_Lateral_Gain
+        apply_nav_targets(
+            cam_error_y * fwd_gain,
+            -cam_error_x * lat_gain,
+            Nav_Coarse_Forward_Limit,
+            Nav_Coarse_Lateral_Limit,
+        )
+        if cam_error_y <= Nav_Coarse_Exit_Y:
+            if nav_coarse_ok_since_ms == 0:
+                nav_coarse_ok_since_ms = now
+            elif utime.ticks_diff(now, nav_coarse_ok_since_ms) >= Nav_Coarse_Ok_Ms:
+                nav_set_state(NAV_STATE_FINE, "err_y<=%d for %dms" % (Nav_Coarse_Exit_Y, Nav_Coarse_Ok_Ms))
+        else:
+            nav_coarse_ok_since_ms = 0
+        return
+
+    if nav_state == NAV_STATE_FINE:
+        nav_ready_for_push = False
+        apply_nav_targets(
+            cam_error_y * Nav_Fine_Forward_Gain,
+            -cam_error_x * Nav_Fine_Lateral_Gain,
+            Nav_Fine_Forward_Limit,
+            Nav_Fine_Lateral_Limit,
+        )
+        if (
+            abs(cam_error_x) <= Nav_Fine_Ok_X
+            and cam_error_y <= Nav_Fine_Ok_Y_Max
+            and low_speed
+        ):
+            if nav_fine_ok_since_ms == 0:
+                nav_fine_ok_since_ms = now
+            elif utime.ticks_diff(now, nav_fine_ok_since_ms) >= Nav_Fine_Ok_Ms:
+                cam_target_vx = 0.0
+                cam_target_vy = 0.0
+                push_face_obj_yaw = yaw_deg
+                nav_set_state(NAV_STATE_PUSH_CLASSIFY, "fine_locked")
+        else:
+            nav_fine_ok_since_ms = 0
+        return
+
+    if nav_state == NAV_STATE_PUSH_CLASSIFY:
+        nav_ready_for_push = False
+        cam_target_vx = 0.0
+        cam_target_vy = 0.0
+        if push_dir_code in (Push_Dir_Right, Push_Dir_Up, Push_Dir_Left):
+            push_yaw_target = yaw_from_field_dir(push_dir_code)
+            push_orbit_dir = calc_orbit_dir(push_face_obj_yaw, push_yaw_target)
+            push_orbit_vy_sign = orbit_vy_sign_from_dir(push_dir_code)
+            nav_set_state(
+                NAV_STATE_PUSH_ORIENT,
+                "class=%s face=%.1f yaw=%.1f orbit_dir=%d vy_sign=%d"
+                % (
+                    push_dir_label(push_dir_code),
+                    push_face_obj_yaw,
+                    push_yaw_target,
+                    push_orbit_dir,
+                    push_orbit_vy_sign,
+                ),
+            )
+        elif utime.ticks_diff(now, nav_transition_ms) >= Nav_Classify_Timeout_Ms:
+            nav_set_state(NAV_STATE_FINE, "classify_timeout")
+        return
+
+    if nav_state == NAV_STATE_PUSH_ORIENT:
+        nav_ready_for_push = False
+        yaw_ref_deg = push_yaw_target
+        yaw_err_deg_orient = -wrapped_yaw_error(yaw_ref_deg, yaw_deg) if ENABLE_IMU else 0.0
+        cam_target_vx = 0.0
+        yaw_err_abs = abs(yaw_err_deg_orient) if ENABLE_IMU else 0.0
+        passed_target = (
+            ENABLE_IMU
+            and push_orbit_dir != 0
+            and yaw_err_deg_orient * push_orbit_dir <= 0.0
+        )
+        if yaw_err_abs > Nav_Push_Orient_Stop_Orbit_Yaw and (not passed_target):
+            cam_target_vy = push_orbit_vy_sign * Nav_Push_Orient_Min_Vz * Nav_Push_Orient_Radius_Gain
+        else:
+            cam_target_vy = 0.0
+        if cam_target_vy > Nav_Push_Orient_Orbit_Vy_Max:
+            cam_target_vy = Nav_Push_Orient_Orbit_Vy_Max
+        elif cam_target_vy < -Nav_Push_Orient_Orbit_Vy_Max:
+            cam_target_vy = -Nav_Push_Orient_Orbit_Vy_Max
+        if (not ENABLE_IMU) or (yaw_err_abs <= Nav_Push_Orient_Ok_Yaw):
+            if nav_push_orient_ok_since_ms == 0:
+                nav_push_orient_ok_since_ms = now
+            elif utime.ticks_diff(now, nav_push_orient_ok_since_ms) >= Nav_Push_Orient_Ok_Ms:
+                nav_set_state(NAV_STATE_PUSH_PREPARE, "orbit_locked")
+        else:
+            nav_push_orient_ok_since_ms = 0
+        if utime.ticks_diff(now, nav_transition_ms) >= Nav_Push_Orient_Max_Ms:
+            cam_target_vx = 0.0
+            cam_target_vy = 0.0
+            nav_set_state(NAV_STATE_FINE, "orbit_timeout")
+        return
+
+    if nav_state == NAV_STATE_PUSH_PREPARE:
+        nav_ready_for_push = False
+        yaw_ref_deg = push_yaw_target
+        yaw_prepare_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg)) if ENABLE_IMU else 0.0
+        if ENABLE_IMU and yaw_prepare_err_abs > Nav_Push_Prepare_Reorient_Yaw:
+            cam_target_vx = 0.0
+            cam_target_vy = 0.0
+            nav_push_prepare_ok_since_ms = 0
+            return
+        apply_nav_targets(
+            cam_error_y * Nav_Push_Prepare_Forward_Gain,
+            -cam_error_x * Nav_Push_Prepare_Lateral_Gain,
+            Nav_Push_Prepare_Forward_Limit,
+            Nav_Push_Prepare_Lateral_Limit,
+        )
+        if (
+            abs(cam_error_x) <= Nav_Push_Prepare_Ok_X
+            and cam_error_y <= Nav_Push_Prepare_Ok_Y_Max
+            and ((not ENABLE_IMU) or (yaw_prepare_err_abs <= Nav_Push_Prepare_Ok_Yaw))
+            and low_speed
+        ):
+            if nav_push_prepare_ok_since_ms == 0:
+                nav_push_prepare_ok_since_ms = now
+            elif utime.ticks_diff(now, nav_push_prepare_ok_since_ms) >= Nav_Push_Prepare_Ok_Ms:
+                cam_target_vx = 0.0
+                cam_target_vy = 0.0
+                nav_set_state(NAV_STATE_PUSH, "push_pose_locked")
+        else:
+            nav_push_prepare_ok_since_ms = 0
+        return
+
+    if nav_state == NAV_STATE_PUSH:
+        nav_ready_for_push = True
+        cam_target_vx = Nav_Push_Execute_Forward_Speed
+        cam_target_vy = 0.0
+        yaw_ref_deg = push_yaw_target
+        if line_crossed:
+            nav_set_state(NAV_STATE_PUSH_BACK, "line_crossed")
+        return
+
+    if nav_state == NAV_STATE_PUSH_BACK:
+        nav_ready_for_push = False
+        cam_target_vx = -Nav_Push_Back_Speed
+        cam_target_vy = 0.0
+        yaw_ref_deg = push_yaw_target
+        if utime.ticks_diff(now, nav_transition_ms) >= Nav_Push_Back_Ms:
+            nav_set_state(NAV_STATE_PUSH_TURN, "push_back_done")
+        return
+
+    if nav_state == NAV_STATE_PUSH_TURN:
+        nav_ready_for_push = False
+        yaw_ref_deg = push_return_yaw_target
+        cam_target_vx = 0.0
+        cam_target_vy = 0.0
+        yaw_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg)) if ENABLE_IMU else 0.0
+        if (not ENABLE_IMU) or (yaw_err_abs <= Nav_Push_Turn_Ok_Yaw and low_speed):
+            if nav_push_turn_ok_since_ms == 0:
+                nav_push_turn_ok_since_ms = now
+            elif utime.ticks_diff(now, nav_push_turn_ok_since_ms) >= Nav_Push_Turn_Ok_Ms:
+                nav_set_state(NAV_STATE_SEARCH, "push_finish")
+        else:
+            nav_push_turn_ok_since_ms = 0
+        return
+
+    cam_target_vx = 0.0
+    cam_target_vy = 0.0
 
 
 def poll_art_uart():
     global cam_rx_buf, cam_error_x, cam_error_y, cam_target_vx, cam_target_vy
+    global cam_has_target, cam_last_rx_ms, cam_rx_started, cam_rx_started_since_ms, cam_valid_target_since_ms
+    global push_dir_code, push_dir_name, push_yaw_target, line_crossed
 
     if cam_uart.any():
         data = cam_uart.read()
         if data:
             cam_rx_buf += data
-            while len(cam_rx_buf) >= 2:
-                update_cam_target(
-                    int(cam_rx_buf[0]) - CAM_ERROR_OFFSET,
-                    int(cam_rx_buf[1]) - CAM_ERROR_OFFSET,
-                )
-                cam_rx_buf = cam_rx_buf[2:]
+            while len(cam_rx_buf) >= 3:
+                if cam_rx_buf[0] != Cam_Frame_Head:
+                    cam_rx_buf = cam_rx_buf[1:]
+                    continue
+                if not cam_rx_started:
+                    cam_rx_started = True
+                    cam_rx_started_since_ms = utime.ticks_ms()
+                if cam_rx_buf[1] == Classify_Packet_Tag:
+                    new_dir = int(cam_rx_buf[2])
+                    if new_dir != push_dir_code:
+                        push_dir_code = new_dir
+                        push_dir_name = push_dir_label(new_dir)
+                        log("[NAV] classify dir=%s" % push_dir_name)
+                    cam_last_rx_ms = utime.ticks_ms()
+                elif cam_rx_buf[1] == Line_Packet_Tag:
+                    new_line_crossed = int(cam_rx_buf[2]) != 0
+                    if new_line_crossed != line_crossed:
+                        line_crossed = new_line_crossed
+                        log("[NAV] line_crossed=%d" % (1 if line_crossed else 0))
+                    cam_last_rx_ms = utime.ticks_ms()
+                elif cam_rx_buf[1] == No_Target_Marker and cam_rx_buf[2] == No_Target_Marker:
+                    cam_has_target = False
+                    cam_valid_target_since_ms = 0
+                    cam_last_rx_ms = utime.ticks_ms()
+                else:
+                    cam_has_target = True
+                    if cam_valid_target_since_ms == 0:
+                        cam_valid_target_since_ms = utime.ticks_ms()
+                    update_cam_target(
+                        (int(cam_rx_buf[1]) - Cam_Error_Offset) * Cam_Error_Scale,
+                        (int(cam_rx_buf[2]) - Cam_Error_Offset) * Cam_Error_Scale,
+                    )
+                cam_rx_buf = cam_rx_buf[3:]
 
     if len(cam_rx_buf) > 20:
         cam_rx_buf = bytearray()
-
-    if utime.ticks_diff(utime.ticks_ms(), cam_last_rx_ms) > CAM_PACKET_TIMEOUT_MS:
-        cam_error_x = 0
-        cam_error_y = 0
-        cam_target_vx = 0.0
-        cam_target_vy = 0.0
 
 
 key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
@@ -183,7 +785,7 @@ key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
 key_mode = Pin(cfg.BTN_MODE_PIN, Pin.IN, Pin.PULL_UP)
 # 发车启动按键
 key_start = Pin(cfg.BTN_START_PIN, Pin.IN, Pin.PULL_UP)
-# 状态LED
+# 状态 LED
 led_straight  = Pin(cfg.LED_STRAIGHT_PIN,  Pin.OUT, value=0)
 led_translate = Pin(cfg.LED_TRANSLATE_PIN, Pin.OUT, value=0)
 led_rotate    = Pin(cfg.LED_ROTATE_PIN,    Pin.OUT, value=0)
@@ -191,10 +793,11 @@ led_rotate    = Pin(cfg.LED_ROTATE_PIN,    Pin.OUT, value=0)
 # ---------------------- Demo-style hardware init ----------------------
 utime.sleep_ms(100)
 
-# 状态LED
+# 心跳 LED
 led = Pin(cfg.LED_HB_PIN, Pin.OUT, pull=Pin.PULL_UP_47K, value=True)
 
-# ====================== 硬件对象创建（art_navigate 模式由 RealHardware 统一管理） ======================
+# ====================== 硬件对象创建 ======================
+# art_navigate 模式由 RealHardware 统一管理
 hw_nav = None
 ctrl = None
 if RUN_MODE == "art_navigate":
@@ -221,7 +824,7 @@ wireless = WIRELESS_UART(460800)
 cam_uart = UART(cfg.CAM_UART_ID, cfg.CAM_UART_BAUD)
 cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
 
-# IMU运行时初始化
+# IMU 运行时初始化
 imu_runtime = None
 if ENABLE_IMU:
     imu_runtime = IMUYawRuntime(
@@ -242,9 +845,9 @@ if SHOW_DEVICE_INFO:
         IMUYawRuntime.help()
         imu_runtime.info()
 
-# ====================== LED模式显示函数 ======================
+# ====================== LED 模式显示辅助 ======================
 def update_led_display():
-    """根据当前运动模式索引更新C19/C20/C21 LED状态"""
+    """更新运动模式 LED。"""
     led_straight.value(0)
     led_translate.value(0)
     led_rotate.value(0)
@@ -255,18 +858,26 @@ def update_led_display():
     elif motion_mode_idx == 2:
         led_rotate.value(1)
 
-# ====================== 运动模式切换函数（C14触发） ======================
+
+def update_nav_led_display():
+    led_straight.value(0)
+    led_translate.value(0)
+    led_rotate.value(0)
+    if nav_state == NAV_STATE_COARSE:
+        led_straight.value(1)
+    elif nav_state in (NAV_STATE_FINE, NAV_STATE_PUSH_CLASSIFY, NAV_STATE_PUSH_PREPARE):
+        led_translate.value(1)
+    elif nav_state in (NAV_STATE_SEARCH_TURN, NAV_STATE_PUSH_ORIENT, NAV_STATE_PUSH, NAV_STATE_PUSH_BACK, NAV_STATE_PUSH_TURN):
+        led_rotate.value(1)
+
+
 def switch_motion_mode():
-    """切换运动模式索引，更新全局目标速度变量，更新LED，打印日志，切换时自动停车"""
+    """切换车体测试模式，并在切换前先停车。"""
     global motion_mode_idx, STRAIGHT_VX, STRAIGHT_VY, STRAIGHT_VZ, BODY_TEST_MODE, car_started
-    # 切换模式时先停车，禁止运动中切换
     car_started = False
     stop_all()
-    # 索引循环+1
     motion_mode_idx = (motion_mode_idx + 1) % 3
-    # 更新模式名称
     BODY_TEST_MODE = motion_mode_names[motion_mode_idx]
-    # 更新目标速度
     if BODY_TEST_MODE == "straight":
         STRAIGHT_VX = TEST_LINEAR_SPEED
         STRAIGHT_VY = 0.0
@@ -279,37 +890,37 @@ def switch_motion_mode():
         STRAIGHT_VX = 0.0
         STRAIGHT_VY = 0.0
         STRAIGHT_VZ = TEST_ROTATE_SPEED
-    # 更新LED
     update_led_display()
-    # 打印日志
-    log(f"[模式切换] 当前模式：{BODY_TEST_MODE}，已停车，请按C9发车")
+    log("[模式] 已切换到 %s，车辆已停止，请按 C9 发车" % BODY_TEST_MODE)
 
-# ====================== C9发车启动函数 ======================
+
+# ====================== C9 发车检查 ======================
 def check_c9_start():
-    """检查C9发车按键，按下后等待0.5秒，再启动小车，并重置计时起点"""
-    global last_c9_state, car_started, start_time, yaw_ref_deg
+    """处理发车按键，带消抖和延时发车。"""
+    global last_c9_state, car_started, auto_start_done, start_time, yaw_ref_deg
     current_c9 = key_start.value()
-    # 按键按下触发（下降沿）
     if current_c9 == 0 and last_c9_state == 1:
         utime.sleep_ms(10)
         if key_start.value() == 0:
-            # 未启动的话，等待0.5秒发车
             if not car_started:
-                log("[C9按键] 即将发车，等待0.5秒...")
+                log("[C9] 0.5 秒后发车...")
                 utime.sleep_ms(500)
                 if ENABLE_IMU and imu_runtime is not None:
                     yaw_ref_deg = imu_runtime.read_yaw()
                 else:
                     yaw_ref_deg = 0.0
+                refresh_field_reference()
                 car_started = True
-                # 【修改】发车时重置计时起点
+                auto_start_done = True
                 start_time = utime.ticks_ms()
-                log(f"[C9按键] 发车成功！当前模式：{BODY_TEST_MODE}，将运行{TIMEOUT_SECOND}秒")
+                nav_set_state(NAV_STATE_SEARCH_TURN, "launch_search_turn", force=True)
+                log("[C9] 已发车，当前模式=%s，超时=%ds" % (BODY_TEST_MODE, TIMEOUT_SECOND))
     last_c9_state = current_c9
 
-# ====================== C14模式切换检查函数 ======================
+
+# ====================== C14 模式切换检查 ======================
 def check_c14_switch():
-    """检查C14模式切换按键（带消抖），按下则切换运动模式"""
+    """处理模式切换按键，带消抖。"""
     global last_c14_state
     current_c14 = key_mode.value()
     if current_c14 == 0 and last_c14_state == 1:
@@ -318,20 +929,21 @@ def check_c14_switch():
             switch_motion_mode()
     last_c14_state = current_c14
 
-# ====================== C8按键退出检查函数 ======================
+
+# ====================== C8 退出按键检查 ======================
 def check_c8_exit():
-    """检查C8按键（带消抖），按下则抛出KeyboardInterrupt"""
+    """处理退出按键，带消抖。"""
     global last_c8_state
     current_c8 = key_exit.value()
     if current_c8 == 0 and last_c8_state == 1:
         utime.sleep_ms(10)
         if key_exit.value() == 0:
-            log("[C8按键] 触发退出程序")
+            log("[C8] 请求退出")
             raise KeyboardInterrupt
     last_c8_state = current_c8
 
-# ====================== Helpers ======================
-# 日志输出：串口+无线双发
+# ====================== 通用辅助函数 ======================
+# 日志输出：串口 + 无线双发
 def log(msg):
     print(msg)
     wireless.send_str(msg + "\r\n")
@@ -341,9 +953,9 @@ def stop_all():
     motor_fl.duty(0)
     motor_fr.duty(0)
     motor_b.duty(0)
-    log("[STOP] 所有电机占空比已清零")
+    log("[停止] 所有电机占空比已清零")
 
-# 占空比限幅函数
+# 占空比限幅
 def clamp_duty(value):
     value = int(value)
     if value > MOTOR_DUTY_MAX:
@@ -352,7 +964,7 @@ def clamp_duty(value):
         return -MOTOR_DUTY_MAX
     return value
 
-# PWM平滑处理函数
+# PWM 平滑处理
 def smooth_value(target, last):
     delta = target - last
     if abs(delta) > MAX_PWM_CHANGE:
@@ -360,14 +972,14 @@ def smooth_value(target, last):
     target = int(last * (1.0 - PWM_SMOOTH_FACTOR) + target * PWM_SMOOTH_FACTOR)
     return clamp_duty(target)
 
-# 电机占空比应用函数（含最小占空比处理）
+# 应用电机占空比（含最小占空比处理）
 def apply_motor_duty(cmd, motor):
     cmd = int(cmd)
     if 0 < abs(cmd) < MOTOR_DUTY_MIN:
         cmd = MOTOR_DUTY_MIN if cmd > 0 else -MOTOR_DUTY_MIN
     motor.duty(cmd)
 
-# 三路电机PWM平滑设置
+# 三路电机 PWM 平滑设置
 def set_three_pwm_smooth(u_fl, u_fr, u_b):
     global last_pwm_fl, last_pwm_fr, last_pwm_b
 
@@ -385,7 +997,7 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
 
     return s_fl, s_fr, s_b
 
-# 根据角色获取电机对象
+# 按角色获取电机对象
 def get_role_motor(role):
     if role == "fl":
         return motor_fl
@@ -395,7 +1007,7 @@ def get_role_motor(role):
         return motor_b
     return None
 
-# 根据角色获取编码器值
+# 按角色获取编码器值
 def get_role_encoder_value(role, e_fl, e_fr, e_b):
     if role == "fl":
         return e_fl
@@ -405,13 +1017,13 @@ def get_role_encoder_value(role, e_fl, e_fr, e_b):
         return e_b
     return 0
 
-# 单轮驱动函数
+# 单轮驱动
 def apply_single_wheel_duty(role, duty):
     apply_motor_duty(duty if role == "fl" else 0, motor_fl)
     apply_motor_duty(duty if role == "fr" else 0, motor_fr)
     apply_motor_duty(duty if role == "b" else 0, motor_b)
 
-# 车轮方向分析函数
+# 轮向分析辅助
 def analyze_wheel_dir(role, e_fl, e_fr, e_b):
     focus = get_role_encoder_value(role, e_fl, e_fr, e_b)
     other_1 = get_role_encoder_value("fl" if role != "fl" else "fr", e_fl, e_fr, e_b)
@@ -419,21 +1031,21 @@ def analyze_wheel_dir(role, e_fl, e_fr, e_b):
     other_peak = max(abs(other_1), abs(other_2))
 
     if abs(focus) <= 1 and other_peak > 1:
-        return "目标编码器无反应，引脚映射可能错误"
+        return "目标编码器无响应，请检查引脚映射"
     if focus < -1:
-        return "正PWM产生负编码器值，需要反转该编码器"
+        return "正 PWM 下出现负编码器计数，请反转该编码器"
     if focus > 1 and other_peak <= abs(focus):
         return "方向匹配正确"
     if focus > 1:
         return "方向正确，但其他编码器也有变化"
-    return "编码器响应过小，请抬起轮子或加大PWM"
+    return "编码器响应过小，请抬起轮子或增大 PWM"
 
-# 检查遥控器7通道是否触发退出
+# 检查遥控器 7 通道是否触发退出
 def check_upper_exit():
     wireless.data_analysis()
     ch7_current = wireless.get_data(EXIT_TRIGGER_CHANNEL)
     if abs(ch7_current - ch7_init_value) > CH7_TOLERANCE:
-        log(f"CH7变化：基准={ch7_init_value:.1f} 当前={ch7_current:.1f}")
+        log("CH7 变化：基准=%.1f 当前=%.1f" % (ch7_init_value, ch7_current))
         return True
     return False
 
@@ -445,7 +1057,7 @@ def check_exit_key():
             raise KeyboardInterrupt
 
 # ---------------------- CH7 exit calibration ----------------------
-log("=== 开始CH7通道基准校准 ===")
+log("=== CH7 通道基准校准开始 ===")
 
 ch7_samples = []
 for _ in range(5):
@@ -454,15 +1066,16 @@ for _ in range(5):
     ch7_samples.append(wireless.get_data(EXIT_TRIGGER_CHANNEL))
 
 ch7_init_value = sum(ch7_samples) / len(ch7_samples)
-log(f"CH7基准校准完成：{ch7_init_value:.1f}")
-log(f"当CHZ变化超过±{CH7_TOLERANCE:.1f}时退出程序")
+log("CH7 校准完成：%.1f" % ch7_init_value)
+log("CH7 退出阈值：±%.1f" % CH7_TOLERANCE)
 
-# ====================== 初始化LED显示 ======================
+# ====================== 初始化 LED 显示 ======================
 update_led_display()
-log(f"[初始化] 程序启动，小车已静止，默认模式：{BODY_TEST_MODE}")
-log("[操作说明] C14=切换模式 | C9=发车（运行{TIMEOUT_SECOND}秒自动退出） | C8=退出程序")
+update_nav_led_display()
+log("[初始化] 程序启动，默认模式=%s" % BODY_TEST_MODE)
+log("[说明] C14=切换模式 | C9=发车 | C8=退出")
 
-# 陀螺仪偏移量设置
+# 陀螺仪偏移设置
 gyro_offset_z = GYRO_OFFSET_Z
 if RUN_MODE != "wheel_dir_cal":
     if ENABLE_IMU and AUTO_GYRO_OFFSET_CAL:
@@ -472,15 +1085,15 @@ if RUN_MODE != "wheel_dir_cal":
             logger=log,
         )
     elif ENABLE_IMU:
-        log(f"陀螺仪偏移预设：z轴={gyro_offset_z:.2f}")
+        log("IMU 偏移预设：%.2f" % gyro_offset_z)
     else:
-        log("IMU未使能，仅速度环运行")
+        log("IMU 未启用，仅运行速度环")
 
 # ---------------------- Ticker ----------------------
 pit_flag = False
 pit_count = 0
 
-# 定时中断回调：设置标志位，通知主循环执行控制
+# 定时中断回调：置位标志，通知主循环执行控制
 def time_pit_handler(_):
     global pit_flag, pit_count
     pit_flag = True
@@ -530,11 +1143,13 @@ last_vz_cmd = 0.0
 last_turn_rate_cmd = 0.0
 yaw_ref_deg = 0.0
 
-# ====================== 速度闭环计算主函数（增加发车判断） ======================
+# ====================== 速度闭环主函数（含发车判断） ======================
 def calc_speed_closed_loop():
     global last_vz_cmd, last_turn_rate_cmd
+    global last_pwm_fl, last_pwm_fr, last_pwm_b
+    global cam_target_vx, cam_target_vy
 
-    # 未发车状态：直接输出0占空比，电机完全静止
+    # 未发车：直接输出 0，占空比清零
     if not car_started:
         set_three_pwm_smooth(0, 0, 0)
         return {
@@ -546,9 +1161,14 @@ def calc_speed_closed_loop():
             "turn_rate_cmd": 0, "vz_cmd": 0,
             "body_vx": 0, "body_vy": 0,
             "cam_x": 0, "cam_y": 0,
+            "abs_err_x": 0, "abs_err_y": 0,
+            "nav_state": NAV_STATE_SEARCH,
+            "nav_ready": 0,
+            "push_dir": push_dir_name,
+            "push_yaw_target": push_yaw_target,
         }
 
-    # 已发车状态：执行原有闭环逻辑
+    # 已发车：执行闭环逻辑
     # 读取陀螺仪数据
     if ENABLE_IMU:
         gyro_z = imu_runtime.read_gyro_z()
@@ -558,33 +1178,194 @@ def calc_speed_closed_loop():
         gyro_z = 0.0
         raw_gyro_z = 0.0
         yaw_deg = 0.0
-    yaw_err_deg = -wrapped_yaw_error(yaw_ref_deg, yaw_deg) if ENABLE_IMU else 0.0
-    vision_turn_cmd = -pos_ctrl(cam_error_x)
+    e_fl = enc_fl.get()
+    e_fr = enc_fr.get()
+    e_b = enc_b.get()
+    low_speed = abs(e_fl) <= Nav_Low_Speed_Th and abs(e_fr) <= Nav_Low_Speed_Th and abs(e_b) <= Nav_Low_Speed_Th
+    update_nav_state_and_targets(yaw_deg, low_speed, gyro_z)
 
-    # 陀螺仪闭环控制（方向控制）
+    if nav_state == NAV_STATE_SEARCH or nav_state == NAV_STATE_PUSH_CLASSIFY:
+        move_cmd.tar_spd_x = 0.0
+        move_cmd.tar_spd_y = 0.0
+        move_cmd.tar_spd_z = 0.0
+        move_cmd.speed_fl = 0.0
+        move_cmd.speed_fr = 0.0
+        move_cmd.speed_b = 0.0
+        last_turn_rate_cmd = 0.0
+        last_vz_cmd = 0.0
+        turn_pid.output = 0.0
+        turn_pid.err = 0.0
+        turn_pid.err_last = 0.0
+        pid_fl.output = 0.0
+        pid_fl.err = 0.0
+        pid_fl.err_last = 0.0
+        pid_fl.tar_spd_last = 0.0
+        pid_fl.delta_tar = 0.0
+        pid_fl.delta_tar_last = 0.0
+        pid_fl.delta_ud = 0.0
+        pid_fr.output = 0.0
+        pid_fr.err = 0.0
+        pid_fr.err_last = 0.0
+        pid_fr.tar_spd_last = 0.0
+        pid_fr.delta_tar = 0.0
+        pid_fr.delta_tar_last = 0.0
+        pid_fr.delta_ud = 0.0
+        pid_b.output = 0.0
+        pid_b.err = 0.0
+        pid_b.err_last = 0.0
+        pid_b.tar_spd_last = 0.0
+        pid_b.delta_tar = 0.0
+        pid_b.delta_tar_last = 0.0
+        pid_b.delta_ud = 0.0
+        if gyro_pid is not None:
+            gyro_pid.output = 0.0
+            gyro_pid.err = 0.0
+            gyro_pid.err_last = 0.0
+            gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
+        last_pwm_fl = 0
+        last_pwm_fr = 0
+        last_pwm_b = 0
+        motor_fl.duty(0)
+        motor_fr.duty(0)
+        motor_b.duty(0)
+        return {
+            "enc_fl": e_fl,
+            "enc_fr": e_fr,
+            "enc_b": e_b,
+            "tar_fl": 0.0, "tar_fr": 0.0, "tar_b": 0.0,
+            "out_fl": 0.0, "out_fr": 0.0, "out_b": 0.0,
+            "pwm_fl": 0, "pwm_fr": 0, "pwm_b": 0,
+            "raw_gyro_z": raw_gyro_z,
+            "gyro_z": gyro_z,
+            "yaw_deg": yaw_deg,
+            "yaw_err_deg": 0.0,
+            "turn_rate_cmd": 0.0,
+            "vz_cmd": 0.0,
+            "body_vx": 0.0,
+            "body_vy": 0.0,
+            "cam_x": cam_error_x,
+            "cam_y": cam_error_y,
+            "abs_err_x": abs(cam_error_x),
+            "abs_err_y": abs(cam_error_y),
+            "nav_state": nav_state,
+            "nav_ready": 0,
+            "push_dir": push_dir_name,
+            "push_yaw_target": push_yaw_target,
+        }
+
+    yaw_err_deg = -wrapped_yaw_error(yaw_ref_deg, yaw_deg) if ENABLE_IMU else 0.0
+    if nav_state == NAV_STATE_SEARCH_TURN:
+        if yaw_err_deg > Nav_Search_Turn_Ok_Yaw:
+            turn_rate_cmd = Nav_Search_Turn_Open_Vz
+            vz_cmd = Nav_Search_Turn_Open_Vz
+        elif yaw_err_deg < -Nav_Search_Turn_Ok_Yaw:
+            turn_rate_cmd = -Nav_Search_Turn_Open_Vz
+            vz_cmd = -Nav_Search_Turn_Open_Vz
+        else:
+            turn_rate_cmd = 0.0
+            vz_cmd = 0.0
+        move_cmd.tar_spd_x = cam_target_vx
+        move_cmd.tar_spd_y = cam_target_vy
+        move_cmd.tar_spd_z = vz_cmd
+        last_turn_rate_cmd = turn_rate_cmd
+        last_vz_cmd = vz_cmd
+        calc_wheel_spd(move_cmd, cam_target_vx, cam_target_vy, vz_cmd)
+
+        e_fl = enc_fl.get()
+        e_fr = enc_fr.get()
+        e_b = enc_b.get()
+        t_fl = move_cmd.speed_fl
+        t_fr = move_cmd.speed_fr
+        t_b = move_cmd.speed_b
+        u_fl = speed_ctrl(pid_fl, e_fl, t_fl)
+        u_fr = speed_ctrl(pid_fr, e_fr, t_fr)
+        u_b = speed_ctrl(pid_b, e_b, t_b)
+        if FORCE_MOTOR_OFF:
+            set_three_pwm_smooth(0, 0, 0)
+            s_fl = 0
+            s_fr = 0
+            s_b = 0
+        else:
+            s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
+        return {
+            "enc_fl": e_fl,
+            "enc_fr": e_fr,
+            "enc_b": e_b,
+            "tar_fl": t_fl, "tar_fr": t_fr, "tar_b": t_b,
+            "out_fl": u_fl, "out_fr": u_fr, "out_b": u_b,
+            "pwm_fl": s_fl, "pwm_fr": s_fr, "pwm_b": s_b,
+            "raw_gyro_z": raw_gyro_z,
+            "gyro_z": gyro_z,
+            "yaw_deg": yaw_deg,
+            "yaw_err_deg": yaw_err_deg,
+            "turn_rate_cmd": turn_rate_cmd,
+            "vz_cmd": vz_cmd,
+            "body_vx": cam_target_vx,
+            "body_vy": cam_target_vy,
+            "cam_x": cam_error_x,
+            "cam_y": cam_error_y,
+            "abs_err_x": abs(cam_error_x),
+            "abs_err_y": abs(cam_error_y),
+            "nav_state": nav_state,
+            "nav_ready": 1 if nav_ready_for_push else 0,
+            "push_dir": push_dir_name,
+            "push_yaw_target": push_yaw_target,
+        }
+
+    if ENABLE_IMU:
+        turn_rate_cmd = turn_ctrl(turn_pid, yaw_err_deg, 0)
+        if nav_state == NAV_STATE_SEARCH_TURN:
+            if turn_rate_cmd > Nav_Search_Turn_Max_Rate:
+                turn_rate_cmd = Nav_Search_Turn_Max_Rate
+            elif turn_rate_cmd < -Nav_Search_Turn_Max_Rate:
+                turn_rate_cmd = -Nav_Search_Turn_Max_Rate
+        if nav_state == NAV_STATE_PUSH_ORIENT and abs(yaw_err_deg) >= 25.0:
+            if turn_rate_cmd >= 0.0:
+                if turn_rate_cmd < Nav_Push_Orient_Min_Turn:
+                    turn_rate_cmd = Nav_Push_Orient_Min_Turn
+            else:
+                if turn_rate_cmd > -Nav_Push_Orient_Min_Turn:
+                    turn_rate_cmd = -Nav_Push_Orient_Min_Turn
+    else:
+        turn_pid.output = 0.0
+        turn_pid.err = 0.0
+        turn_pid.err_last = 0.0
+        turn_rate_cmd = 0.0
+
+    # 陀螺仪内环（方向控制）
     if ENABLE_GYRO_LOOP and gyro_pid is not None:
-        turn_rate_cmd = vision_turn_cmd
+        if nav_state == NAV_STATE_SEARCH_TURN:
+            gyro_pid.gyro_output_limit = Nav_Search_Turn_Gyro_Limit
+        elif nav_state == NAV_STATE_PUSH_ORIENT:
+            gyro_pid.gyro_output_limit = Nav_Push_Orient_Gyro_Limit
+        else:
+            gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
         vz_cmd = gyro_ctrl(gyro_pid, turn_rate_cmd - gyro_z)
+        if (
+            nav_state == NAV_STATE_PUSH_ORIENT
+            and abs(yaw_err_deg) >= 25.0
+            and abs(vz_cmd) < Nav_Push_Orient_Min_Vz
+        ):
+            if turn_rate_cmd >= 0.0:
+                vz_cmd = Nav_Push_Orient_Min_Vz
+            else:
+                vz_cmd = -Nav_Push_Orient_Min_Vz
     else:
         if gyro_pid is not None:
             gyro_pid.output = 0.0
             gyro_pid.err = 0.0
             gyro_pid.err_last = 0.0
-        turn_pid.output = 0.0
-        turn_pid.err = 0.0
-        turn_pid.err_last = 0.0
-        turn_rate_cmd = vision_turn_cmd
-        vz_cmd = vision_turn_cmd
+        vz_cmd = turn_rate_cmd
     move_cmd.tar_spd_x = cam_target_vx
-    move_cmd.tar_spd_y = 0.0
-    move_cmd.tar_spd_z = turn_rate_cmd
+    move_cmd.tar_spd_y = cam_target_vy
+    move_cmd.tar_spd_z = vz_cmd
     last_turn_rate_cmd = turn_rate_cmd
     last_vz_cmd = vz_cmd
 
-    # 车体运动学解算：输出三个轮子目标转速
-    calc_wheel_spd(move_cmd, cam_target_vx, 0.0, vz_cmd)
+    # 车体运动学分解：输出三个轮子的目标转速
+    calc_wheel_spd(move_cmd, cam_target_vx, cam_target_vy, vz_cmd)
 
-    # 读取编码器当前速度
+    # 读取当前编码器速度
     e_fl = enc_fl.get()
     e_fr = enc_fr.get()
     e_b = enc_b.get()
@@ -594,13 +1375,19 @@ def calc_speed_closed_loop():
     t_fr = move_cmd.speed_fr
     t_b = move_cmd.speed_b
 
-    # 速度PID计算输出
+    # 速度 PID 输出
     u_fl = speed_ctrl(pid_fl, e_fl, t_fl)
     u_fr = speed_ctrl(pid_fr, e_fr, t_fr)
     u_b = speed_ctrl(pid_b, e_b, t_b)
 
-    # PWM平滑输出
-    s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
+    # PWM 平滑输出
+    if FORCE_MOTOR_OFF:
+        set_three_pwm_smooth(0, 0, 0)
+        s_fl = 0
+        s_fr = 0
+        s_b = 0
+    else:
+        s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
 
     return {
         "enc_fl": e_fl,
@@ -622,12 +1409,18 @@ def calc_speed_closed_loop():
         "turn_rate_cmd": turn_rate_cmd,
         "vz_cmd": vz_cmd,
         "body_vx": cam_target_vx,
-        "body_vy": 0.0,
+        "body_vy": cam_target_vy,
         "cam_x": cam_error_x,
         "cam_y": cam_error_y,
+        "abs_err_x": abs(cam_error_x),
+        "abs_err_y": abs(cam_error_y),
+        "nav_state": nav_state,
+        "nav_ready": 1 if nav_ready_for_push else 0,
+        "push_dir": push_dir_name,
+        "push_yaw_target": push_yaw_target,
     }
 
-# 轮子方向校准模式
+# 轮向校准模式
 def run_wheel_dir_cal():
     duty = clamp_duty(int(CAL_PWM) * (1 if CAL_SIGN >= 0 else -1))
     apply_single_wheel_duty(CAL_WHEEL, duty)
@@ -645,13 +1438,13 @@ def run_wheel_dir_cal():
     }
 
 if RUN_MODE == "wheel_dir_cal":
-    log("=== 轮子方向校准开始 ===")
+    log("=== 轮向校准开始 ===")
     log(
         "tick=%dms mode=%s wheel=%s duty=%d sign=%+d"
         % (TICK_PERIOD_MS, RUN_MODE, CAL_WHEEL, CAL_PWM, CAL_SIGN)
     )
     log(
-        "规则：正PWM应让对应轮子编码器正向计数，否则反转该编码器配置"
+        "规则：正 PWM 应让对应轮子编码器正向计数，否则需要反转编码器配置"
     )
 else:
     log("=== 速度闭环启动 ===")
@@ -664,6 +1457,8 @@ else:
             cfg.CAM_UART_BAUD,
         )
     )
+    if FORCE_MOTOR_OFF:
+        log("[调试] FORCE_MOTOR_OFF=1，电机输出已强制关闭，可手动转动车身观察 yaw")
 log(
     "电机映射：fl=%s/%s inv=%s, fr=%s/%s inv=%s, b=%s/%s inv=%s"
     % (cfg.MOTOR_FL_PH, cfg.MOTOR_FL_PWM, cfg.MOTOR_FL_INVERT,
@@ -696,9 +1491,39 @@ try:
         check_c8_exit()
         check_c14_switch()
         check_c9_start()
+        if AUTO_START_ON_BOOT and (not auto_start_done) and (not car_started):
+            if utime.ticks_diff(now, start_time) >= AUTO_START_DELAY_MS:
+                if ENABLE_IMU and imu_runtime is not None:
+                    yaw_ref_deg = imu_runtime.read_yaw()
+                else:
+                    yaw_ref_deg = 0.0
+                refresh_field_reference()
+                car_started = True
+                auto_start_done = True
+                start_time = now
+                nav_set_state(NAV_STATE_SEARCH_TURN, "launch_search_turn", force=True)
+                log("[自动发车] 到达开机延时，car_started=1")
         poll_art_uart()
+        vision_ready = (
+            (not car_started)
+            and cam_rx_started
+            and cam_rx_started_since_ms > 0
+            and cam_packet_fresh()
+            and utime.ticks_diff(now, cam_rx_started_since_ms) >= Nav_Vision_Ready_Ms
+        )
+        if vision_ready:
+            if ENABLE_IMU and imu_runtime is not None:
+                yaw_ref_deg = imu_runtime.read_yaw()
+            else:
+                yaw_ref_deg = 0.0
+            refresh_field_reference()
+            car_started = True
+            auto_start_done = True
+            start_time = now
+            nav_set_state(NAV_STATE_SEARCH_TURN, "vision_launch_search_turn", force=True)
+            log("[瑙嗚鍙戣溅] 棣栨鏀跺埌鏈夋晥鐩爣锛宑ar_started=1")
 
-        # 视觉导航：每次主循环轮询相机 UART，推入 UartChannel，推进状态机
+        # 视觉导航：轮询相机 UART，推进状态机
         if RUN_MODE == "art_navigate" and car_started and hw_nav is not None:
             hw_nav.poll_cam_uart(ctrl.ctx.art_detect)
             ctrl.step()
@@ -716,7 +1541,7 @@ try:
 
             if pit_count % DEBUG_DIV == 0 and RUN_MODE == "wheel_dir_cal":
                 log(
-                    "[WHEEL CAL] t=%.2fs wheel=%s duty=%d enc=(%d,%d,%d) focus=%d note=%s"
+                    "[轮向校准] t=%.2fs wheel=%s duty=%d enc=(%d,%d,%d) focus=%d note=%s"
                     % (
                         elapsed_s,
                         snap["wheel"],
@@ -728,39 +1553,69 @@ try:
                         snap["note"],
                     )
                 )
-            elif pit_count % DEBUG_DIV == 0 and snap is not None:
+            elif pit_count % DEBUG_DIV == 0 and snap is not None and cam_rx_started:
                 if ENABLE_IMU:
-                    log(
-                        "[SPEED LOOP] t=%.2fs cam=(%d,%d) body=(%.1f,%.1f) turn=%.2f enc=(%d,%d,%d) tar=(%.1f,%.1f,%.1f) out=(%.1f,%.1f,%.1f) pwm=(%d,%d,%d) raw_gz=%.1f gyro=%.2f yaw=%.2f yaw_err=%.2f vz=%.2f"
-                        % (
-                            elapsed_s,
-                            int(snap["cam_x"]),
-                            int(snap["cam_y"]),
-                            snap["body_vx"],
-                            snap["body_vy"],
-                            snap["turn_rate_cmd"],
-                            int(snap["enc_fl"]),
-                            int(snap["enc_fr"]),
-                            int(snap["enc_b"]),
-                            snap["tar_fl"],
-                            snap["tar_fr"],
-                            snap["tar_b"],
-                            snap["out_fl"],
-                            snap["out_fr"],
-                            snap["out_b"],
-                            int(snap["pwm_fl"]),
-                            int(snap["pwm_fr"]),
-                            int(snap["pwm_b"]),
-                            snap["raw_gyro_z"],
-                            snap["gyro_z"],
-                            snap["yaw_deg"],
-                            snap["yaw_err_deg"],
-                            snap["vz_cmd"],
+                    if TUNE_LOG_VERBOSE:
+                        log(
+                            "[速度环] t=%.2fs nav=%s ready=%d err_xy=(%d,%d)|abs=(%d,%d) cmd_xy=(%.1f,%.1f) turn=%.2f enc=(%d,%d,%d) tar=(%.1f,%.1f,%.1f) pwm=(%d,%d,%d) gyro=%.2f yaw=%.2f yaw_err=%.2f vz=%.2f"
+                            % (
+                                elapsed_s,
+                                snap["nav_state"],
+                                snap["nav_ready"],
+                                int(snap["cam_x"]),
+                                int(snap["cam_y"]),
+                                int(snap["abs_err_x"]),
+                                int(snap["abs_err_y"]),
+                                snap["body_vx"],
+                                snap["body_vy"],
+                                snap["turn_rate_cmd"],
+                                int(snap["enc_fl"]),
+                                int(snap["enc_fr"]),
+                                int(snap["enc_b"]),
+                                snap["tar_fl"],
+                                snap["tar_fr"],
+                                snap["tar_b"],
+                                int(snap["pwm_fl"]),
+                                int(snap["pwm_fr"]),
+                                int(snap["pwm_b"]),
+                                snap["gyro_z"],
+                                snap["yaw_deg"],
+                                snap["yaw_err_deg"],
+                                snap["vz_cmd"],
+                            )
                         )
-                    )
+                    else:
+                        log(
+                            "[速度环] t=%.2fs err_xy=(%d,%d) cmd_xy=(%.1f,%.1f) turn=%.2f enc=(%d,%d,%d) tar=(%.1f,%.1f,%.1f) out=(%.1f,%.1f,%.1f) pwm=(%d,%d,%d) raw_gz=%.1f gyro=%.2f yaw=%.2f yaw_err=%.2f vz=%.2f"
+                            % (
+                                elapsed_s,
+                                int(snap["cam_x"]),
+                                int(snap["cam_y"]),
+                                snap["body_vx"],
+                                snap["body_vy"],
+                                snap["turn_rate_cmd"],
+                                int(snap["enc_fl"]),
+                                int(snap["enc_fr"]),
+                                int(snap["enc_b"]),
+                                snap["tar_fl"],
+                                snap["tar_fr"],
+                                snap["tar_b"],
+                                snap["out_fl"],
+                                snap["out_fr"],
+                                snap["out_b"],
+                                int(snap["pwm_fl"]),
+                                int(snap["pwm_fr"]),
+                                int(snap["pwm_b"]),
+                                snap["raw_gyro_z"],
+                                snap["gyro_z"],
+                                snap["yaw_deg"],
+                                snap["yaw_err_deg"],
+                                snap["vz_cmd"],
+                            )
+                        )
                 else:
                     log(
-                        "[SPEED LOOP] t=%.2fs mode=%s cam=(%d,%d) body=(%.1f,%.1f) enc=(%d,%d,%d) tar=(%.1f,%.1f,%.1f) out=(%.1f,%.1f,%.1f) pwm=(%d,%d,%d)"
+                        "[速度环] t=%.2fs mode=%s err_xy=(%d,%d) cmd_xy=(%.1f,%.1f) enc=(%d,%d,%d) tar=(%.1f,%.1f,%.1f) out=(%.1f,%.1f,%.1f) pwm=(%d,%d,%d)"
                         % (
                             elapsed_s,
                             BODY_TEST_MODE,
@@ -793,56 +1648,96 @@ try:
                         int(snap["out_fl"]),
                         int(snap["out_fr"]),
                     )
+                if ENABLE_IMU:
+                    log_push_debug(
+                        "speed",
+                        snap["yaw_deg"],
+                        abs(snap["enc_fl"]) <= Nav_Low_Speed_Th
+                        and abs(snap["enc_fr"]) <= Nav_Low_Speed_Th
+                        and abs(snap["enc_b"]) <= Nav_Low_Speed_Th,
+                    )
 
         if utime.ticks_diff(now, last_status_ms) >= 1000:
             led.toggle()
             last_status_ms = now
             if RUN_MODE == "wheel_dir_cal":
                 log(
-                    "[STATUS] t=%.1fs ch7=%.1f wheel=%s duty=%d"
+                    "[状态] t=%.1fs ch7=%.1f wheel=%s duty=%d"
                     % (elapsed_s, ch7_init_value, CAL_WHEEL, int(CAL_PWM) * (1 if CAL_SIGN >= 0 else -1))
                 )
-            else:
+            elif cam_rx_started:
                 if ENABLE_IMU:
-                    log(
-                        "[STATUS] t=%.1fs ch7=%.1f cam=(%d,%d) body=(%.1f,%.1f) raw_gz=%.1f gyro=%.2f yaw=%.2f yaw_ref_err=%.2f turn=%.2f vz=%.2f"
-                        % (
-                            elapsed_s,
-                            ch7_init_value,
-                            cam_error_x,
-                            cam_error_y,
-                            cam_target_vx,
-                            0.0,
-                            imu_runtime.raw_gyro_z,
-                            imu_runtime.gyro_z_deg,
-                            imu_runtime.yaw_deg,
-                            -wrapped_yaw_error(yaw_ref_deg, imu_runtime.yaw_deg),
-                            last_turn_rate_cmd,
-                            last_vz_cmd,
+                    if TUNE_LOG_VERBOSE:
+                        log(
+                            "[状态] t=%.1fs started=%d ch7=%.1f nav=%s ready=%d err_xy=(%d,%d)|abs=(%d,%d) cmd_xy=(%.1f,%.1f) gyro=%.2f yaw=%.2f yaw_ref_err=%.2f turn=%.2f vz=%.2f"
+                            % (
+                                elapsed_s,
+                                1 if car_started else 0,
+                                ch7_init_value,
+                                nav_state,
+                                1 if nav_ready_for_push else 0,
+                                cam_error_x,
+                                cam_error_y,
+                                abs(cam_error_x),
+                                abs(cam_error_y),
+                                cam_target_vx,
+                                cam_target_vy,
+                                imu_runtime.gyro_z_deg,
+                                imu_runtime.yaw_deg,
+                                -wrapped_yaw_error(yaw_ref_deg, imu_runtime.yaw_deg),
+                                last_turn_rate_cmd,
+                                last_vz_cmd,
+                            )
                         )
-                    )
+                    else:
+                        log(
+                            "[状态] t=%.1fs started=%d ch7=%.1f err_xy=(%d,%d) cmd_xy=(%.1f,%.1f) raw_gz=%.1f gyro=%.2f yaw=%.2f yaw_ref_err=%.2f turn=%.2f vz=%.2f"
+                            % (
+                                elapsed_s,
+                                1 if car_started else 0,
+                                ch7_init_value,
+                                cam_error_x,
+                                cam_error_y,
+                                cam_target_vx,
+                                cam_target_vy,
+                                imu_runtime.raw_gyro_z,
+                                imu_runtime.gyro_z_deg,
+                                imu_runtime.yaw_deg,
+                                -wrapped_yaw_error(yaw_ref_deg, imu_runtime.yaw_deg),
+                                last_turn_rate_cmd,
+                                last_vz_cmd,
+                            )
+                        )
                 else:
                     log(
-                        "[STATUS] t=%.1fs ch7=%.1f mode=%s cam=(%d,%d) target_body=(%.1f, %.1f, %.1f)"
+                        "[状态] t=%.1fs started=%d ch7=%.1f mode=%s err_xy=(%d,%d) cmd_xy=(%.1f, %.1f, %.1f)"
                         % (
                             elapsed_s,
+                            1 if car_started else 0,
                             ch7_init_value,
                             BODY_TEST_MODE,
                             cam_error_x,
                             cam_error_y,
                             cam_target_vx,
-                            0.0,
+                            cam_target_vy,
                             0.0,
                         )
                     )
 
+                if ENABLE_IMU:
+                    log_push_debug(
+                        "status",
+                        imu_runtime.yaw_deg,
+                        False,
+                    )
+
         if loop_count % EXIT_CHECK_DIV == 0 and check_upper_exit():
-            log("=== CH7 exit triggered, program stopped ===")
+            log("=== CH7 触发退出，程序停止 ===")
             break
 
-        # 【修改】只有发车后才检查超时
+        # 仅在发车后检查超时
         if False and car_started and elapsed_s >= TIMEOUT_SECOND:
-            log("=== 运行10秒超时，程序停止 ===")
+            log("=== 运行超时，程序停止 ===")
             break
 
         if loop_count % GC_DIV == 0:
@@ -854,8 +1749,13 @@ finally:
     pit1.stop()
     stop_all()
     led.value(True)
-    # 退出时熄灭所有LED
+    # 退出时熄灭所有 LED
     led_straight.value(0)
     led_translate.value(0)
     led_rotate.value(0)
-    log("=== program fully stopped ===")
+    log("=== 程序已完全停止 ===")
+
+
+
+
+

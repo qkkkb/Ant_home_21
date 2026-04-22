@@ -17,36 +17,66 @@ clock = time.clock()                # Create a clock object to track the FPS.
 
 # ================= Model =================
 detect_model = "/sd/detect.tflite"
+classify_model = "/sd/classify.tflite"
 net = tf.load(detect_model)
+classify_net = None
+try:
+    classify_net = tf.load(classify_model, load_to_fb = True)
+except Exception as ex:
+    print("CLASSIFY LOAD FAIL:", ex)
 
 
 # ================= UART =================
 uart = UART(12, 9600)
 uart.init(9600, timeout_char = 1000)
+SEARCH_TRIGGER = b"SEARCH\n"
+COARSE_TRIGGER = b"COARSE\n"
 FINE_TRIGGER = b"FINE\n"
+CLASSIFY_TRIGGER = b"CLASSIFY\n"
+LINE_TRIGGER = b"LINE\n"
+IDLE_TRIGGER = b"IDLE\n"
 
 
 # ================= Runtime =================
 DETECT_SCORE_TH = 0.70
 SEND_NEUTRAL_WHEN_EMPTY = True
-DEBUG_DRAW_BOX = True
+DEBUG_DRAW_BOX = False
 PRINT_FPS = False
-PRINT_EVENT = True
+PRINT_EVENT = False
 PRINT_VERBOSE = False
 
 ERROR_OFFSET = 120
-ERROR_LIMIT = 120
-UART_FRAME_HEAD = 0xAA
-FINE_ENTER_ERR_Y = 100
-FINE_FORCE_FRAMES = 23  #强制进入 FINE 模式的帧数上限
-STOP_ALIGN_ERR_Y = 1
-STOP_ALIGN_ERR_X = 6
+ERROR_LIMIT = 240
+ERROR_SCALE = 2
+UART_FRAME_HEAD = 0xFF
+LINE_PACKET_TAG = 0xFC
+CLASSIFY_PACKET_TAG = 0xFD
+CLASSIFY_DIR_RIGHT = 1
+CLASSIFY_DIR_UP = 2
+CLASSIFY_DIR_LEFT = 3
+LINE_STATE_NONE = 0
+LINE_STATE_CROSSED = 1
+CLASSIFY_SCORE_TH = 0.45
+CLASSIFY_LABELS = [
+    "ball",
+    "redbag",
+    "bluebag",
+    "brownbear",
+    "whitebear",
+]
+NO_TARGET_MARKER = 0xFE   # 254，超出 encode_error 范围 [0,240]，永不冲突
 
 FRAME_W = 320
 FRAME_H = 240
 WORK_W  = 240
 WORK_H  = 240
-COARSE_FREEZE_TIMEOUT = 20   # 冻结后超过此帧数未收到 FINE -> 重置重新检测
+Ema_Alpha = 0.75
+YELLOW_LINE_THRESHOLDS = [(35, 100, -20, 25, 25, 100)]
+LINE_ROI_Y = WORK_H // 2
+LINE_MIN_PIXELS = 120
+LINE_MIN_AREA = 120
+LINE_MIN_WIDTH = int(WORK_W * 0.55)
+LINE_MIN_BOTTOM = int(WORK_H * 0.82)
 
 
 # ================= Inverse Perspective =================
@@ -72,7 +102,7 @@ MM_PER_PIX_X = 210.0 / 84.0    # 2.500 mm/px
 MM_PER_PIX_Y = 594.0 / 240.0   # 2.475 mm/px
 BEV_CENTER_X = IPM_MATRIX_DST_W // 2   # 120
 BEV_CENTER_Y = IPM_MATRIX_DST_H // 2   # 120
-BEV_TARGET_Y = IPM_MATRIX_DST_H - 1    # 239, measured target bottom position
+BEV_TARGET_Y = 210    # pre-push target line in BEV
 BEV_FLIP_X = True
 BEV_FLIP_Y = False
 
@@ -168,7 +198,7 @@ def bev_to_mm(bev_x, bev_y):
 
 def encode_error(value):
     value = clamp(value, -ERROR_LIMIT, ERROR_LIMIT)
-    return clamp(value + ERROR_OFFSET, 0, ERROR_OFFSET * 2)
+    return clamp(int(value / ERROR_SCALE) + ERROR_OFFSET, 0, ERROR_OFFSET * 2)
 
 
 def send_error(error_x, error_y):
@@ -176,6 +206,28 @@ def send_error(error_x, error_y):
     send_y = encode_error(error_y)
     uart.write(bytearray([UART_FRAME_HEAD, send_x, send_y]))
     return send_x, send_y
+
+
+def send_no_target():
+    uart.write(bytearray([UART_FRAME_HEAD, NO_TARGET_MARKER, NO_TARGET_MARKER]))
+
+
+def send_classify_dir(dir_code):
+    uart.write(bytearray([UART_FRAME_HEAD, CLASSIFY_PACKET_TAG, dir_code & 0xFF]))
+
+
+def send_line_state(line_state):
+    uart.write(bytearray([UART_FRAME_HEAD, LINE_PACKET_TAG, line_state & 0xFF]))
+
+
+def classify_dir_name(dir_code):
+    if dir_code == CLASSIFY_DIR_RIGHT:
+        return "RIGHT"
+    if dir_code == CLASSIFY_DIR_UP:
+        return "UP"
+    if dir_code == CLASSIFY_DIR_LEFT:
+        return "LEFT"
+    return "NONE"
 
 
 def find_nearest_target(img):
@@ -202,6 +254,87 @@ def find_nearest_target(img):
     return best
 
 
+def classify_target(img, target):
+    if classify_net is None:
+        return None, None, 0.0
+
+    x1, y1, x2, y2, _, _ = target
+    w = x2 - x1
+    h = y2 - y1
+    if w < 8 or h < 8:
+        return None, None, 0.0
+
+    pad_x = w // 8
+    pad_y = h // 8
+    rx1 = clamp(x1 - pad_x, 0, img.width() - 1)
+    ry1 = clamp(y1 - pad_y, 0, img.height() - 1)
+    rx2 = clamp(x2 + pad_x, 0, img.width() - 1)
+    ry2 = clamp(y2 + pad_y, 0, img.height() - 1)
+    rw = rx2 - rx1
+    rh = ry2 - ry1
+    if rw < 4 or rh < 4:
+        return None, None, 0.0
+
+    roi_img = img.copy(roi = (rx1, ry1, rw, rh))
+    best_label = None
+    best_score = 0.0
+    for obj in tf.classify(
+        classify_net,
+        roi_img,
+        min_scale = 1,
+        scale_mul = 0.2,
+        x_overlap = 0.2,
+        y_overlap = 0.2,
+        scale = 1,
+        offset = 1,
+    ):
+        outputs = obj.output()
+        best_idx = 0
+        for idx in range(1, len(outputs)):
+            if outputs[idx] > outputs[best_idx]:
+                best_idx = idx
+        best_label = CLASSIFY_LABELS[best_idx]
+        best_score = outputs[best_idx]
+        break
+
+    if best_label is None or best_score < CLASSIFY_SCORE_TH:
+        return None, best_label, best_score
+
+    if best_label == "ball":
+        return CLASSIFY_DIR_UP, best_label, best_score
+    if best_label in ("brownbear", "whitebear"):
+        return CLASSIFY_DIR_RIGHT, best_label, best_score
+    if best_label in ("redbag", "bluebag"):
+        return CLASSIFY_DIR_LEFT, best_label, best_score
+    return None, best_label, best_score
+
+
+def detect_yellow_line(img):
+    roi_h = img.height() - LINE_ROI_Y
+    if roi_h <= 0:
+        return False, None
+
+    best_blob = None
+    for blob in img.find_blobs(
+        YELLOW_LINE_THRESHOLDS,
+        roi = (0, LINE_ROI_Y, img.width(), roi_h),
+        pixels_threshold = LINE_MIN_PIXELS,
+        area_threshold = LINE_MIN_AREA,
+        merge = True,
+    ):
+        if (best_blob is None) or (blob.pixels() > best_blob.pixels()):
+            best_blob = blob
+
+    if best_blob is None:
+        return False, None
+
+    crossed = (
+        best_blob.w() >= LINE_MIN_WIDTH
+        and (best_blob.y() + best_blob.h()) >= LINE_MIN_BOTTOM
+    )
+    return crossed, best_blob.rect()
+
+
 def draw_target_overlay(img, x1, y1, x2, y2):
     img.draw_rectangle(x1, y1, x2 - x1, y2 - y1, color = (0, 255, 0), thickness = 2)
 
@@ -210,13 +343,9 @@ def print_state_cfg():
     if not (PRINT_EVENT or PRINT_VERBOSE):
         return
     print(
-        "STATE CFG fine_y<=%d force_fine=%d freeze=%d stop=(y<=%d,|x|<=%d) bev_target_y=%d mm_per_px=(%.3f,%.3f)" %
+        "STATE CFG host_mode=1 ema_alpha=%.2f bev_target_y=%d mm_per_px=(%.3f,%.3f) uart=[SEARCH/COARSE/FINE/LINE/IDLE]" %
         (
-            FINE_ENTER_ERR_Y,
-            FINE_FORCE_FRAMES,
-            COARSE_FREEZE_TIMEOUT,
-            STOP_ALIGN_ERR_Y,
-            STOP_ALIGN_ERR_X,
+            Ema_Alpha,
             BEV_TARGET_Y,
             MM_PER_PIX_X,
             MM_PER_PIX_Y,
@@ -259,13 +388,37 @@ def print_state_log(mode, event, coarse_frame_count, freeze_count,
 print("IPM_ENABLE=%s IS_IMG_TO_BEV=%s DST=%dx%d" %
       (IPM_ENABLE, IPM_MATRIX_IS_IMAGE_TO_BEV, IPM_MATRIX_DST_W, IPM_MATRIX_DST_H))
 print_state_cfg()
-detect_mode = "COARSE"
+detect_mode = "SEARCH"
 frozen_error = None
 frozen_overlay = None
+ema_bev_x = None
+ema_bev_y = None
+coarse_frame_in_interval = 0
 freeze_count = 0
 coarse_frame_count = 0
 uart_rx_buf = bytearray()
 frame_count = 0
+classify_sent = False
+
+
+def set_detect_mode(new_mode, event, clear_state = True):
+    global detect_mode, frozen_error, frozen_overlay, ema_bev_x, ema_bev_y
+    global coarse_frame_in_interval, freeze_count, coarse_frame_count, classify_sent
+
+    detect_mode = new_mode
+    if clear_state:
+        frozen_error = None
+        if DEBUG_DRAW_BOX:
+            frozen_overlay = None
+        ema_bev_x = None
+        ema_bev_y = None
+        coarse_frame_in_interval = 0
+        freeze_count = 0
+        coarse_frame_count = 0
+        classify_sent = False
+    print_state_log("UART", event, coarse_frame_count, freeze_count)
+
+
 while True:
     clock.tick()
     green.on()        # 打开红灯
@@ -273,14 +426,23 @@ while True:
         uart_data = uart.read()
         if uart_data:
             uart_rx_buf += uart_data
-            if FINE_TRIGGER in uart_rx_buf:
-                detect_mode = "FINE"
-                frozen_error = None
-                if DEBUG_DRAW_BOX:
-                    frozen_overlay = None
-                freeze_count = 0
-                coarse_frame_count = 0
-                print_state_log("UART", "TRIGGER->FINE", coarse_frame_count, freeze_count)
+            if SEARCH_TRIGGER in uart_rx_buf:
+                set_detect_mode("SEARCH", "TRIGGER->SEARCH")
+                uart_rx_buf = bytearray()
+            elif COARSE_TRIGGER in uart_rx_buf:
+                set_detect_mode("COARSE", "TRIGGER->COARSE")
+                uart_rx_buf = bytearray()
+            elif FINE_TRIGGER in uart_rx_buf:
+                set_detect_mode("FINE", "TRIGGER->FINE")
+                uart_rx_buf = bytearray()
+            elif CLASSIFY_TRIGGER in uart_rx_buf:
+                set_detect_mode("CLASSIFY", "TRIGGER->CLASSIFY")
+                uart_rx_buf = bytearray()
+            elif LINE_TRIGGER in uart_rx_buf:
+                set_detect_mode("LINE", "TRIGGER->LINE")
+                uart_rx_buf = bytearray()
+            elif IDLE_TRIGGER in uart_rx_buf:
+                set_detect_mode("IDLE", "TRIGGER->IDLE")
                 uart_rx_buf = bytearray()
             elif len(uart_rx_buf) > 20:
                 uart_rx_buf = bytearray()
@@ -288,99 +450,112 @@ while True:
     img = sensor.snapshot().scale(x_scale = WORK_W / float(FRAME_W),
                                   y_scale = WORK_H / float(FRAME_H))
 
-    if detect_mode == "DONE":
+    if detect_mode == "IDLE":
         if SEND_NEUTRAL_WHEN_EMPTY:
-            send_error(0, 0)
-    elif detect_mode == "COARSE":
-        coarse_entered_fine = False
-        coarse_frame_count += 1
-        if (frozen_error is None) or (freeze_count >= COARSE_FREEZE_TIMEOUT):
+            send_no_target()
+    elif detect_mode == "CLASSIFY":
+        if not classify_sent:
             target = find_nearest_target(img)
-            freeze_count = 0
+            if target is None:
+                print_state_log("CLASSIFY", "NO_TARGET", coarse_frame_count, freeze_count, verbose = True)
+            else:
+                x1, y1, x2, y2, _, _ = target
+                dir_code, class_label, class_score = classify_target(img, target)
+                if DEBUG_DRAW_BOX:
+                    draw_target_overlay(img, x1, y1, x2, y2)
+                if dir_code is None:
+                    print_state_log(
+                        "CLASSIFY", "UNSURE", coarse_frame_count, freeze_count,
+                        score = class_score, label = class_label, verbose = True
+                    )
+                else:
+                    send_classify_dir(dir_code)
+                    classify_sent = True
+                    print_state_log(
+                        "CLASSIFY", classify_dir_name(dir_code), coarse_frame_count, freeze_count,
+                        score = class_score, label = class_label, verbose = True
+                    )
+    elif detect_mode == "LINE":
+        line_crossed, line_rect = detect_yellow_line(img)
+        if line_crossed:
+            send_line_state(LINE_STATE_CROSSED)
+            print_state_log("LINE", "CROSSED", coarse_frame_count, freeze_count)
+        else:
+            send_line_state(LINE_STATE_NONE)
+            print_state_log("LINE", "SEARCH", coarse_frame_count, freeze_count, verbose = True)
+        if DEBUG_DRAW_BOX and line_rect is not None:
+            img.draw_rectangle(line_rect, color = (255, 255, 0), thickness = 2)
+    elif detect_mode == "SEARCH" or detect_mode == "COARSE":
+        mode_name = detect_mode
+        coarse_frame_count += 1
+
+        # 自适应采样间隔：远距离快采样，近距离慢采样
+        if frozen_error is None:
+            sample_interval = 0
+        elif abs(frozen_error[1]) > 140:
+            sample_interval = 2
+        else:
+            sample_interval = 1
+
+        need_detect = False
+        if frozen_error is None:
+            need_detect = True
+        else:
+            coarse_frame_in_interval += 1
+            if coarse_frame_in_interval >= sample_interval:
+                need_detect = True
+                coarse_frame_in_interval = 0
+
+        if need_detect:
+            target = find_nearest_target(img)
             if target is not None:
                 x1, y1, x2, y2, label, score = target
                 mid_x = (x1 + x2) // 2
                 bottom_y = y2
                 bev_x, bev_y = ipm_transform(mid_x, bottom_y)
                 bev_x, bev_y = normalize_bev_point(bev_x, bev_y)
-                error_x = int(bev_x) - BEV_CENTER_X
-                error_y = BEV_TARGET_Y - int(bev_y)
-                dx_mm, dy_mm = bev_to_mm(bev_x, bev_y)
-                if (error_y <= FINE_ENTER_ERR_Y) or (coarse_frame_count >= FINE_FORCE_FRAMES):
-                    detect_mode = "FINE"
-                    frozen_error = None
-                    coarse_frame_count = 0
-                    if DEBUG_DRAW_BOX:
-                        frozen_overlay = None
-                        draw_target_overlay(img, x1, y1, x2, y2)
-                    coarse_entered_fine = True
-                    send_x, send_y = send_error(error_x, error_y)
-                    if error_y <= FINE_ENTER_ERR_Y:
-                        print_state_log(
-                            "COARSE", "TO_FINE(Y)", coarse_frame_count, freeze_count,
-                            score, label, mid_x, bottom_y, bev_x, bev_y,
-                            dx_mm, dy_mm, error_x, error_y, send_x, send_y
-                        )
-                    else:
-                        print_state_log(
-                            "COARSE", "TO_FINE(%dF)" % FINE_FORCE_FRAMES, coarse_frame_count, freeze_count,
-                            score, label, mid_x, bottom_y, bev_x, bev_y,
-                            dx_mm, dy_mm, error_x, error_y, send_x, send_y
-                        )
+
+                if ema_bev_x is None:
+                    ema_bev_x = bev_x
+                    ema_bev_y = bev_y
                 else:
-                    frozen_error = (error_x, error_y)
-                    if DEBUG_DRAW_BOX:
-                        frozen_overlay = (x1, y1, x2, y2)
-                    print_state_log(
-                        "COARSE", "LOCK", coarse_frame_count, freeze_count,
-                        score, label, mid_x, bottom_y, bev_x, bev_y,
-                        dx_mm, dy_mm, error_x, error_y,
-                        verbose = True
-                    )
-            else:
-                frozen_error = None
+                    ema_bev_x = Ema_Alpha * bev_x + (1.0 - Ema_Alpha) * ema_bev_x
+                    ema_bev_y = Ema_Alpha * bev_y + (1.0 - Ema_Alpha) * ema_bev_y
+
+                error_x = int(ema_bev_x) - BEV_CENTER_X
+                error_y = BEV_TARGET_Y - int(ema_bev_y)
+                frozen_error = (error_x, error_y)
                 if DEBUG_DRAW_BOX:
-                    frozen_overlay = None
-        if coarse_entered_fine:
-            pass
-        elif (frozen_error is not None) and (coarse_frame_count >= FINE_FORCE_FRAMES):
-            detect_mode = "FINE"
-            coarse_frame_count = 0
+                    frozen_overlay = (x1, y1, x2, y2)
+
+                dx_mm, dy_mm = bev_to_mm(ema_bev_x, ema_bev_y)
+                send_x, send_y = send_error(error_x, error_y)
+                print_state_log(
+                    mode_name, "EMA", coarse_frame_count, coarse_frame_in_interval,
+                    score, label, mid_x, bottom_y, ema_bev_x, ema_bev_y,
+                    dx_mm, dy_mm, error_x, error_y, send_x, send_y,
+                )
+            else:
+                print_state_log(mode_name, "MISS", coarse_frame_count,
+                                coarse_frame_in_interval, verbose=True)
+
+        if frozen_error is not None:
             if DEBUG_DRAW_BOX and frozen_overlay is not None:
-                draw_target_overlay(img, frozen_overlay[0], frozen_overlay[1], frozen_overlay[2], frozen_overlay[3])
-            send_x, send_y = send_error(frozen_error[0], frozen_error[1])
-            print_state_log(
-                "COARSE", "TO_FINE(%dF)_HOLD" % FINE_FORCE_FRAMES, coarse_frame_count, freeze_count,
-                error_x = frozen_error[0], error_y = frozen_error[1],
-                send_x = send_x, send_y = send_y
-            )
-        elif frozen_error is not None:
-            if DEBUG_DRAW_BOX and frozen_overlay is not None:
-                draw_target_overlay(img, frozen_overlay[0], frozen_overlay[1], frozen_overlay[2], frozen_overlay[3])
-            send_x, send_y = send_error(frozen_error[0], frozen_error[1])
-            freeze_count += 1
-            print_state_log(
-                "COARSE", "HOLD", coarse_frame_count, freeze_count,
-                error_x = frozen_error[0], error_y = frozen_error[1],
-                send_x = send_x, send_y = send_y,
-                verbose = True
-            )
+                draw_target_overlay(img, frozen_overlay[0], frozen_overlay[1],
+                                    frozen_overlay[2], frozen_overlay[3])
+            if not need_detect:
+                send_error(frozen_error[0], frozen_error[1])
         else:
             if SEND_NEUTRAL_WHEN_EMPTY:
-                send_error(0, 0)
-            if coarse_frame_count >= FINE_FORCE_FRAMES:
-                detect_mode = "FINE"
-                coarse_frame_count = 0
-                print_state_log("COARSE", "TO_FINE(%dF)_NO_TARGET" % FINE_FORCE_FRAMES, coarse_frame_count, freeze_count)
-            else:
-                print_state_log("COARSE", "SEARCH", coarse_frame_count, freeze_count, verbose = True)
-        # COARSE 持续发送冻结误差，到期后重新检测并更新
+                send_no_target()
+            print_state_log(mode_name, "SEARCH", coarse_frame_count,
+                            coarse_frame_in_interval, verbose=True)
     else:
         target = find_nearest_target(img)
 
         if target is None:
             if SEND_NEUTRAL_WHEN_EMPTY:
-                send_error(0, 0)
+                send_no_target()
 
             print_state_log("FINE", "NO_TARGET", coarse_frame_count, freeze_count, verbose = True)
             if (not PRINT_VERBOSE) and PRINT_FPS:
@@ -396,27 +571,15 @@ while True:
             if DEBUG_DRAW_BOX:
                 draw_target_overlay(img, x1, y1, x2, y2)
             dx_mm, dy_mm = bev_to_mm(bev_x, bev_y)
-            if (error_y <= STOP_ALIGN_ERR_Y) and (-STOP_ALIGN_ERR_X <= error_x <= STOP_ALIGN_ERR_X):
-                detect_mode = "DONE"
-                frozen_error = None
-                if DEBUG_DRAW_BOX:
-                    frozen_overlay = None
-                send_x, send_y = send_error(0, 0)
-                print_state_log(
-                    "FINE", "DONE", coarse_frame_count, freeze_count,
-                    score, label, mid_x, bottom_y, bev_x, bev_y,
-                    dx_mm, dy_mm, error_x, error_y, send_x, send_y
-                )
-            else:
-                send_x, send_y = send_error(error_x, error_y)
-                print_state_log(
-                    "FINE", "TRACK", coarse_frame_count, freeze_count,
-                    score, label, mid_x, bottom_y, bev_x, bev_y,
-                    dx_mm, dy_mm, error_x, error_y, send_x, send_y,
-                    verbose = True
-                )
-                if (not PRINT_VERBOSE) and PRINT_FPS:
-                    print(clock.fps())
+            send_x, send_y = send_error(error_x, error_y)
+            print_state_log(
+                "FINE", "TRACK", coarse_frame_count, freeze_count,
+                score, label, mid_x, bottom_y, bev_x, bev_y,
+                dx_mm, dy_mm, error_x, error_y, send_x, send_y,
+                verbose = True
+            )
+            if (not PRINT_VERBOSE) and PRINT_FPS:
+                print(clock.fps())
 
     frame_count += 1
     if (frame_count & 0x07) == 0:

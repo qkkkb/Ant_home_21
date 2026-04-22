@@ -26,20 +26,20 @@ def turn_ctrl(pid, err_yaw, motor_slow_flag=0):
         pid.err += 360
 
     if motor_slow_flag:
-        pid.output = 4.0 * pid.err + 0.5 * (pid.err - pid.err_last)
+        pid.output = 2.0 * pid.err + 0.3 * (pid.err - pid.err_last)
     else:
-        if -20 < pid.err < 10:
-            pid.output = 6.0 * pid.err + 0.8 * (pid.err - pid.err_last)
-        if -20 < pid.err < 20:
-            pid.output = 7.5 * pid.err + 1.0 * (pid.err - pid.err_last)
+        if -10 < pid.err < 10:
+            pid.output = 1.5 * pid.err + 0.3 * (pid.err - pid.err_last)
+        elif -20 < pid.err < 20:
+            pid.output = 2.0 * pid.err + 0.5 * (pid.err - pid.err_last)
         else:
-            pid.output = 9.0 * pid.err + 1.5 * (pid.err - pid.err_last)
+            pid.output = 3.0 * pid.err + 0.8 * (pid.err - pid.err_last)
 
     pid.err_last = pid.err
-    if pid.output > 420:
-        pid.output = 420.0
-    elif pid.output < -420:
-        pid.output = -420.0
+    if pid.output > 15:
+        pid.output = 15.0
+    elif pid.output < -15:
+        pid.output = -15.0
     return pid.output
 
 

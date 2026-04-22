@@ -130,9 +130,8 @@ Push_Dir_Right = 1
 Push_Dir_Up = 2
 Push_Dir_Left = 3
 Nav_Detect_Ms = 200
-Nav_Vision_Ready_Ms = 300
 Nav_Target_Lost_Ms = 500
-Nav_Search_Turn_Yaw = 45.0
+Nav_Search_Turn_Yaw = 30.0
 Nav_Search_Turn_Ok_Yaw = 5.0
 Nav_Search_Turn_Ok_Ms = 120
 Nav_Search_Turn_Gyro_Th = 3.0
@@ -209,7 +208,6 @@ cam_last_rx_ms = utime.ticks_ms()
 cam_rx_buf = bytearray()
 cam_has_target = False
 cam_rx_started = False
-cam_rx_started_since_ms = 0
 cam_valid_target_since_ms = 0
 nav_state = NAV_STATE_SEARCH
 nav_detect_since_ms = 0
@@ -519,6 +517,11 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         nav_ready_for_push = False
         cam_target_vx = 0.0
         cam_target_vy = 0.0
+        if seen:
+            if ENABLE_IMU:
+                yaw_ref_deg = yaw_deg
+            nav_set_state(NAV_STATE_COARSE, "target_seen_during_search_turn")
+            return
         yaw_ref_deg = search_turn_yaw_target
         yaw_search_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg)) if ENABLE_IMU else 0.0
         search_turn_stable = (
@@ -733,7 +736,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
 
 def poll_art_uart():
     global cam_rx_buf, cam_error_x, cam_error_y, cam_target_vx, cam_target_vy
-    global cam_has_target, cam_last_rx_ms, cam_rx_started, cam_rx_started_since_ms, cam_valid_target_since_ms
+    global cam_has_target, cam_last_rx_ms, cam_rx_started, cam_valid_target_since_ms
     global push_dir_code, push_dir_name, push_yaw_target, line_crossed
 
     if cam_uart.any():
@@ -746,7 +749,6 @@ def poll_art_uart():
                     continue
                 if not cam_rx_started:
                     cam_rx_started = True
-                    cam_rx_started_since_ms = utime.ticks_ms()
                 if cam_rx_buf[1] == Classify_Packet_Tag:
                     new_dir = int(cam_rx_buf[2])
                     if new_dir != push_dir_code:
@@ -1507,9 +1509,7 @@ try:
         vision_ready = (
             (not car_started)
             and cam_rx_started
-            and cam_rx_started_since_ms > 0
             and cam_packet_fresh()
-            and utime.ticks_diff(now, cam_rx_started_since_ms) >= Nav_Vision_Ready_Ms
         )
         if vision_ready:
             if ENABLE_IMU and imu_runtime is not None:

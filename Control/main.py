@@ -158,14 +158,7 @@ Nav_Lateral_Deadband = 6
 Nav_Classify_Timeout_Ms = 1500
 Nav_Push_Orient_Ok_Yaw = 12.0
 Nav_Push_Orient_Ok_Ms = 80
-Nav_Push_Orient_Relock_Yaw = 30.0
-Nav_Push_Orient_Stop_Orbit_Yaw = 18.0
-Nav_Push_Orient_Min_Turn = 35.0
-Nav_Push_Orient_Gyro_Limit = 16.0
-Nav_Push_Orient_Min_Vz = 10.0
 Nav_Push_Orient_Max_Ms = 8000
-Nav_Push_Orient_Radius_Gain = 2.0
-Nav_Push_Orient_Orbit_Vy_Max = 24.0
 Nav_Push_Orbit_Slow_Yaw = 40.0
 Nav_Push_Orbit_Fast_Vy = 18.0
 Nav_Push_Orbit_Slow_Vy = 10.0
@@ -315,13 +308,6 @@ def push_yaw_error_deg(yaw_deg):
     if not ENABLE_IMU:
         return 0.0
     return -wrapped_yaw_error(push_yaw_target, yaw_deg)
-
-
-def calc_orbit_dir(from_yaw, target_yaw):
-    err = -wrapped_yaw_error(target_yaw, from_yaw)
-    if err >= 0.0:
-        return 1
-    return -1
 
 
 def orbit_turn_dir_from_dir(dir_code):
@@ -1367,16 +1353,12 @@ def calc_speed_closed_loop():
             "push_yaw_target": push_yaw_target,
         }
 
+    orbit_open_loop = False
     if nav_state == NAV_STATE_PUSH_ORIENT:
         yaw_err_abs = abs(yaw_err_deg) if ENABLE_IMU else 0.0
         orbit_vy_mag, orbit_turn_mag = get_push_orbit_motion(yaw_err_abs)
-        if push_orbit_vy_sign != 0:
-            cam_target_vx = 0.0
-            cam_target_vy = push_orbit_vy_sign * orbit_vy_mag
-        else:
-            cam_target_vx = 0.0
-            cam_target_vy = 0.0
-
+        cam_target_vx = 0.0
+        cam_target_vy = push_orbit_vy_sign * orbit_vy_mag
         if orbit_turn_mag > 0.0 and push_orbit_dir != 0:
             turn_rate_cmd = push_orbit_dir * orbit_turn_mag
             vz_cmd = push_orbit_dir * orbit_turn_mag
@@ -1389,98 +1371,30 @@ def calc_speed_closed_loop():
                     vz_cmd = Nav_Push_Orbit_Brake_Vz
             else:
                 vz_cmd = 0.0
+        orbit_open_loop = True
 
-        move_cmd.tar_spd_x = cam_target_vx
-        move_cmd.tar_spd_y = cam_target_vy
-        move_cmd.tar_spd_z = vz_cmd
-        last_turn_rate_cmd = turn_rate_cmd
-        last_vz_cmd = vz_cmd
-        calc_wheel_spd(move_cmd, cam_target_vx, cam_target_vy, vz_cmd)
-
-        e_fl = enc_fl.get()
-        e_fr = enc_fr.get()
-        e_b = enc_b.get()
-        t_fl = move_cmd.speed_fl
-        t_fr = move_cmd.speed_fr
-        t_b = move_cmd.speed_b
-        u_fl = speed_ctrl(pid_fl, e_fl, t_fl)
-        u_fr = speed_ctrl(pid_fr, e_fr, t_fr)
-        u_b = speed_ctrl(pid_b, e_b, t_b)
-        if FORCE_MOTOR_OFF:
-            set_three_pwm_smooth(0, 0, 0)
-            s_fl = 0
-            s_fr = 0
-            s_b = 0
-        else:
-            s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
-        return {
-            "enc_fl": e_fl,
-            "enc_fr": e_fr,
-            "enc_b": e_b,
-            "tar_fl": t_fl, "tar_fr": t_fr, "tar_b": t_b,
-            "out_fl": u_fl, "out_fr": u_fr, "out_b": u_b,
-            "pwm_fl": s_fl, "pwm_fr": s_fr, "pwm_b": s_b,
-            "raw_gyro_z": raw_gyro_z,
-            "gyro_z": gyro_z,
-            "yaw_deg": yaw_deg,
-            "yaw_err_deg": yaw_err_deg,
-            "turn_rate_cmd": turn_rate_cmd,
-            "vz_cmd": vz_cmd,
-            "body_vx": cam_target_vx,
-            "body_vy": cam_target_vy,
-            "cam_x": cam_error_x,
-            "cam_y": cam_error_y,
-            "abs_err_x": abs(cam_error_x),
-            "abs_err_y": abs(cam_error_y),
-            "nav_state": nav_state,
-            "nav_ready": 0,
-            "push_dir": push_dir_name,
-            "push_yaw_target": push_yaw_target,
-        }
-
-    if ENABLE_IMU:
+    if ENABLE_IMU and (not orbit_open_loop):
         turn_rate_cmd = turn_ctrl(turn_pid, yaw_err_deg, 0)
         if nav_state == NAV_STATE_SEARCH_TURN:
             if turn_rate_cmd > Nav_Search_Turn_Max_Rate:
                 turn_rate_cmd = Nav_Search_Turn_Max_Rate
             elif turn_rate_cmd < -Nav_Search_Turn_Max_Rate:
                 turn_rate_cmd = -Nav_Search_Turn_Max_Rate
-        if (
-            nav_state == NAV_STATE_PUSH_ORIENT
-            and abs(yaw_err_deg) >= 25.0
-            and abs(cam_target_vy) < 0.1
-        ):
-            if turn_rate_cmd >= 0.0:
-                if turn_rate_cmd < Nav_Push_Orient_Min_Turn:
-                    turn_rate_cmd = Nav_Push_Orient_Min_Turn
-            else:
-                if turn_rate_cmd > -Nav_Push_Orient_Min_Turn:
-                    turn_rate_cmd = -Nav_Push_Orient_Min_Turn
-    else:
+    elif not orbit_open_loop:
         turn_pid.output = 0.0
         turn_pid.err = 0.0
         turn_pid.err_last = 0.0
         turn_rate_cmd = 0.0
 
     # 陀螺仪内环（方向控制）
-    if ENABLE_GYRO_LOOP and gyro_pid is not None:
+    if orbit_open_loop:
+        pass
+    elif ENABLE_GYRO_LOOP and gyro_pid is not None:
         if nav_state == NAV_STATE_SEARCH_TURN:
             gyro_pid.gyro_output_limit = Nav_Search_Turn_Gyro_Limit
-        elif nav_state == NAV_STATE_PUSH_ORIENT:
-            gyro_pid.gyro_output_limit = Nav_Push_Orient_Gyro_Limit
         else:
             gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
         vz_cmd = gyro_ctrl(gyro_pid, turn_rate_cmd - gyro_z)
-        if (
-            nav_state == NAV_STATE_PUSH_ORIENT
-            and abs(yaw_err_deg) >= 25.0
-            and abs(cam_target_vy) < 0.1
-            and abs(vz_cmd) < Nav_Push_Orient_Min_Vz
-        ):
-            if turn_rate_cmd >= 0.0:
-                vz_cmd = Nav_Push_Orient_Min_Vz
-            else:
-                vz_cmd = -Nav_Push_Orient_Min_Vz
     else:
         if gyro_pid is not None:
             gyro_pid.output = 0.0

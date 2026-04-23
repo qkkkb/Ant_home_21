@@ -494,6 +494,35 @@ def apply_nav_targets(vx, vy, vx_limit, vy_limit):
     cam_target_vy = vy
 
 
+def apply_push_orbit_targets(yaw_deg):
+    global cam_target_vx, cam_target_vy
+
+    yaw_err_deg_orient = -wrapped_yaw_error(push_yaw_target, yaw_deg) if ENABLE_IMU else 0.0
+    yaw_err_abs = abs(yaw_err_deg_orient) if ENABLE_IMU else 0.0
+    passed_target = (
+        ENABLE_IMU
+        and push_orbit_dir != 0
+        and yaw_err_deg_orient * push_orbit_dir <= 0.0
+    )
+
+    cam_target_vx = 0.0
+    if (
+        yaw_err_abs > Nav_Push_Orient_Stop_Orbit_Yaw
+        and (not passed_target)
+        and push_orbit_vy_sign != 0
+    ):
+        cam_target_vy = push_orbit_vy_sign * Nav_Push_Orient_Min_Vz * Nav_Push_Orient_Radius_Gain
+    else:
+        cam_target_vy = 0.0
+
+    if cam_target_vy > Nav_Push_Orient_Orbit_Vy_Max:
+        cam_target_vy = Nav_Push_Orient_Orbit_Vy_Max
+    elif cam_target_vy < -Nav_Push_Orient_Orbit_Vy_Max:
+        cam_target_vy = -Nav_Push_Orient_Orbit_Vy_Max
+
+    return yaw_err_abs
+
+
 def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
     global nav_detect_since_ms, nav_target_lost_since_ms, nav_search_turn_ok_since_ms
     global nav_coarse_ok_since_ms, nav_fine_ok_since_ms, nav_push_orient_ok_since_ms
@@ -649,6 +678,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                     push_orbit_vy_sign,
                 ),
             )
+            apply_push_orbit_targets(yaw_deg)
         elif utime.ticks_diff(now, nav_transition_ms) >= Nav_Classify_Timeout_Ms:
             nav_set_state(NAV_STATE_FINE, "classify_timeout")
         return
@@ -656,22 +686,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
     if nav_state == NAV_STATE_PUSH_ORIENT:
         nav_ready_for_push = False
         yaw_ref_deg = push_yaw_target
-        yaw_err_deg_orient = -wrapped_yaw_error(yaw_ref_deg, yaw_deg) if ENABLE_IMU else 0.0
-        cam_target_vx = 0.0
-        yaw_err_abs = abs(yaw_err_deg_orient) if ENABLE_IMU else 0.0
-        passed_target = (
-            ENABLE_IMU
-            and push_orbit_dir != 0
-            and yaw_err_deg_orient * push_orbit_dir <= 0.0
-        )
-        if yaw_err_abs > Nav_Push_Orient_Stop_Orbit_Yaw and (not passed_target):
-            cam_target_vy = push_orbit_vy_sign * Nav_Push_Orient_Min_Vz * Nav_Push_Orient_Radius_Gain
-        else:
-            cam_target_vy = 0.0
-        if cam_target_vy > Nav_Push_Orient_Orbit_Vy_Max:
-            cam_target_vy = Nav_Push_Orient_Orbit_Vy_Max
-        elif cam_target_vy < -Nav_Push_Orient_Orbit_Vy_Max:
-            cam_target_vy = -Nav_Push_Orient_Orbit_Vy_Max
+        yaw_err_abs = apply_push_orbit_targets(yaw_deg)
         if (not ENABLE_IMU) or (yaw_err_abs <= Nav_Push_Orient_Ok_Yaw):
             if nav_push_orient_ok_since_ms == 0:
                 nav_push_orient_ok_since_ms = now

@@ -1356,7 +1356,11 @@ def calc_speed_closed_loop():
                 turn_rate_cmd = Nav_Search_Turn_Max_Rate
             elif turn_rate_cmd < -Nav_Search_Turn_Max_Rate:
                 turn_rate_cmd = -Nav_Search_Turn_Max_Rate
-        if nav_state == NAV_STATE_PUSH_ORIENT and abs(yaw_err_deg) >= 25.0:
+        if (
+            nav_state == NAV_STATE_PUSH_ORIENT
+            and abs(yaw_err_deg) >= 25.0
+            and abs(cam_target_vy) < 0.1
+        ):
             if turn_rate_cmd >= 0.0:
                 if turn_rate_cmd < Nav_Push_Orient_Min_Turn:
                     turn_rate_cmd = Nav_Push_Orient_Min_Turn
@@ -1381,6 +1385,7 @@ def calc_speed_closed_loop():
         if (
             nav_state == NAV_STATE_PUSH_ORIENT
             and abs(yaw_err_deg) >= 25.0
+            and abs(cam_target_vy) < 0.1
             and abs(vz_cmd) < Nav_Push_Orient_Min_Vz
         ):
             if turn_rate_cmd >= 0.0:

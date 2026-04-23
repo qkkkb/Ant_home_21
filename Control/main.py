@@ -1211,8 +1211,7 @@ def calc_speed_closed_loop():
             "push_yaw_target": push_yaw_target,
         }
 
-    orbit_open_loop = False
-    orbit_gyro_brake = False
+    orbit_rate_mode = False
     if nav_state == NAV_STATE_PUSH_ORIENT:
         orbit_remaining = max(0.0, push_orbit_target_delta - push_orbit_progress_deg)
         if push_orbit_reached:
@@ -1224,35 +1223,29 @@ def calc_speed_closed_loop():
         cam_target_vy = push_orbit_vy_sign * orbit_vy_mag
         if orbit_turn_mag > 0.0 and push_orbit_dir != 0:
             turn_rate_cmd = push_orbit_dir * orbit_turn_mag
-            vz_cmd = push_orbit_dir * orbit_turn_mag
-            orbit_open_loop = True
         else:
             turn_rate_cmd = 0.0
-            vz_cmd = 0.0
-            orbit_gyro_brake = push_orbit_reached
+        orbit_rate_mode = True
 
-    if orbit_gyro_brake:
+    if orbit_rate_mode:
         turn_pid.output = 0.0
         turn_pid.err = 0.0
         turn_pid.err_last = 0.0
-        turn_rate_cmd = 0.0
-    elif ENABLE_IMU and (not orbit_open_loop):
+    elif ENABLE_IMU:
         turn_rate_cmd = turn_ctrl(turn_pid, yaw_err_deg, 0)
         if nav_state == NAV_STATE_SEARCH_TURN:
             if turn_rate_cmd > Nav_Search_Turn_Max_Rate:
                 turn_rate_cmd = Nav_Search_Turn_Max_Rate
             elif turn_rate_cmd < -Nav_Search_Turn_Max_Rate:
                 turn_rate_cmd = -Nav_Search_Turn_Max_Rate
-    elif not orbit_open_loop:
+    else:
         turn_pid.output = 0.0
         turn_pid.err = 0.0
         turn_pid.err_last = 0.0
         turn_rate_cmd = 0.0
 
     # 陀螺仪内环（方向控制）
-    if orbit_open_loop:
-        pass
-    elif ENABLE_GYRO_LOOP and gyro_pid is not None:
+    if ENABLE_GYRO_LOOP and gyro_pid is not None:
         if nav_state == NAV_STATE_SEARCH_TURN:
             gyro_pid.gyro_output_limit = Nav_Search_Turn_Gyro_Limit
         else:

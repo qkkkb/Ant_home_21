@@ -225,6 +225,7 @@ field_right_yaw = 90.0
 field_left_yaw = 270.0
 field_down_yaw = 180.0
 launch_yaw = 0.0
+field_reference_valid = False
 search_turn_yaw_target = 45.0
 push_dir_code = Push_Dir_None
 push_dir_name = "NONE"
@@ -233,6 +234,7 @@ push_return_yaw_target = 0.0
 push_face_obj_yaw = 0.0
 push_orbit_dir = 0
 push_orbit_vy_sign = 0
+push_orbit_blocked = False
 line_crossed = False
 
 def wrapped_yaw_error(ref_deg, now_deg):
@@ -272,8 +274,16 @@ def yaw_from_field_dir(dir_code):
     return field_up_yaw
 
 
-def refresh_field_reference():
+def refresh_field_reference(force=False):
     global field_up_yaw, field_right_yaw, field_left_yaw, field_down_yaw, launch_yaw
+    global field_reference_valid
+
+    if field_reference_valid and (not force):
+        log(
+            "[FIELD] keep up=%.2f right=%.2f left=%.2f down=%.2f launch=%.2f"
+            % (field_up_yaw, field_right_yaw, field_left_yaw, field_down_yaw, launch_yaw)
+        )
+        return False
 
     if ENABLE_IMU and imu_runtime is not None:
         launch_yaw = normalize_yaw_deg(imu_runtime.read_yaw())
@@ -289,6 +299,8 @@ def refresh_field_reference():
         "[FIELD] up=%.2f right=%.2f left=%.2f down=%.2f launch=%.2f"
         % (field_up_yaw, field_right_yaw, field_left_yaw, field_down_yaw, launch_yaw)
     )
+    field_reference_valid = True
+    return True
 
 
 def push_yaw_error_deg(yaw_deg):
@@ -488,7 +500,8 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
     global nav_push_prepare_ok_since_ms, nav_push_turn_ok_since_ms
     global nav_ready_for_push
     global cam_target_vx, cam_target_vy, yaw_ref_deg, push_yaw_target
-    global line_crossed, push_return_yaw_target, push_face_obj_yaw, push_orbit_dir, push_orbit_vy_sign
+    global line_crossed, push_return_yaw_target, push_face_obj_yaw
+    global push_orbit_dir, push_orbit_vy_sign, push_orbit_blocked
 
     now = utime.ticks_ms()
     track_target_states = (
@@ -544,6 +557,12 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         cam_target_vx = 0.0
         cam_target_vy = 0.0
         nav_ready_for_push = False
+        if push_orbit_blocked:
+            if nav_target_lost_since_ms > 0:
+                if utime.ticks_diff(now, nav_target_lost_since_ms) >= Nav_Target_Lost_Ms:
+                    push_orbit_blocked = False
+                    log("[NAV] orbit retry unlocked after target lost")
+            return
         if seen and nav_detect_since_ms > 0:
             if utime.ticks_diff(now, nav_detect_since_ms) >= Nav_Detect_Ms:
                 if ENABLE_IMU:
@@ -663,7 +682,8 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         if utime.ticks_diff(now, nav_transition_ms) >= Nav_Push_Orient_Max_Ms:
             cam_target_vx = 0.0
             cam_target_vy = 0.0
-            nav_set_state(NAV_STATE_FINE, "orbit_timeout")
+            push_orbit_blocked = True
+            nav_set_state(NAV_STATE_SEARCH, "orbit_timeout_blocked")
         return
 
     if nav_state == NAV_STATE_PUSH_PREPARE:

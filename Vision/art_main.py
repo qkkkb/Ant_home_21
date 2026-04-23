@@ -77,8 +77,6 @@ LINE_MIN_PIXELS = 120
 LINE_MIN_AREA = 120
 LINE_MIN_WIDTH = int(WORK_W * 0.55)
 LINE_MIN_BOTTOM = int(WORK_H * 0.82)
-LINE_MAX_HEIGHT = int(WORK_H * 0.18)
-LINE_MIN_ASPECT = 3.0
 
 
 # ================= Inverse Perspective =================
@@ -332,8 +330,6 @@ def detect_yellow_line(img):
 
     crossed = (
         best_blob.w() >= LINE_MIN_WIDTH
-        and best_blob.h() <= LINE_MAX_HEIGHT
-        and best_blob.w() >= best_blob.h() * LINE_MIN_ASPECT
         and (best_blob.y() + best_blob.h()) >= LINE_MIN_BOTTOM
     )
     return crossed, best_blob.rect()

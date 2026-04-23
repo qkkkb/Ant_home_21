@@ -1,8 +1,8 @@
-from machine import Pin, PWM, UART
+from machine import Pin, UART
 import gc
 import utime
 from smartcar import ticker, encoder
-from seekfree import WIRELESS_UART, MOTOR_CONTROLLER
+from seekfree import WIRELESS_UART
 from imu_runtime import IMUYawRuntime
 from models import AnglePID, MoveBase, SpeedPID
 from move_base import calc_wheel_spd
@@ -15,13 +15,10 @@ _pid_mod.PWM_MAX = cfg.PWM_MAX
 speed_ctrl = _pid_mod.speed_ctrl
 gyro_ctrl = _pid_mod.gyro_ctrl
 turn_ctrl = _pid_mod.turn_ctrl
-pos_ctrl = _pid_mod.pos_ctrl
 
 # ====================== 基础配置 ======================
 # 系统控制周期
 TICK_PERIOD_MS = cfg.TICK_PERIOD_MS
-# 电机 PWM 频率
-MOTOR_FREQ = cfg.MOTOR_FREQ
 # 电机最大/最小有效占空比
 MOTOR_DUTY_MAX = cfg.MOTOR_DUTY_MAX
 MOTOR_DUTY_MIN = cfg.MOTOR_DUTY_MIN
@@ -32,62 +29,19 @@ MAX_PWM_CHANGE = cfg.MAX_PWM_CHANGE
 
 # 默认开启速度环；需要方向控制时再叠加陀螺仪环
 ENABLE_GYRO_LOOP = True
-ENABLE_OSCILLOSCOPE = False
-SHOW_DEVICE_INFO = False
 
-# 运行模式
-# wheel_dir_cal：仅校准轮子方向
-# speed_loop：正常速度闭环测试
-RUN_MODE = "speed_loop"
-CAL_WHEEL = "fr"
-CAL_PWM = 1200
-CAL_SIGN = 1
-
-# 车体运动模式
-# straight：前后直行
-# translate：左右平移
-# rotate：原地旋转
-BODY_TEST_MODE = "straight"
-TEST_LINEAR_SPEED = 5.0
-TEST_ROTATE_SPEED = 5.0
 GYRO_SIGN = 1.0
 
 # 陀螺仪 Z 轴标定参数
 GYRO_OFFSET_Z = 3.16
-AUTO_GYRO_OFFSET_CAL = False
-GYRO_CALIB_SAMPLES = 2000
-GYRO_CALIB_DELAY_MS = 1
 GYRO_SCALE = -1.0 / 16.54052
 GYRO_DEADBAND_DPS = 0.8  # 陀螺仪死区阈值
 GYRO_KP = 0.15
 GYRO_KI = 0.003
 GYRO_OUTPUT_LIMIT = 5.0
 
-# 根据运动模式设置目标速度
-if BODY_TEST_MODE == "straight":
-    STRAIGHT_VX = TEST_LINEAR_SPEED
-    STRAIGHT_VY = 0.0
-    STRAIGHT_VZ = 0.0
-elif BODY_TEST_MODE == "translate":
-    STRAIGHT_VX = 0.0
-    STRAIGHT_VY = TEST_LINEAR_SPEED
-    STRAIGHT_VZ = 0.0
-elif BODY_TEST_MODE == "rotate":
-    STRAIGHT_VX = 0.0
-    STRAIGHT_VY = 0.0
-    STRAIGHT_VZ = TEST_ROTATE_SPEED
-else:
-    raise ValueError("BODY_TEST_MODE 必须是 straight / translate / rotate")
-
 # IMU 使能条件
-ENABLE_IMU = ENABLE_GYRO_LOOP or AUTO_GYRO_OFFSET_CAL or SHOW_DEVICE_INFO
-
-# 编码器与 IMU 采样配置
-ENCODER_CAPTURE_DIV = 1
-IMU_CAPTURE_DIV = 1
-ENC_FL_INVERT = False
-ENC_FR_INVERT = False
-ENC_B_INVERT = False
+ENABLE_IMU = ENABLE_GYRO_LOOP
 
 # 调试与退出配置
 DEBUG_DIV = 20
@@ -96,7 +50,6 @@ GC_DIV = 50
 FORCE_MOTOR_OFF = False  # 调试开关：True 时程序继续运行，但三个电机始终断输出
 AUTO_START_ON_BOOT = False
 AUTO_START_DELAY_MS = 2000
-TIMEOUT_SECOND = 10  # 发车后运行 10 秒自动退出
 TUNE_LOG_VERBOSE = True
 
 # 无线遥控器 7 通道作为退出触发
@@ -185,15 +138,9 @@ Nav_Push_Turn_Ok_Yaw = 6.0
 Nav_Push_Turn_Ok_Ms = 150
 
 # ====================== 全局状态变量 ======================
-# 运动模式索引：0=直行 1=平移 2=旋转
-motion_mode_idx = 0
-# 运动模式名称列表
-motion_mode_names = ["straight", "translate", "rotate"]
 # 小车启动标志：False=上电静止，True=已启动
 car_started = False
 auto_start_done = False
-# 上一次 C14 模式键状态（用于消抖）
-last_c14_state = 1
 # 上一次 C9 发车键状态（用于消抖）
 last_c9_state = 1
 # 上一次 C8 退出键状态（用于消抖）
@@ -859,8 +806,6 @@ def poll_art_uart():
 key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
 
 # ====================== 按键硬件初始化 ======================
-# 模式切换按键
-key_mode = Pin(cfg.BTN_MODE_PIN, Pin.IN, Pin.PULL_UP)
 # 发车启动按键
 key_start = Pin(cfg.BTN_START_PIN, Pin.IN, Pin.PULL_UP)
 # 状态 LED
@@ -875,27 +820,12 @@ utime.sleep_ms(100)
 led = Pin(cfg.LED_HB_PIN, Pin.OUT, pull=Pin.PULL_UP_47K, value=True)
 
 # ====================== 硬件对象创建 ======================
-# art_navigate 模式由 RealHardware 统一管理
-hw_nav = None
-ctrl = None
-if RUN_MODE == "art_navigate":
-    hw_nav = RealHardware()
-    ctrl = VehicleController(hw_nav)
-    ctrl.ctx.state = CarState.COARSE_APPROACH_MODE
-    # 别名：让 stop_all() / ticker 等现有代码继续正常使用
-    motor_fl = hw_nav.motor_fl
-    motor_fr = hw_nav.motor_fr
-    motor_b  = hw_nav.motor_b
-    enc_fl   = hw_nav.enc_fl
-    enc_fr   = hw_nav.enc_fr
-    enc_b    = hw_nav.enc_b
-else:
-    motor_fl = Motor(cfg.MOTOR_FL_PH, cfg.MOTOR_FL_PWM, freq=cfg.MOTOR_FREQ, invert=cfg.MOTOR_FL_INVERT)
-    motor_fr = Motor(cfg.MOTOR_FR_PH, cfg.MOTOR_FR_PWM, freq=cfg.MOTOR_FREQ, invert=cfg.MOTOR_FR_INVERT)
-    motor_b  = Motor(cfg.MOTOR_B_PH,  cfg.MOTOR_B_PWM,  freq=cfg.MOTOR_FREQ, invert=cfg.MOTOR_B_INVERT)
-    enc_fl = encoder(cfg.ENC_FL_A, cfg.ENC_FL_B, cfg.ENC_FL_INVERT)
-    enc_fr = encoder(cfg.ENC_FR_A, cfg.ENC_FR_B, cfg.ENC_FR_INVERT)
-    enc_b  = encoder(cfg.ENC_B_A,  cfg.ENC_B_B,  cfg.ENC_B_INVERT)
+motor_fl = Motor(cfg.MOTOR_FL_PH, cfg.MOTOR_FL_PWM, freq=cfg.MOTOR_FREQ, invert=cfg.MOTOR_FL_INVERT)
+motor_fr = Motor(cfg.MOTOR_FR_PH, cfg.MOTOR_FR_PWM, freq=cfg.MOTOR_FREQ, invert=cfg.MOTOR_FR_INVERT)
+motor_b  = Motor(cfg.MOTOR_B_PH,  cfg.MOTOR_B_PWM,  freq=cfg.MOTOR_FREQ, invert=cfg.MOTOR_B_INVERT)
+enc_fl = encoder(cfg.ENC_FL_A, cfg.ENC_FL_B, cfg.ENC_FL_INVERT)
+enc_fr = encoder(cfg.ENC_FR_A, cfg.ENC_FR_B, cfg.ENC_FR_INVERT)
+enc_b  = encoder(cfg.ENC_B_A,  cfg.ENC_B_B,  cfg.ENC_B_INVERT)
 
 # 无线串口初始化
 wireless = WIRELESS_UART(460800)
@@ -913,30 +843,7 @@ if ENABLE_IMU:
         tick_period_ms=TICK_PERIOD_MS,
     )
 
-# 打印设备信息
-if SHOW_DEVICE_INFO:
-    MOTOR_CONTROLLER.help()
-    motor_fl.info()
-    motor_fr.info()
-    motor_b.info()
-    if ENABLE_IMU:
-        IMUYawRuntime.help()
-        imu_runtime.info()
-
-# ====================== LED 模式显示辅助 ======================
-def update_led_display():
-    """更新运动模式 LED。"""
-    led_straight.value(0)
-    led_translate.value(0)
-    led_rotate.value(0)
-    if motion_mode_idx == 0:
-        led_straight.value(1)
-    elif motion_mode_idx == 1:
-        led_translate.value(1)
-    elif motion_mode_idx == 2:
-        led_rotate.value(1)
-
-
+# ====================== LED 导航显示辅助 ======================
 def update_nav_led_display():
     led_straight.value(0)
     led_translate.value(0)
@@ -947,30 +854,6 @@ def update_nav_led_display():
         led_translate.value(1)
     elif nav_state in (NAV_STATE_SEARCH_TURN, NAV_STATE_PUSH_ORIENT, NAV_STATE_PUSH, NAV_STATE_PUSH_BACK, NAV_STATE_PUSH_TURN):
         led_rotate.value(1)
-
-
-def switch_motion_mode():
-    """切换车体测试模式，并在切换前先停车。"""
-    global motion_mode_idx, STRAIGHT_VX, STRAIGHT_VY, STRAIGHT_VZ, BODY_TEST_MODE, car_started
-    car_started = False
-    stop_all()
-    motion_mode_idx = (motion_mode_idx + 1) % 3
-    BODY_TEST_MODE = motion_mode_names[motion_mode_idx]
-    if BODY_TEST_MODE == "straight":
-        STRAIGHT_VX = TEST_LINEAR_SPEED
-        STRAIGHT_VY = 0.0
-        STRAIGHT_VZ = 0.0
-    elif BODY_TEST_MODE == "translate":
-        STRAIGHT_VX = 0.0
-        STRAIGHT_VY = TEST_LINEAR_SPEED
-        STRAIGHT_VZ = 0.0
-    elif BODY_TEST_MODE == "rotate":
-        STRAIGHT_VX = 0.0
-        STRAIGHT_VY = 0.0
-        STRAIGHT_VZ = TEST_ROTATE_SPEED
-    update_led_display()
-    log("[模式] 已切换到 %s，车辆已停止，请按 C9 发车" % BODY_TEST_MODE)
-
 
 # ====================== C9 发车检查 ======================
 def check_c9_start():
@@ -992,20 +875,8 @@ def check_c9_start():
                 auto_start_done = True
                 start_time = utime.ticks_ms()
                 nav_set_state(NAV_STATE_SEARCH_TURN, "launch_search_turn", force=True)
-                log("[C9] 已发车，当前模式=%s，超时=%ds" % (BODY_TEST_MODE, TIMEOUT_SECOND))
+                log("[C9] 已发车，视觉闭环启动")
     last_c9_state = current_c9
-
-
-# ====================== C14 模式切换检查 ======================
-def check_c14_switch():
-    """处理模式切换按键，带消抖。"""
-    global last_c14_state
-    current_c14 = key_mode.value()
-    if current_c14 == 0 and last_c14_state == 1:
-        utime.sleep_ms(10)
-        if key_mode.value() == 0:
-            switch_motion_mode()
-    last_c14_state = current_c14
 
 
 # ====================== C8 退出按键检查 ======================
@@ -1075,49 +946,6 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
 
     return s_fl, s_fr, s_b
 
-# 按角色获取电机对象
-def get_role_motor(role):
-    if role == "fl":
-        return motor_fl
-    if role == "fr":
-        return motor_fr
-    if role == "b":
-        return motor_b
-    return None
-
-# 按角色获取编码器值
-def get_role_encoder_value(role, e_fl, e_fr, e_b):
-    if role == "fl":
-        return e_fl
-    if role == "fr":
-        return e_fr
-    if role == "b":
-        return e_b
-    return 0
-
-# 单轮驱动
-def apply_single_wheel_duty(role, duty):
-    apply_motor_duty(duty if role == "fl" else 0, motor_fl)
-    apply_motor_duty(duty if role == "fr" else 0, motor_fr)
-    apply_motor_duty(duty if role == "b" else 0, motor_b)
-
-# 轮向分析辅助
-def analyze_wheel_dir(role, e_fl, e_fr, e_b):
-    focus = get_role_encoder_value(role, e_fl, e_fr, e_b)
-    other_1 = get_role_encoder_value("fl" if role != "fl" else "fr", e_fl, e_fr, e_b)
-    other_2 = get_role_encoder_value("b" if role != "b" else "fr", e_fl, e_fr, e_b)
-    other_peak = max(abs(other_1), abs(other_2))
-
-    if abs(focus) <= 1 and other_peak > 1:
-        return "目标编码器无响应，请检查引脚映射"
-    if focus < -1:
-        return "正 PWM 下出现负编码器计数，请反转该编码器"
-    if focus > 1 and other_peak <= abs(focus):
-        return "方向匹配正确"
-    if focus > 1:
-        return "方向正确，但其他编码器也有变化"
-    return "编码器响应过小，请抬起轮子或增大 PWM"
-
 # 检查遥控器 7 通道是否触发退出
 def check_upper_exit():
     wireless.data_analysis()
@@ -1126,13 +954,6 @@ def check_upper_exit():
         log("CH7 变化：基准=%.1f 当前=%.1f" % (ch7_init_value, ch7_current))
         return True
     return False
-
-# 检查硬件退出按键（带消抖）
-def check_exit_key():
-    if key_exit.value() == 0:
-        utime.sleep_ms(10)
-        if key_exit.value() == 0:
-            raise KeyboardInterrupt
 
 # ---------------------- CH7 exit calibration ----------------------
 log("=== CH7 通道基准校准开始 ===")
@@ -1148,24 +969,15 @@ log("CH7 校准完成：%.1f" % ch7_init_value)
 log("CH7 退出阈值：±%.1f" % CH7_TOLERANCE)
 
 # ====================== 初始化 LED 显示 ======================
-update_led_display()
 update_nav_led_display()
-log("[初始化] 程序启动，默认模式=%s" % BODY_TEST_MODE)
-log("[说明] C14=切换模式 | C9=发车 | C8=退出")
+log("[初始化] 程序启动，视觉闭环待发车")
+log("[说明] C9=发车 | C8=退出")
 
 # 陀螺仪偏移设置
-gyro_offset_z = GYRO_OFFSET_Z
-if RUN_MODE != "wheel_dir_cal":
-    if ENABLE_IMU and AUTO_GYRO_OFFSET_CAL:
-        gyro_offset_z = imu_runtime.calibrate_offset(
-            samples=GYRO_CALIB_SAMPLES,
-            delay_ms=GYRO_CALIB_DELAY_MS,
-            logger=log,
-        )
-    elif ENABLE_IMU:
-        log("IMU 偏移预设：%.2f" % gyro_offset_z)
-    else:
-        log("IMU 未启用，仅运行速度环")
+if ENABLE_IMU:
+    log("IMU 偏移预设：%.2f" % GYRO_OFFSET_Z)
+else:
+    log("IMU 未启用，仅运行速度环")
 
 # ---------------------- Ticker ----------------------
 pit_flag = False
@@ -1506,45 +1318,18 @@ def calc_speed_closed_loop():
         "push_yaw_target": push_yaw_target,
     }
 
-# 轮向校准模式
-def run_wheel_dir_cal():
-    duty = clamp_duty(int(CAL_PWM) * (1 if CAL_SIGN >= 0 else -1))
-    apply_single_wheel_duty(CAL_WHEEL, duty)
-    e_fl = enc_fl.get()
-    e_fr = enc_fr.get()
-    e_b = enc_b.get()
-    return {
-        "wheel": CAL_WHEEL,
-        "duty": duty,
-        "enc_fl": e_fl,
-        "enc_fr": e_fr,
-        "enc_b": e_b,
-        "focus": get_role_encoder_value(CAL_WHEEL, e_fl, e_fr, e_b),
-        "note": analyze_wheel_dir(CAL_WHEEL, e_fl, e_fr, e_b),
-    }
-
-if RUN_MODE == "wheel_dir_cal":
-    log("=== 轮向校准开始 ===")
-    log(
-        "tick=%dms mode=%s wheel=%s duty=%d sign=%+d"
-        % (TICK_PERIOD_MS, RUN_MODE, CAL_WHEEL, CAL_PWM, CAL_SIGN)
+log("=== 速度闭环启动 ===")
+log(
+    "tick=%dms speed_loop=on gyro_loop=%s yaw_loop=on cam_uart=%d@%d"
+    % (
+        TICK_PERIOD_MS,
+        "on" if ENABLE_GYRO_LOOP else "off",
+        cfg.CAM_UART_ID,
+        cfg.CAM_UART_BAUD,
     )
-    log(
-        "规则：正 PWM 应让对应轮子编码器正向计数，否则需要反转编码器配置"
-    )
-else:
-    log("=== 速度闭环启动 ===")
-    log(
-        "tick=%dms speed_loop=on gyro_loop=%s yaw_loop=on cam_uart=%d@%d"
-        % (
-            TICK_PERIOD_MS,
-            "on" if ENABLE_GYRO_LOOP else "off",
-            cfg.CAM_UART_ID,
-            cfg.CAM_UART_BAUD,
-        )
-    )
-    if FORCE_MOTOR_OFF:
-        log("[调试] FORCE_MOTOR_OFF=1，电机输出已强制关闭，可手动转动车身观察 yaw")
+)
+if FORCE_MOTOR_OFF:
+    log("[调试] FORCE_MOTOR_OFF=1，电机输出已强制关闭，可手动转动车身观察 yaw")
 log(
     "电机映射：fl=%s/%s inv=%s, fr=%s/%s inv=%s, b=%s/%s inv=%s"
     % (cfg.MOTOR_FL_PH, cfg.MOTOR_FL_PWM, cfg.MOTOR_FL_INVERT,
@@ -1560,7 +1345,7 @@ log(
 if ENABLE_IMU:
     log(
         "imu: official_demo_style yaw_axis=z offset_z=%.2f scale=%.8f deadband=%.2f"
-        % (gyro_offset_z, GYRO_SCALE, GYRO_DEADBAND_DPS)
+        % (GYRO_OFFSET_Z, GYRO_SCALE, GYRO_DEADBAND_DPS)
     )
     log(
         "gyro loop cfg: sign=%.1f kp=%.3f ki=%.3f limit=%.1f"
@@ -1575,7 +1360,6 @@ try:
 
         # ====================== 按键检查（主循环最前面） ======================
         check_c8_exit()
-        check_c14_switch()
         check_c9_start()
         if AUTO_START_ON_BOOT and (not auto_start_done) and (not car_started):
             if utime.ticks_diff(now, start_time) >= AUTO_START_DELAY_MS:
@@ -1607,37 +1391,11 @@ try:
             nav_set_state(NAV_STATE_SEARCH_TURN, "vision_launch_search_turn", force=True)
             log("[瑙嗚鍙戣溅] 棣栨鏀跺埌鏈夋晥鐩爣锛宑ar_started=1")
 
-        # 视觉导航：轮询相机 UART，推进状态机
-        if RUN_MODE == "art_navigate" and car_started and hw_nav is not None:
-            hw_nav.poll_cam_uart(ctrl.ctx.art_detect)
-            ctrl.step()
-
         if pit_flag:
             pit_flag = False
-            if RUN_MODE == "wheel_dir_cal":
-                snap = run_wheel_dir_cal()
-            elif RUN_MODE == "art_navigate":
-                snap = None
-                if car_started and ctrl is not None:
-                    ctrl.pit_5ms_step()
-            else:
-                snap = calc_speed_closed_loop()
+            snap = calc_speed_closed_loop()
 
-            if pit_count % DEBUG_DIV == 0 and RUN_MODE == "wheel_dir_cal":
-                log(
-                    "[轮向校准] t=%.2fs wheel=%s duty=%d enc=(%d,%d,%d) focus=%d note=%s"
-                    % (
-                        elapsed_s,
-                        snap["wheel"],
-                        int(snap["duty"]),
-                        int(snap["enc_fl"]),
-                        int(snap["enc_fr"]),
-                        int(snap["enc_b"]),
-                        int(snap["focus"]),
-                        snap["note"],
-                    )
-                )
-            elif pit_count % DEBUG_DIV == 0 and snap is not None and cam_rx_started:
+            if pit_count % DEBUG_DIV == 0 and snap is not None and cam_rx_started:
                 if ENABLE_IMU:
                     if TUNE_LOG_VERBOSE:
                         log(
@@ -1699,10 +1457,9 @@ try:
                         )
                 else:
                     log(
-                        "[速度环] t=%.2fs mode=%s err_xy=(%d,%d) cmd_xy=(%.1f,%.1f) enc=(%d,%d,%d) tar=(%.1f,%.1f,%.1f) out=(%.1f,%.1f,%.1f) pwm=(%d,%d,%d)"
+                        "[速度环] t=%.2fs err_xy=(%d,%d) cmd_xy=(%.1f,%.1f) enc=(%d,%d,%d) tar=(%.1f,%.1f,%.1f) out=(%.1f,%.1f,%.1f) pwm=(%d,%d,%d)"
                         % (
                             elapsed_s,
-                            BODY_TEST_MODE,
                             int(snap["cam_x"]),
                             int(snap["cam_y"]),
                             snap["body_vx"],
@@ -1721,17 +1478,6 @@ try:
                             int(snap["pwm_b"]),
                         )
                     )
-                if ENABLE_OSCILLOSCOPE:
-                    wireless.send_oscilloscope(
-                        int(snap["enc_fl"]),
-                        int(snap["enc_fr"]),
-                        int(snap["enc_b"]),
-                        int(snap["tar_fl"]),
-                        int(snap["tar_fr"]),
-                        int(snap["tar_b"]),
-                        int(snap["out_fl"]),
-                        int(snap["out_fr"]),
-                    )
                 if ENABLE_IMU:
                     log_push_debug(
                         "speed",
@@ -1744,12 +1490,7 @@ try:
         if utime.ticks_diff(now, last_status_ms) >= 1000:
             led.toggle()
             last_status_ms = now
-            if RUN_MODE == "wheel_dir_cal":
-                log(
-                    "[状态] t=%.1fs ch7=%.1f wheel=%s duty=%d"
-                    % (elapsed_s, ch7_init_value, CAL_WHEEL, int(CAL_PWM) * (1 if CAL_SIGN >= 0 else -1))
-                )
-            elif cam_rx_started:
+            if cam_rx_started:
                 if ENABLE_IMU:
                     if TUNE_LOG_VERBOSE:
                         log(
@@ -1794,12 +1535,11 @@ try:
                         )
                 else:
                     log(
-                        "[状态] t=%.1fs started=%d ch7=%.1f mode=%s err_xy=(%d,%d) cmd_xy=(%.1f, %.1f, %.1f)"
+                        "[状态] t=%.1fs started=%d ch7=%.1f err_xy=(%d,%d) cmd_xy=(%.1f, %.1f, %.1f)"
                         % (
                             elapsed_s,
                             1 if car_started else 0,
                             ch7_init_value,
-                            BODY_TEST_MODE,
                             cam_error_x,
                             cam_error_y,
                             cam_target_vx,
@@ -1817,11 +1557,6 @@ try:
 
         if loop_count % EXIT_CHECK_DIV == 0 and check_upper_exit():
             log("=== CH7 触发退出，程序停止 ===")
-            break
-
-        # 仅在发车后检查超时
-        if False and car_started and elapsed_s >= TIMEOUT_SECOND:
-            log("=== 运行超时，程序停止 ===")
             break
 
         if loop_count % GC_DIV == 0:

@@ -112,8 +112,11 @@ Nav_Classify_Timeout_Ms = 1500
 Nav_Push_Orient_Ok_Yaw = 12.0
 Nav_Push_Orient_Max_Ms = 15000
 Nav_Push_Orbit_Slow_Yaw = 40.0
-Nav_Push_Orbit_Fast_Vz = 4.5
-Nav_Push_Orbit_Slow_Vz = 2.5
+Nav_Push_Orbit_Fast_Vy = 4.5
+Nav_Push_Orbit_Slow_Vy = 2.5
+Nav_Push_Orbit_Fast_Rate = 90.0
+Nav_Push_Orbit_Slow_Rate = 35.0
+Nav_Push_Orbit_Gyro_Limit = 16.0
 Nav_Push_Orbit_Radius_Base = 1.6
 Nav_Push_Orbit_Radius_Gain = 0.02
 Nav_Push_Orbit_Stop_Gyro_Th = 4.0
@@ -283,10 +286,14 @@ def get_push_orbit_motion(yaw_err_abs):
     if yaw_err_abs <= Nav_Push_Orient_Ok_Yaw:
         return 0.0, 0.0
     if yaw_err_abs > Nav_Push_Orbit_Slow_Yaw:
-        turn_mag = Nav_Push_Orbit_Fast_Vz
+        vy_base = Nav_Push_Orbit_Fast_Vy
+        turn_rate_mag = Nav_Push_Orbit_Fast_Rate
     else:
-        turn_mag = Nav_Push_Orbit_Slow_Vz
-    return turn_mag * push_orbit_radius_ratio, turn_mag
+        span = Nav_Push_Orbit_Slow_Yaw - Nav_Push_Orient_Ok_Yaw
+        ratio = (yaw_err_abs - Nav_Push_Orient_Ok_Yaw) / span
+        vy_base = Nav_Push_Orbit_Slow_Vy + (Nav_Push_Orbit_Fast_Vy - Nav_Push_Orbit_Slow_Vy) * ratio
+        turn_rate_mag = Nav_Push_Orbit_Slow_Rate + (Nav_Push_Orbit_Fast_Rate - Nav_Push_Orbit_Slow_Rate) * ratio
+    return vy_base * push_orbit_radius_ratio, turn_rate_mag
 
 
 def update_push_orbit_radius(err_y):
@@ -1248,6 +1255,8 @@ def calc_speed_closed_loop():
     if ENABLE_GYRO_LOOP and gyro_pid is not None:
         if nav_state == NAV_STATE_SEARCH_TURN:
             gyro_pid.gyro_output_limit = Nav_Search_Turn_Gyro_Limit
+        elif nav_state == NAV_STATE_PUSH_ORIENT:
+            gyro_pid.gyro_output_limit = Nav_Push_Orbit_Gyro_Limit
         else:
             gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
         vz_cmd = gyro_ctrl(gyro_pid, turn_rate_cmd - gyro_z)

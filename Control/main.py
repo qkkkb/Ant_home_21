@@ -110,14 +110,14 @@ Nav_Forward_Deadband = 4
 Nav_Lateral_Deadband = 6
 Nav_Classify_Timeout_Ms = 1500
 Nav_Push_Orient_Ok_Yaw = 12.0
-Nav_Push_Orient_Ok_Ms = 80
-Nav_Push_Orient_Max_Ms = 8000
+Nav_Push_Orient_Max_Ms = 15000
 Nav_Push_Orbit_Slow_Yaw = 40.0
 Nav_Push_Orbit_Fast_Vz = 4.5
 Nav_Push_Orbit_Slow_Vz = 2.5
 Nav_Push_Orbit_Radius_Base = 1.6
 Nav_Push_Orbit_Radius_Gain = 0.02
 Nav_Push_Orbit_Stop_Gyro_Th = 4.0
+Nav_Push_Orbit_Brake_Max_Ms = 300
 Nav_Push_Orbit_Brake_Vz = 2.0
 Nav_Push_Orbit_Vy_Sign_Right = -1
 Nav_Push_Orbit_Vy_Sign_Up = 0
@@ -163,7 +163,6 @@ nav_search_turn_ok_since_ms = 0
 nav_coarse_ok_since_ms = 0
 nav_fine_ok_since_ms = 0
 nav_transition_ms = 0
-nav_push_orient_ok_since_ms = 0
 nav_push_prepare_ok_since_ms = 0
 nav_push_turn_ok_since_ms = 0
 nav_ready_for_push = False
@@ -187,6 +186,7 @@ push_orbit_reached = False
 push_orbit_progress_deg = 0.0
 push_orbit_target_delta = 0.0
 push_orbit_last_ms = 0
+push_orbit_brake_since_ms = 0
 push_orbit_radius_ratio = Nav_Push_Orbit_Radius_Base
 line_crossed = False
 
@@ -312,7 +312,7 @@ def log_push_debug(prefix, yaw_deg, low_speed):
         return
 
     msg = (
-        "[PUSH_DBG] %s state=%s dir=%s seen=%d age=%dms line=%d field=(up=%.1f right=%.1f left=%.1f) yaw=%.2f face=%.2f yaw_tar=%.2f orbit_dir=%d vy_sign=%d ret_yaw=%.2f yaw_err=%.2f low=%d cmd_xy=(%.1f,%.1f) turn=%.2f vz=%.2f"
+        "[PUSH_DBG] %s state=%s dir=%s seen=%d age=%dms line=%d field=(up=%.1f right=%.1f left=%.1f) yaw=%.2f face=%.2f yaw_tar=%.2f orbit_dir=%d vy_sign=%d ret_yaw=%.2f yaw_err=%.2f orb=%.1f/%.1f low=%d cmd_xy=(%.1f,%.1f) turn=%.2f vz=%.2f"
         % (
             prefix,
             nav_state,
@@ -330,6 +330,8 @@ def log_push_debug(prefix, yaw_deg, low_speed):
             push_orbit_vy_sign,
             push_return_yaw_target,
             push_yaw_error_deg(yaw_deg),
+            push_orbit_progress_deg,
+            push_orbit_target_delta,
             1 if low_speed else 0,
             cam_target_vx,
             cam_target_vy,
@@ -391,12 +393,13 @@ def send_art_mode_command(new_state):
 def nav_set_state(new_state, reason="", force=False):
     global nav_state, nav_detect_since_ms, nav_target_lost_since_ms, nav_search_turn_ok_since_ms
     global nav_coarse_ok_since_ms, nav_fine_ok_since_ms, nav_transition_ms
-    global nav_push_orient_ok_since_ms, nav_push_prepare_ok_since_ms, nav_push_turn_ok_since_ms
+    global nav_push_prepare_ok_since_ms, nav_push_turn_ok_since_ms
     global nav_ready_for_push, cam_target_vx, cam_target_vy
     global yaw_ref_deg, cam_rx_started, push_dir_code, push_dir_name
     global line_crossed, push_return_yaw_target, search_turn_yaw_target
     global push_orbit_dir, push_orbit_vy_sign, push_orbit_done
     global push_orbit_reached, push_orbit_progress_deg, push_orbit_last_ms
+    global push_orbit_brake_since_ms
 
     if nav_state == new_state and (not force):
         return
@@ -408,7 +411,6 @@ def nav_set_state(new_state, reason="", force=False):
     nav_search_turn_ok_since_ms = 0
     nav_coarse_ok_since_ms = 0
     nav_fine_ok_since_ms = 0
-    nav_push_orient_ok_since_ms = 0
     nav_push_prepare_ok_since_ms = 0
     nav_push_turn_ok_since_ms = 0
     nav_transition_ms = now
@@ -430,6 +432,7 @@ def nav_set_state(new_state, reason="", force=False):
         push_orbit_reached = False
         push_orbit_progress_deg = 0.0
         push_orbit_last_ms = 0
+        push_orbit_brake_since_ms = 0
     elif new_state == NAV_STATE_PUSH_BACK:
         push_return_yaw_target = normalize_yaw_deg(push_yaw_target + 180.0)
 
@@ -478,13 +481,14 @@ def apply_nav_targets(vx, vy, vx_limit, vy_limit):
 
 def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
     global nav_detect_since_ms, nav_target_lost_since_ms, nav_search_turn_ok_since_ms
-    global nav_coarse_ok_since_ms, nav_fine_ok_since_ms, nav_push_orient_ok_since_ms
+    global nav_coarse_ok_since_ms, nav_fine_ok_since_ms
     global nav_push_prepare_ok_since_ms, nav_push_turn_ok_since_ms
     global nav_ready_for_push
     global cam_target_vx, cam_target_vy, yaw_ref_deg, push_yaw_target
     global line_crossed, push_return_yaw_target, push_face_obj_yaw
     global push_orbit_dir, push_orbit_vy_sign, push_orbit_blocked, push_orbit_done
     global push_orbit_reached, push_orbit_progress_deg, push_orbit_target_delta, push_orbit_last_ms
+    global push_orbit_brake_since_ms
 
     now = utime.ticks_ms()
     track_target_states = (
@@ -629,6 +633,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             push_orbit_progress_deg = 0.0
             push_orbit_reached = False
             push_orbit_last_ms = now
+            push_orbit_brake_since_ms = 0
             if push_orbit_dir == 0:
                 push_orbit_done = True
                 nav_set_state(
@@ -655,33 +660,31 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         nav_ready_for_push = False
         yaw_ref_deg = push_yaw_target
         yaw_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg)) if ENABLE_IMU else 0.0
+        orbit_stop_delta = max(0.0, push_orbit_target_delta - Nav_Push_Orient_Ok_Yaw)
         if push_orbit_last_ms == 0:
             push_orbit_last_ms = now
         else:
             push_orbit_progress_deg += abs(gyro_z) * utime.ticks_diff(now, push_orbit_last_ms) * 0.001
             push_orbit_last_ms = now
-        if push_orbit_progress_deg >= max(0.0, push_orbit_target_delta - Nav_Push_Orient_Ok_Yaw):
+        if push_orbit_progress_deg >= orbit_stop_delta or yaw_err_abs <= Nav_Push_Orient_Ok_Yaw:
             push_orbit_reached = True
-        orbit_vy_mag, _orbit_turn_mag = get_push_orbit_motion(yaw_err_abs)
+            if push_orbit_brake_since_ms == 0:
+                push_orbit_brake_since_ms = now
+        orbit_vy_mag, _orbit_turn_mag = get_push_orbit_motion(max(0.0, push_orbit_target_delta - push_orbit_progress_deg))
         cam_target_vx = 0.0
         if push_orbit_reached:
             cam_target_vy = 0.0
         else:
             cam_target_vy = push_orbit_vy_sign * orbit_vy_mag
-        if (
-            (not ENABLE_IMU)
-            or (
-                (yaw_err_abs <= Nav_Push_Orient_Ok_Yaw or push_orbit_reached)
-                and abs(gyro_z) <= Nav_Push_Orbit_Stop_Gyro_Th
-            )
-        ):
-            if nav_push_orient_ok_since_ms == 0:
-                nav_push_orient_ok_since_ms = now
-            elif utime.ticks_diff(now, nav_push_orient_ok_since_ms) >= Nav_Push_Orient_Ok_Ms:
+        if (not ENABLE_IMU) or push_orbit_reached:
+            brake_elapsed = 0
+            if push_orbit_brake_since_ms > 0:
+                brake_elapsed = utime.ticks_diff(now, push_orbit_brake_since_ms)
+            if (not ENABLE_IMU) or abs(gyro_z) <= Nav_Push_Orbit_Stop_Gyro_Th or brake_elapsed >= Nav_Push_Orbit_Brake_Max_Ms:
                 push_orbit_done = True
                 nav_set_state(NAV_STATE_FINE, "orbit_done_refine")
         else:
-            nav_push_orient_ok_since_ms = 0
+            push_orbit_brake_since_ms = 0
         if utime.ticks_diff(now, nav_transition_ms) >= Nav_Push_Orient_Max_Ms:
             cam_target_vx = 0.0
             cam_target_vy = 0.0
@@ -1204,12 +1207,12 @@ def calc_speed_closed_loop():
 
     orbit_open_loop = False
     if nav_state == NAV_STATE_PUSH_ORIENT:
-        yaw_err_abs = abs(yaw_err_deg) if ENABLE_IMU else 0.0
+        orbit_remaining = max(0.0, push_orbit_target_delta - push_orbit_progress_deg)
         if push_orbit_reached:
             orbit_vy_mag = 0.0
             orbit_turn_mag = 0.0
         else:
-            orbit_vy_mag, orbit_turn_mag = get_push_orbit_motion(yaw_err_abs)
+            orbit_vy_mag, orbit_turn_mag = get_push_orbit_motion(orbit_remaining)
         cam_target_vx = 0.0
         cam_target_vy = push_orbit_vy_sign * orbit_vy_mag
         if orbit_turn_mag > 0.0 and push_orbit_dir != 0:

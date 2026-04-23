@@ -117,8 +117,7 @@ Nav_Push_Orbit_Slow_Vz = 2.5
 Nav_Push_Orbit_Radius_Base = 1.6
 Nav_Push_Orbit_Radius_Gain = 0.02
 Nav_Push_Orbit_Stop_Gyro_Th = 4.0
-Nav_Push_Orbit_Brake_Max_Ms = 300
-Nav_Push_Orbit_Brake_Vz = 2.0
+Nav_Push_Orbit_Brake_Max_Ms = 1000
 Nav_Push_Orbit_Vy_Sign_Right = -1
 Nav_Push_Orbit_Vy_Sign_Up = 0
 Nav_Push_Orbit_Vy_Sign_Left = 1
@@ -663,12 +662,14 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         orbit_stop_delta = max(0.0, push_orbit_target_delta - Nav_Push_Orient_Ok_Yaw)
         if push_orbit_last_ms == 0:
             push_orbit_last_ms = now
-        else:
+        elif not push_orbit_reached:
             orbit_step = push_orbit_dir * gyro_z * utime.ticks_diff(now, push_orbit_last_ms) * 0.001
             if orbit_step > 0.0:
                 push_orbit_progress_deg += orbit_step
             push_orbit_last_ms = now
         if push_orbit_progress_deg >= orbit_stop_delta or yaw_err_abs <= Nav_Push_Orient_Ok_Yaw:
+            if push_orbit_progress_deg > orbit_stop_delta:
+                push_orbit_progress_deg = orbit_stop_delta
             push_orbit_reached = True
             if push_orbit_brake_since_ms == 0:
                 push_orbit_brake_since_ms = now
@@ -767,8 +768,11 @@ def poll_art_uart():
     global cam_has_target, cam_last_rx_ms, cam_rx_started, cam_valid_target_since_ms
     global push_dir_code, push_dir_name, push_yaw_target, line_crossed
 
-    if cam_uart.any():
-        data = cam_uart.read()
+    pending = cam_uart.any()
+    if pending:
+        if pending > 32:
+            pending = 32
+        data = cam_uart.read(pending)
         if data:
             cam_rx_buf += data
             while len(cam_rx_buf) >= 3:
@@ -1208,6 +1212,7 @@ def calc_speed_closed_loop():
         }
 
     orbit_open_loop = False
+    orbit_gyro_brake = False
     if nav_state == NAV_STATE_PUSH_ORIENT:
         orbit_remaining = max(0.0, push_orbit_target_delta - push_orbit_progress_deg)
         if push_orbit_reached:
@@ -1220,18 +1225,18 @@ def calc_speed_closed_loop():
         if orbit_turn_mag > 0.0 and push_orbit_dir != 0:
             turn_rate_cmd = push_orbit_dir * orbit_turn_mag
             vz_cmd = push_orbit_dir * orbit_turn_mag
+            orbit_open_loop = True
         else:
             turn_rate_cmd = 0.0
-            if abs(gyro_z) > Nav_Push_Orbit_Stop_Gyro_Th:
-                if gyro_z > 0.0:
-                    vz_cmd = -Nav_Push_Orbit_Brake_Vz
-                else:
-                    vz_cmd = Nav_Push_Orbit_Brake_Vz
-            else:
-                vz_cmd = 0.0
-        orbit_open_loop = True
+            vz_cmd = 0.0
+            orbit_gyro_brake = push_orbit_reached
 
-    if ENABLE_IMU and (not orbit_open_loop):
+    if orbit_gyro_brake:
+        turn_pid.output = 0.0
+        turn_pid.err = 0.0
+        turn_pid.err_last = 0.0
+        turn_rate_cmd = 0.0
+    elif ENABLE_IMU and (not orbit_open_loop):
         turn_rate_cmd = turn_ctrl(turn_pid, yaw_err_deg, 0)
         if nav_state == NAV_STATE_SEARCH_TURN:
             if turn_rate_cmd > Nav_Search_Turn_Max_Rate:

@@ -664,7 +664,9 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         if push_orbit_last_ms == 0:
             push_orbit_last_ms = now
         else:
-            push_orbit_progress_deg += abs(gyro_z) * utime.ticks_diff(now, push_orbit_last_ms) * 0.001
+            orbit_step = push_orbit_dir * gyro_z * utime.ticks_diff(now, push_orbit_last_ms) * 0.001
+            if orbit_step > 0.0:
+                push_orbit_progress_deg += orbit_step
             push_orbit_last_ms = now
         if push_orbit_progress_deg >= orbit_stop_delta or yaw_err_abs <= Nav_Push_Orient_Ok_Yaw:
             push_orbit_reached = True

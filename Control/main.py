@@ -144,6 +144,7 @@ Nav_Push_Turn_Slow_Rate = 35.0
 Nav_Push_Turn_Gyro_Limit = 16.0
 Nav_Push_Turn_Ok_Yaw = 6.0
 Nav_Push_Turn_Ok_Ms = 150
+Nav_Push_Left_Yaw_Bias = 4.0
 
 # ====================== 全局状态变量 ======================
 # 小车启动标志：False=上电静止，True=已启动
@@ -234,7 +235,7 @@ def yaw_from_field_dir(dir_code):
     if dir_code == Push_Dir_Up:
         return field_up_yaw
     if dir_code == Push_Dir_Left:
-        return field_left_yaw
+        return normalize_yaw_deg(field_left_yaw + Nav_Push_Left_Yaw_Bias)
     return field_up_yaw
 
 

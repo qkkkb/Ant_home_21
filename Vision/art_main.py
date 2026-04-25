@@ -83,6 +83,8 @@ LINE_SEG_MIN_ASPECT = 2.0
 LINE_SEG_MIN_COUNT = 2
 LINE_SEG_MIN_TOTAL_WIDTH = int(WORK_W * 0.35)
 LINE_SEG_MIN_SPAN = LINE_MIN_WIDTH
+LINE_SEG_MAX_CENTER_Y_SPAN = int(WORK_H * 0.10)
+LINE_CONFIRM_FRAMES = 2
 
 
 # ================= Inverse Perspective =================
@@ -327,6 +329,8 @@ def detect_yellow_line(img):
     seg_max_x = 0
     seg_min_y = img.height()
     seg_max_y = 0
+    seg_min_cy = img.height()
+    seg_max_cy = 0
     for blob in img.find_blobs(
         YELLOW_LINE_THRESHOLDS,
         roi = (0, LINE_ROI_Y, img.width(), roi_h),
@@ -355,6 +359,7 @@ def detect_yellow_line(img):
             x0 = blob.x()
             x1 = x0 + w
             y0 = blob.y()
+            cy = y0 + h // 2
             if x0 < seg_min_x:
                 seg_min_x = x0
             if x1 > seg_max_x:
@@ -363,6 +368,10 @@ def detect_yellow_line(img):
                 seg_min_y = y0
             if bottom > seg_max_y:
                 seg_max_y = bottom
+            if cy < seg_min_cy:
+                seg_min_cy = cy
+            if cy > seg_max_cy:
+                seg_max_cy = cy
 
     if best_blob is not None:
         return True, best_blob.rect()
@@ -374,6 +383,7 @@ def detect_yellow_line(img):
             seg_total_w >= LINE_SEG_MIN_TOTAL_WIDTH
             or seg_span >= LINE_SEG_MIN_SPAN
         )
+        and (seg_max_cy - seg_min_cy) <= LINE_SEG_MAX_CENTER_Y_SPAN
     ):
         return True, (seg_min_x, seg_min_y, seg_span, seg_max_y - seg_min_y)
 
@@ -444,11 +454,13 @@ coarse_frame_count = 0
 uart_rx_buf = bytearray()
 frame_count = 0
 classify_sent = False
+line_confirm_count = 0
 
 
 def set_detect_mode(new_mode, event, clear_state = True):
     global detect_mode, frozen_error, frozen_overlay, ema_bev_x, ema_bev_y
     global coarse_frame_in_interval, freeze_count, coarse_frame_count, classify_sent
+    global line_confirm_count
 
     detect_mode = new_mode
     if clear_state:
@@ -461,6 +473,7 @@ def set_detect_mode(new_mode, event, clear_state = True):
         freeze_count = 0
         coarse_frame_count = 0
         classify_sent = False
+        line_confirm_count = 0
     print_state_log("UART", event, coarse_frame_count, freeze_count)
 
 
@@ -523,6 +536,11 @@ while True:
     elif detect_mode == "LINE":
         line_crossed, line_rect = detect_yellow_line(img)
         if line_crossed:
+            if line_confirm_count < LINE_CONFIRM_FRAMES:
+                line_confirm_count += 1
+        else:
+            line_confirm_count = 0
+        if line_confirm_count >= LINE_CONFIRM_FRAMES:
             send_line_state(LINE_STATE_CROSSED)
             print_state_log("LINE", "CROSSED", coarse_frame_count, freeze_count)
         else:

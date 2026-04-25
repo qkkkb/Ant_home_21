@@ -386,6 +386,18 @@ def update_cam_target(err_x, err_y):
     cam_last_rx_ms = utime.ticks_ms()
 
 
+def clear_cam_target_state():
+    global cam_error_x, cam_error_y, cam_last_rx_ms, cam_rx_buf
+    global cam_has_target, cam_valid_target_since_ms
+
+    cam_error_x = 0
+    cam_error_y = 0
+    cam_has_target = False
+    cam_valid_target_since_ms = 0
+    cam_last_rx_ms = 0
+    cam_rx_buf = bytearray()
+
+
 def cam_packet_fresh():
     return utime.ticks_diff(utime.ticks_ms(), cam_last_rx_ms) <= Cam_Packet_Timeout_Ms
 
@@ -443,6 +455,17 @@ def nav_set_state(new_state, reason="", force=False):
     nav_ready_for_push = False
     cam_target_vx = 0.0
     cam_target_vy = 0.0
+
+    if new_state in (
+        NAV_STATE_SEARCH,
+        NAV_STATE_SEARCH_TURN,
+        NAV_STATE_COARSE,
+        NAV_STATE_FINE,
+        NAV_STATE_PUSH_CLASSIFY,
+        NAV_STATE_PUSH_PREPARE,
+        NAV_STATE_PUSH,
+    ):
+        clear_cam_target_state()
 
     if new_state in (NAV_STATE_SEARCH, NAV_STATE_SEARCH_TURN, NAV_STATE_PUSH, NAV_STATE_PUSH_CLASSIFY):
         line_crossed = False
@@ -625,6 +648,11 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
 
     if nav_state == NAV_STATE_FINE:
         nav_ready_for_push = False
+        if not seen:
+            cam_target_vx = 0.0
+            cam_target_vy = 0.0
+            nav_fine_ok_since_ms = 0
+            return
         apply_nav_targets(
             cam_error_y * Nav_Fine_Forward_Gain,
             -cam_error_x * Nav_Fine_Lateral_Gain,
@@ -642,11 +670,29 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 cam_target_vx = 0.0
                 cam_target_vy = 0.0
                 if push_orbit_done:
-                    nav_set_state(NAV_STATE_PUSH_PREPARE, "orbit_refine_locked")
+                    nav_set_state(
+                        NAV_STATE_PUSH_PREPARE,
+                        "orbit_refine_locked seen=%d age=%d err=(%d,%d)"
+                        % (
+                            1 if seen else 0,
+                            utime.ticks_diff(now, cam_last_rx_ms),
+                            cam_error_x,
+                            cam_error_y,
+                        ),
+                    )
                 else:
                     update_push_orbit_radius(cam_error_y)
                     push_face_obj_yaw = yaw_deg
-                    nav_set_state(NAV_STATE_PUSH_CLASSIFY, "fine_locked")
+                    nav_set_state(
+                        NAV_STATE_PUSH_CLASSIFY,
+                        "fine_locked seen=%d age=%d err=(%d,%d)"
+                        % (
+                            1 if seen else 0,
+                            utime.ticks_diff(now, cam_last_rx_ms),
+                            cam_error_x,
+                            cam_error_y,
+                        ),
+                    )
         else:
             nav_fine_ok_since_ms = 0
         return
@@ -731,6 +777,11 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         yaw_ref_deg = push_yaw_target
         yaw_prepare_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg)) if ENABLE_IMU else 0.0
         if ENABLE_IMU and yaw_prepare_err_abs > Nav_Push_Prepare_Reorient_Yaw:
+            cam_target_vx = 0.0
+            cam_target_vy = 0.0
+            nav_push_prepare_ok_since_ms = 0
+            return
+        if not seen:
             cam_target_vx = 0.0
             cam_target_vy = 0.0
             nav_push_prepare_ok_since_ms = 0

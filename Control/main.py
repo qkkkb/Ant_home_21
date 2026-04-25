@@ -134,6 +134,7 @@ Nav_Push_Prepare_Ok_Y_Max = 10
 Nav_Push_Prepare_Ok_Yaw = 6.0
 Nav_Push_Prepare_Ok_Ms = 80
 Nav_Push_Execute_Forward_Speed = 2.2
+Nav_Push_Execute_Vy_Bias = -0.35
 Nav_Push_Line_Lost_Ms = 150
 Nav_Push_Line_Extra_Ms = 500
 Nav_Push_Back_Speed = 1.2
@@ -144,7 +145,6 @@ Nav_Push_Turn_Slow_Rate = 35.0
 Nav_Push_Turn_Gyro_Limit = 16.0
 Nav_Push_Turn_Ok_Yaw = 6.0
 Nav_Push_Turn_Ok_Ms = 150
-Nav_Push_Left_Yaw_Bias = 4.0
 
 # ====================== 全局状态变量 ======================
 # 小车启动标志：False=上电静止，True=已启动
@@ -235,7 +235,7 @@ def yaw_from_field_dir(dir_code):
     if dir_code == Push_Dir_Up:
         return field_up_yaw
     if dir_code == Push_Dir_Left:
-        return normalize_yaw_deg(field_left_yaw + Nav_Push_Left_Yaw_Bias)
+        return field_left_yaw
     return field_up_yaw
 
 
@@ -761,7 +761,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
     if nav_state == NAV_STATE_PUSH:
         nav_ready_for_push = True
         cam_target_vx = Nav_Push_Execute_Forward_Speed
-        cam_target_vy = 0.0
+        cam_target_vy = Nav_Push_Execute_Vy_Bias
         yaw_ref_deg = push_yaw_target
         if line_crossed:
             push_line_seen_once = True

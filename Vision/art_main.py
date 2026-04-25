@@ -78,6 +78,11 @@ LINE_MIN_AREA = 120
 LINE_MIN_WIDTH = int(WORK_W * 0.55)
 LINE_MIN_BOTTOM = int(WORK_H * 0.82)
 LINE_MIN_ASPECT = 2.5     # 黄线宽高比阈值：w/h >= 2.5 才认为是线；网球 w/h ≈ 1 被过滤
+LINE_SEG_MIN_WIDTH = int(WORK_W * 0.16)
+LINE_SEG_MIN_ASPECT = 2.0
+LINE_SEG_MIN_COUNT = 2
+LINE_SEG_MIN_TOTAL_WIDTH = int(WORK_W * 0.35)
+LINE_SEG_MIN_SPAN = LINE_MIN_WIDTH
 
 
 # ================= Inverse Perspective =================
@@ -316,6 +321,12 @@ def detect_yellow_line(img):
         return False, None
 
     best_blob = None
+    seg_count = 0
+    seg_total_w = 0
+    seg_min_x = img.width()
+    seg_max_x = 0
+    seg_min_y = img.height()
+    seg_max_y = 0
     for blob in img.find_blobs(
         YELLOW_LINE_THRESHOLDS,
         roi = (0, LINE_ROI_Y, img.width(), roi_h),
@@ -325,19 +336,48 @@ def detect_yellow_line(img):
     ):
         w = blob.w()
         h = blob.h()
+        bottom = blob.y() + h
         aspect = float(w) / max(h, 1)
         if (
             w >= LINE_MIN_WIDTH
-            and (blob.y() + h) >= LINE_MIN_BOTTOM
+            and bottom >= LINE_MIN_BOTTOM
             and aspect >= LINE_MIN_ASPECT
         ):
             if (best_blob is None) or (blob.pixels() > best_blob.pixels()):
                 best_blob = blob
+        elif (
+            w >= LINE_SEG_MIN_WIDTH
+            and bottom >= LINE_MIN_BOTTOM
+            and aspect >= LINE_SEG_MIN_ASPECT
+        ):
+            seg_count += 1
+            seg_total_w += w
+            x0 = blob.x()
+            x1 = x0 + w
+            y0 = blob.y()
+            if x0 < seg_min_x:
+                seg_min_x = x0
+            if x1 > seg_max_x:
+                seg_max_x = x1
+            if y0 < seg_min_y:
+                seg_min_y = y0
+            if bottom > seg_max_y:
+                seg_max_y = bottom
 
-    if best_blob is None:
-        return False, None
+    if best_blob is not None:
+        return True, best_blob.rect()
 
-    return True, best_blob.rect()
+    seg_span = seg_max_x - seg_min_x
+    if (
+        seg_count >= LINE_SEG_MIN_COUNT
+        and (
+            seg_total_w >= LINE_SEG_MIN_TOTAL_WIDTH
+            or seg_span >= LINE_SEG_MIN_SPAN
+        )
+    ):
+        return True, (seg_min_x, seg_min_y, seg_span, seg_max_y - seg_min_y)
+
+    return False, None
 
 
 def draw_target_overlay(img, x1, y1, x2, y2):

@@ -77,6 +77,7 @@ LINE_MIN_PIXELS = 120
 LINE_MIN_AREA = 120
 LINE_MIN_WIDTH = int(WORK_W * 0.55)
 LINE_MIN_BOTTOM = int(WORK_H * 0.82)
+LINE_MIN_ASPECT = 2.5     # 黄线宽高比阈值：w/h >= 2.5 才认为是线；网球 w/h ≈ 1 被过滤
 
 
 # ================= Inverse Perspective =================
@@ -322,17 +323,21 @@ def detect_yellow_line(img):
         area_threshold = LINE_MIN_AREA,
         merge = True,
     ):
-        if (best_blob is None) or (blob.pixels() > best_blob.pixels()):
-            best_blob = blob
+        w = blob.w()
+        h = blob.h()
+        aspect = float(w) / max(h, 1)
+        if (
+            w >= LINE_MIN_WIDTH
+            and (blob.y() + h) >= LINE_MIN_BOTTOM
+            and aspect >= LINE_MIN_ASPECT
+        ):
+            if (best_blob is None) or (blob.pixels() > best_blob.pixels()):
+                best_blob = blob
 
     if best_blob is None:
         return False, None
 
-    crossed = (
-        best_blob.w() >= LINE_MIN_WIDTH
-        and (best_blob.y() + best_blob.h()) >= LINE_MIN_BOTTOM
-    )
-    return crossed, best_blob.rect()
+    return True, best_blob.rect()
 
 
 def draw_target_overlay(img, x1, y1, x2, y2):

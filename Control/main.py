@@ -110,6 +110,7 @@ Nav_Forward_Deadband = 4
 Nav_Lateral_Deadband = 6
 Nav_Classify_Timeout_Ms = 1500
 Nav_Push_Orient_Ok_Yaw = 12.0
+Nav_Push_Orbit_Skip_Yaw = 15.0
 Nav_Push_Orient_Max_Ms = 15000
 Nav_Push_Orbit_Slow_Yaw = 40.0
 Nav_Push_Orbit_Fast_Vy = 4.5
@@ -705,7 +706,14 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             push_yaw_target = yaw_from_field_dir(push_dir_code)
             push_orbit_dir = orbit_turn_dir_from_dir(push_dir_code)
             push_orbit_vy_sign = orbit_vy_sign_from_dir(push_dir_code)
-            push_orbit_target_delta = abs(-wrapped_yaw_error(push_yaw_target, push_face_obj_yaw))
+            orbit_yaw_err = -wrapped_yaw_error(push_yaw_target, push_face_obj_yaw)
+            push_orbit_target_delta = abs(orbit_yaw_err)
+            if push_dir_code == Push_Dir_Up and push_orbit_target_delta > Nav_Push_Orbit_Skip_Yaw:
+                if orbit_yaw_err >= 0.0:
+                    push_orbit_dir = 1
+                else:
+                    push_orbit_dir = -1
+                push_orbit_vy_sign = -push_orbit_dir
             push_orbit_progress_deg = 0.0
             push_orbit_reached = False
             push_orbit_last_ms = now

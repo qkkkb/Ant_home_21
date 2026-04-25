@@ -75,8 +75,9 @@ YELLOW_LINE_THRESHOLDS = [(60, 100, -128, 2, 22, 127)]
 LINE_ROI_Y = WORK_H // 2
 LINE_MIN_PIXELS = 120
 LINE_MIN_AREA = 120
-LINE_MIN_BOTTOM = int(WORK_H * 0.82)
+LINE_MIN_BOTTOM = int(WORK_H * 0.70)
 LINE_SIDE_MIN_WIDTH = int(WORK_W * 0.16)
+LINE_SIDE_MAX_HEIGHT = int(WORK_H * 0.10)
 LINE_SIDE_MIN_ASPECT = 2.0
 LINE_CENTER_MASK_W = int(WORK_W * 0.42)
 LINE_CONFIRM_FRAMES = 2
@@ -336,6 +337,7 @@ def detect_yellow_line(img):
             aspect = float(w) / max(h, 1)
             if (
                 w >= LINE_SIDE_MIN_WIDTH
+                and h <= LINE_SIDE_MAX_HEIGHT
                 and (blob.y() + h) >= LINE_MIN_BOTTOM
                 and aspect >= LINE_SIDE_MIN_ASPECT
             ):

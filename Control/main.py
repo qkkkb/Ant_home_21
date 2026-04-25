@@ -301,7 +301,7 @@ def get_push_orbit_motion(yaw_err_abs):
     else:
         span = Nav_Push_Orbit_Slow_Yaw - Nav_Push_Orient_Ok_Yaw
         ratio = (yaw_err_abs - Nav_Push_Orient_Ok_Yaw) / span
-        vy_base = Nav_Push_Orbit_Slow_Vy + (Nav_Push_Orbit_Fast_Vy - Nav_Push_Orbit_Slow_Vy) * ratio
+        vy_base = Nav_Push_Orbit_Fast_Vy * ratio
         turn_rate_mag = Nav_Push_Orbit_Slow_Rate + (Nav_Push_Orbit_Fast_Rate - Nav_Push_Orbit_Slow_Rate) * ratio
     return vy_base * push_orbit_radius_ratio, turn_rate_mag
 
@@ -493,7 +493,12 @@ def nav_set_state(new_state, reason="", force=False):
         if new_state == NAV_STATE_SEARCH_TURN:
             search_turn_yaw_target = normalize_yaw_deg(field_up_yaw + Nav_Search_Turn_Yaw)
             yaw_ref_deg = search_turn_yaw_target
-        elif new_state in (NAV_STATE_COARSE, NAV_STATE_FINE, NAV_STATE_PUSH_CLASSIFY):
+        elif new_state == NAV_STATE_FINE:
+            if push_orbit_done:
+                yaw_ref_deg = push_yaw_target
+            else:
+                yaw_ref_deg = imu_runtime.read_yaw()
+        elif new_state in (NAV_STATE_COARSE, NAV_STATE_PUSH_CLASSIFY):
             yaw_ref_deg = imu_runtime.read_yaw()
         elif new_state in (NAV_STATE_PUSH_ORIENT, NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH, NAV_STATE_PUSH_BACK):
             yaw_ref_deg = push_yaw_target

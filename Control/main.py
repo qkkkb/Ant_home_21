@@ -135,6 +135,7 @@ Nav_Push_Prepare_Ok_Yaw = 6.0
 Nav_Push_Prepare_Ok_Ms = 80
 Nav_Push_Execute_Forward_Speed = 2.2
 Nav_Push_Line_Lost_Ms = 150
+Nav_Push_Line_Extra_Ms = 500
 Nav_Push_Back_Speed = 1.2
 Nav_Push_Back_Ms = 350
 Nav_Push_Turn_Slow_Yaw = 35.0
@@ -198,6 +199,7 @@ push_orbit_radius_ratio = Nav_Push_Orbit_Radius_Base
 line_crossed = False
 push_line_seen_once = False
 push_line_lost_since_ms = 0
+push_line_extra_since_ms = 0
 
 def wrapped_yaw_error(ref_deg, now_deg):
     err = now_deg - ref_deg
@@ -419,7 +421,7 @@ def nav_set_state(new_state, reason="", force=False):
     global nav_push_prepare_ok_since_ms, nav_push_turn_ok_since_ms
     global nav_ready_for_push, cam_target_vx, cam_target_vy
     global yaw_ref_deg, cam_rx_started, push_dir_code, push_dir_name
-    global line_crossed, push_line_seen_once, push_line_lost_since_ms
+    global line_crossed, push_line_seen_once, push_line_lost_since_ms, push_line_extra_since_ms
     global push_return_yaw_target, search_turn_yaw_target
     global push_orbit_dir, push_orbit_vy_sign, push_orbit_done
     global push_orbit_reached, push_orbit_progress_deg, push_orbit_last_ms
@@ -446,6 +448,7 @@ def nav_set_state(new_state, reason="", force=False):
         line_crossed = False
         push_line_seen_once = False
         push_line_lost_since_ms = 0
+        push_line_extra_since_ms = 0
 
     if new_state in (NAV_STATE_SEARCH, NAV_STATE_SEARCH_TURN, NAV_STATE_COARSE, NAV_STATE_PUSH_CLASSIFY):
         push_orbit_done = False
@@ -511,7 +514,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
     global nav_push_prepare_ok_since_ms, nav_push_turn_ok_since_ms
     global nav_ready_for_push
     global cam_target_vx, cam_target_vy, yaw_ref_deg, push_yaw_target
-    global line_crossed, push_line_seen_once, push_line_lost_since_ms
+    global line_crossed, push_line_seen_once, push_line_lost_since_ms, push_line_extra_since_ms
     global push_return_yaw_target, push_face_obj_yaw
     global push_orbit_dir, push_orbit_vy_sign, push_orbit_blocked, push_orbit_done
     global push_orbit_reached, push_orbit_progress_deg, push_orbit_target_delta, push_orbit_last_ms
@@ -762,11 +765,15 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         if line_crossed:
             push_line_seen_once = True
             push_line_lost_since_ms = 0
+            push_line_extra_since_ms = 0
         elif push_line_seen_once:
             if push_line_lost_since_ms == 0:
                 push_line_lost_since_ms = now
             elif utime.ticks_diff(now, push_line_lost_since_ms) >= Nav_Push_Line_Lost_Ms:
-                nav_set_state(NAV_STATE_PUSH_BACK, "line_lost_after_cross")
+                if push_line_extra_since_ms == 0:
+                    push_line_extra_since_ms = now
+                elif utime.ticks_diff(now, push_line_extra_since_ms) >= Nav_Push_Line_Extra_Ms:
+                    nav_set_state(NAV_STATE_PUSH_BACK, "line_extra_after_cross")
         return
 
     if nav_state == NAV_STATE_PUSH_BACK:

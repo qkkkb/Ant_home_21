@@ -665,9 +665,15 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             Nav_Fine_Forward_Limit,
             Nav_Fine_Lateral_Limit,
         )
+        fine_yaw_ok = (
+            (not push_orbit_done)
+            or (not ENABLE_IMU)
+            or (abs(push_yaw_error_deg(yaw_deg)) <= Nav_Push_Prepare_Reorient_Yaw)
+        )
         if (
             abs(cam_error_x) <= Nav_Fine_Ok_X
             and cam_error_y <= Nav_Fine_Ok_Y_Max
+            and fine_yaw_ok
             and low_speed
         ):
             if nav_fine_ok_since_ms == 0:
@@ -713,7 +719,10 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             push_orbit_vy_sign = orbit_vy_sign_from_dir(push_dir_code)
             orbit_yaw_err = -wrapped_yaw_error(push_yaw_target, push_face_obj_yaw)
             push_orbit_target_delta = abs(orbit_yaw_err)
-            if push_dir_code == Push_Dir_Up and push_orbit_target_delta > Nav_Push_Orbit_Skip_Yaw:
+            if push_orbit_target_delta <= Nav_Push_Orbit_Skip_Yaw:
+                push_orbit_dir = 0
+                push_orbit_vy_sign = 0
+            else:
                 if orbit_yaw_err >= 0.0:
                     push_orbit_dir = 1
                 else:

@@ -868,6 +868,8 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             if nav_push_turn_ok_since_ms == 0:
                 nav_push_turn_ok_since_ms = now
             elif utime.ticks_diff(now, nav_push_turn_ok_since_ms) >= Nav_Push_Turn_Ok_Ms:
+                if ENABLE_IMU and imu_runtime is not None:
+                    imu_runtime.reset_yaw(push_return_yaw_target)
                 nav_set_state(NAV_STATE_SEARCH, "push_finish")
         else:
             nav_push_turn_ok_since_ms = 0

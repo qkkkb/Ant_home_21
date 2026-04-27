@@ -990,12 +990,16 @@ def calibrate_gyro_before_launch():
         and ENABLE_IMU
         and imu_runtime is not None
     ):
-        imu_runtime.calibrate_offset(
-            samples=GYRO_CALIBRATE_SAMPLES,
-            delay_ms=GYRO_CALIBRATE_DELAY_MS,
-            logger=log,
-        )
-        imu_runtime.reset_yaw(0.0)
+        pit1.stop()
+        try:
+            imu_runtime.calibrate_offset(
+                samples=GYRO_CALIBRATE_SAMPLES,
+                delay_ms=GYRO_CALIBRATE_DELAY_MS,
+                logger=log,
+            )
+            imu_runtime.reset_yaw(0.0)
+        finally:
+            pit1.start(TICK_PERIOD_MS)
 
 
 # ====================== C9 发车检查 ======================

@@ -39,6 +39,9 @@ GYRO_DEADBAND_DPS = 0.8  # 陀螺仪死区阈值
 GYRO_KP = 0.15
 GYRO_KI = 0.003
 GYRO_OUTPUT_LIMIT = 5.0
+AUTO_CALIBRATE_GYRO_ON_LAUNCH = True
+GYRO_CALIBRATE_SAMPLES = 1000
+GYRO_CALIBRATE_DELAY_MS = 2
 
 # IMU 使能条件
 ENABLE_IMU = ENABLE_GYRO_LOOP
@@ -980,6 +983,21 @@ def update_nav_led_display():
     elif nav_state in (NAV_STATE_SEARCH_TURN, NAV_STATE_PUSH_ORIENT, NAV_STATE_PUSH, NAV_STATE_PUSH_BACK, NAV_STATE_PUSH_TURN):
         led_rotate.value(1)
 
+
+def calibrate_gyro_before_launch():
+    if (
+        AUTO_CALIBRATE_GYRO_ON_LAUNCH
+        and ENABLE_IMU
+        and imu_runtime is not None
+    ):
+        imu_runtime.calibrate_offset(
+            samples=GYRO_CALIBRATE_SAMPLES,
+            delay_ms=GYRO_CALIBRATE_DELAY_MS,
+            logger=log,
+        )
+        imu_runtime.reset_yaw(0.0)
+
+
 # ====================== C9 发车检查 ======================
 def check_c9_start():
     """处理发车按键，带消抖和延时发车。"""
@@ -991,6 +1009,7 @@ def check_c9_start():
             if not car_started:
                 log("[C9] 0.5 秒后发车...")
                 utime.sleep_ms(500)
+                calibrate_gyro_before_launch()
                 if ENABLE_IMU and imu_runtime is not None:
                     yaw_ref_deg = imu_runtime.read_yaw()
                 else:
@@ -1496,6 +1515,7 @@ try:
         check_c9_start()
         if AUTO_START_ON_BOOT and (not auto_start_done) and (not car_started):
             if utime.ticks_diff(now, start_time) >= AUTO_START_DELAY_MS:
+                calibrate_gyro_before_launch()
                 if ENABLE_IMU and imu_runtime is not None:
                     yaw_ref_deg = imu_runtime.read_yaw()
                 else:
@@ -1513,6 +1533,7 @@ try:
             and cam_packet_fresh()
         )
         if vision_ready:
+            calibrate_gyro_before_launch()
             if ENABLE_IMU and imu_runtime is not None:
                 yaw_ref_deg = imu_runtime.read_yaw()
             else:

@@ -10,8 +10,10 @@ white = LED(4)
 sensor.reset()                      # Reset and initialize the sensor.
 sensor.set_pixformat(sensor.RGB565) # Set pixel format to RGB565.
 sensor.set_framesize(sensor.QVGA)      # 320x240, scaled to 240x240 in code
-sensor.skip_frames(time = 2000)     # Wait for settings take effect.
+sensor.set_auto_gain(False)
+sensor.set_auto_whitebal(False)
 sensor.set_auto_exposure(True, exposure_us = 150)
+sensor.skip_frames(time = 3000)     # Wait for settings take effect.
 clock = time.clock()                # Create a clock object to track the FPS.
 
 

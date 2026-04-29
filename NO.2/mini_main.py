@@ -95,9 +95,9 @@ IPM_MATRIX_DST_H = WORK_H
 
 # TODO: Replace with calibration output from ipm_calibration_pc.py
 IPM_MATRIX = [
-    [-1.55542265, -2.18141946, 293.44258373],
-    [0.00000000, -5.52711324, 514.02153110],
-    [0.00000000, -0.01820840, 1.00000000],
+    [-1.33832280, -1.85118157, 279.46693444],
+    [0.00000000, -4.79946699, 489.54563309],
+    [0.00010745, -0.01567589, 1.00000000],
 ]
 
 # BEV 像素 -> 物理距离换算 (mm)
@@ -106,7 +106,7 @@ MM_PER_PIX_X = 210.0 / 84.0    # 2.500 mm/px
 MM_PER_PIX_Y = 594.0 / 240.0   # 2.475 mm/px
 BEV_CENTER_X = IPM_MATRIX_DST_W // 2   # 120
 BEV_CENTER_Y = IPM_MATRIX_DST_H // 2   # 120
-BEV_TARGET_Y = 210    # pre-push target line in BEV
+BEV_TARGET_Y = 239    # pre-push target line in BEV
 BEV_FLIP_X = True
 BEV_FLIP_Y = False
 

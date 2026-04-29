@@ -121,6 +121,14 @@ def wrapped_yaw_error(ref_deg, now_deg):
     return err
 
 
+def reset_gyro_pid_state():
+    global gyro_pid
+    if gyro_pid is not None:
+        gyro_pid.output = 0.0
+        gyro_pid.err = 0.0
+        gyro_pid.err_last = 0.0
+
+
 key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
 
 # ====================== 按键硬件初始化 ======================
@@ -208,6 +216,7 @@ def switch_motion_mode():
         STRAIGHT_VX = 0.0
         STRAIGHT_VY = 0.0
         STRAIGHT_VZ = TEST_ROTATE_SPEED
+        reset_gyro_pid_state()
     # 更新LED
     update_led_display()
     # 打印日志
@@ -481,14 +490,14 @@ def calc_speed_closed_loop():
         yaw_deg = 0.0
     yaw_err_deg = wrapped_yaw_error(yaw_ref_deg, yaw_deg) if ENABLE_IMU else 0.0
 
-    # 陀螺仪闭环控制（方向控制）
-    if ENABLE_GYRO_LOOP and gyro_pid is not None:
+    # 旋转模式直接使用目标角速度，避免陀螺仪闭环抵消旋转指令。
+    if BODY_TEST_MODE == "rotate":
+        reset_gyro_pid_state()
+        vz_cmd = STRAIGHT_VZ
+    elif ENABLE_GYRO_LOOP and gyro_pid is not None:
         vz_cmd = gyro_ctrl(gyro_pid, STRAIGHT_VZ - gyro_z)
     else:
-        if gyro_pid is not None:
-            gyro_pid.output = 0.0
-            gyro_pid.err = 0.0
-            gyro_pid.err_last = 0.0
+        reset_gyro_pid_state()
         vz_cmd = STRAIGHT_VZ
     last_vz_cmd = vz_cmd
 

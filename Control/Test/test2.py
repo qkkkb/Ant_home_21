@@ -8,9 +8,7 @@ from models import AnglePID, MoveBase, SpeedPID
 from move_base import calc_wheel_spd
 import pid as _pid_mod
 import config as cfg
-from hardware import Motor, RealHardware
-from controller import VehicleController
-from models import CarState
+from hardware import Motor
 
 # 设置PID最大PWM值
 _pid_mod.PWM_MAX = cfg.PWM_MAX
@@ -50,11 +48,11 @@ CAL_SIGN = 1
 BODY_TEST_MODE = "straight"
 TEST_LINEAR_SPEED = 5.0
 TEST_ROTATE_SPEED = 5.0
-GYRO_SIGN = -1.0
+GYRO_SIGN = 1.0
 
 # 陀螺仪Z轴校准参数
 GYRO_OFFSET_Z = 3.16
-AUTO_GYRO_OFFSET_CAL = True
+AUTO_GYRO_OFFSET_CAL = False
 GYRO_CALIB_SAMPLES = 1000
 GYRO_CALIB_DELAY_MS = 2
 GYRO_SCALE = -1.0 / 16.54052
@@ -141,27 +139,13 @@ utime.sleep_ms(100)
 # 状态LED
 led = Pin(cfg.LED_HB_PIN, Pin.OUT, pull=Pin.PULL_UP_47K, value=True)
 
-# ====================== 硬件对象创建（art_navigate 模式由 RealHardware 统一管理） ======================
-hw_nav = None
-ctrl = None
-if RUN_MODE == "art_navigate":
-    hw_nav = RealHardware()
-    ctrl = VehicleController(hw_nav)
-    ctrl.ctx.state = CarState.COARSE_APPROACH_MODE
-    # 别名：让 stop_all() / ticker 等现有代码继续正常使用
-    motor_fl = hw_nav.motor_fl
-    motor_fr = hw_nav.motor_fr
-    motor_b  = hw_nav.motor_b
-    enc_fl   = hw_nav.enc_fl
-    enc_fr   = hw_nav.enc_fr
-    enc_b    = hw_nav.enc_b
-else:
-    motor_fl = Motor(cfg.MOTOR_FL_PH, cfg.MOTOR_FL_PWM, freq=cfg.MOTOR_FREQ, invert=cfg.MOTOR_FL_INVERT)
-    motor_fr = Motor(cfg.MOTOR_FR_PH, cfg.MOTOR_FR_PWM, freq=cfg.MOTOR_FREQ, invert=cfg.MOTOR_FR_INVERT)
-    motor_b  = Motor(cfg.MOTOR_B_PH,  cfg.MOTOR_B_PWM,  freq=cfg.MOTOR_FREQ, invert=cfg.MOTOR_B_INVERT)
-    enc_fl = encoder(cfg.ENC_FL_A, cfg.ENC_FL_B, cfg.ENC_FL_INVERT)
-    enc_fr = encoder(cfg.ENC_FR_A, cfg.ENC_FR_B, cfg.ENC_FR_INVERT)
-    enc_b  = encoder(cfg.ENC_B_A,  cfg.ENC_B_B,  cfg.ENC_B_INVERT)
+# ====================== 硬件对象创建 ======================
+motor_fl = Motor(cfg.MOTOR_FL_PH, cfg.MOTOR_FL_PWM, freq=cfg.MOTOR_FREQ, invert=cfg.MOTOR_FL_INVERT)
+motor_fr = Motor(cfg.MOTOR_FR_PH, cfg.MOTOR_FR_PWM, freq=cfg.MOTOR_FREQ, invert=cfg.MOTOR_FR_INVERT)
+motor_b  = Motor(cfg.MOTOR_B_PH,  cfg.MOTOR_B_PWM,  freq=cfg.MOTOR_FREQ, invert=cfg.MOTOR_B_INVERT)
+enc_fl = encoder(cfg.ENC_FL_A, cfg.ENC_FL_B, cfg.ENC_FL_INVERT)
+enc_fr = encoder(cfg.ENC_FR_A, cfg.ENC_FR_B, cfg.ENC_FR_INVERT)
+enc_b  = encoder(cfg.ENC_B_A,  cfg.ENC_B_B,  cfg.ENC_B_INVERT)
 
 # 无线串口初始化
 wireless = WIRELESS_UART(460800)
@@ -621,19 +605,10 @@ try:
         check_c14_switch()
         check_c9_start()
 
-        # 视觉导航：每次主循环轮询相机 UART，推入 UartChannel，推进状态机
-        if RUN_MODE == "art_navigate" and car_started and hw_nav is not None:
-            hw_nav.poll_cam_uart(ctrl.ctx.art_detect)
-            ctrl.step()
-
         if pit_flag:
             pit_flag = False
             if RUN_MODE == "wheel_dir_cal":
                 snap = run_wheel_dir_cal()
-            elif RUN_MODE == "art_navigate":
-                snap = None
-                if car_started and ctrl is not None:
-                    ctrl.pit_5ms_step()
             else:
                 snap = calc_speed_closed_loop()
 

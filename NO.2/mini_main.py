@@ -9,9 +9,11 @@ from machine import UART
 #white = LED(4)
 sensor.reset()                      # Reset and initialize the sensor.
 sensor.set_pixformat(sensor.RGB565) # Set pixel format to RGB565.
-sensor.set_framesize(sensor.QVGA)      # 320x240, scaled to 240x240 in code
-sensor.skip_frames(time = 2000)     # Wait for settings take effect.
+sensor.set_framesize(sensor.QVGA)      # 320x240, scaled to 192x192 in code
+sensor.set_auto_gain(False)
+sensor.set_auto_whitebal(False)
 sensor.set_auto_exposure(True, exposure_us = 150)
+sensor.skip_frames(time = 3000)     # Wait for settings take effect.
 clock = time.clock()                # Create a clock object to track the FPS.
 
 
@@ -27,7 +29,7 @@ except Exception as ex:
 
 
 # ================= UART =================
-uart = UART(2, 9600)
+uart = UART(12, 9600)
 uart.init(9600, timeout_char = 1000)
 SEARCH_TRIGGER = b"SEARCH\n"
 COARSE_TRIGGER = b"COARSE\n"
@@ -40,14 +42,14 @@ IDLE_TRIGGER = b"IDLE\n"
 # ================= Runtime =================
 DETECT_SCORE_TH = 0.70
 SEND_NEUTRAL_WHEN_EMPTY = True
-DEBUG_DRAW_BOX = True
-PRINT_FPS = True
-PRINT_EVENT = True
-PRINT_VERBOSE = True
+DEBUG_DRAW_BOX = False
+PRINT_FPS = False
+PRINT_EVENT = False
+PRINT_VERBOSE = False
 
 ERROR_OFFSET = 120
 ERROR_LIMIT = 240
-ERROR_SCALE = 2
+ERROR_SCALE = 1.6
 UART_FRAME_HEAD = 0xFF
 LINE_PACKET_TAG = 0xFC
 CLASSIFY_PACKET_TAG = 0xFD
@@ -68,13 +70,13 @@ NO_TARGET_MARKER = 0xFE   # 254，超出 encode_error 范围 [0,240]，永不冲
 
 FRAME_W = 320
 FRAME_H = 240
-WORK_W  = 240
-WORK_H  = 240
+WORK_W  = 192
+WORK_H  = 192
 Ema_Alpha = 0.75
 YELLOW_LINE_THRESHOLDS = [(60, 100, -128, 2, 22, 127)]
 LINE_ROI_Y = WORK_H // 2
-LINE_MIN_PIXELS = 120
-LINE_MIN_AREA = 120
+LINE_MIN_PIXELS = 77
+LINE_MIN_AREA = 77
 LINE_MIN_BOTTOM = int(WORK_H * 0.70)
 LINE_SIDE_MIN_WIDTH = int(WORK_W * 0.16)
 LINE_SIDE_MIN_ASPECT = 1.5
@@ -93,20 +95,20 @@ IPM_MATRIX_IS_IMAGE_TO_BEV = True
 IPM_MATRIX_DST_W = WORK_W
 IPM_MATRIX_DST_H = WORK_H
 
-# TODO: Replace with calibration output from ipm_calibration_pc.py
+# Temporary 192x192 scale of the 240x240 calibration. Recalibrate after the camera move.
 IPM_MATRIX = [
-    [-1.33832280, -1.85118157, 279.46693444],
-    [0.00000000, -4.79946699, 489.54563309],
-    [0.00010745, -0.01567589, 1.00000000],
+    [-1.33832280, -1.85118157, 223.57354755],
+    [0.00000000, -4.79946699, 391.63650647],
+    [0.00013431, -0.01959486, 1.00000000],
 ]
 
 # BEV 像素 -> 物理距离换算 (mm)
 # 标定：594mm x 210mm 纸，_bev_w=84, BEV 240x240
-MM_PER_PIX_X = 210.0 / 84.0    # 2.500 mm/px
-MM_PER_PIX_Y = 594.0 / 240.0   # 2.475 mm/px
-BEV_CENTER_X = IPM_MATRIX_DST_W // 2   # 120
-BEV_CENTER_Y = IPM_MATRIX_DST_H // 2   # 120
-BEV_TARGET_Y = 239    # pre-push target line in BEV
+MM_PER_PIX_X = 210.0 / 67.2    # 3.125 mm/px
+MM_PER_PIX_Y = 594.0 / 192.0   # 3.094 mm/px
+BEV_CENTER_X = IPM_MATRIX_DST_W // 2   # 96
+BEV_CENTER_Y = IPM_MATRIX_DST_H // 2   # 96
+BEV_TARGET_Y = 191    # pre-push target line in BEV
 BEV_FLIP_X = True
 BEV_FLIP_Y = False
 

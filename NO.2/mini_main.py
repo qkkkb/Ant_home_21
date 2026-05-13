@@ -97,18 +97,18 @@ IPM_MATRIX_DST_H = WORK_H
 
 # Temporary 192x192 scale of the 240x240 calibration. Recalibrate after the camera move.
 IPM_MATRIX = [
-    [-1.33832280, -1.85118157, 223.57354755],
-    [0.00000000, -4.79946699, 391.63650647],
-    [0.00013431, -0.01959486, 1.00000000],
+    [69.09784559, 85.50020555, -6108.60245847],
+    [-0.00000000, 213.51798852, -8327.20155229],
+    [0.00146588, 0.88188865, 1.00000000],
 ]
 
 # BEV 像素 -> 物理距离换算 (mm)
 # 标定：594mm x 210mm 纸，_bev_w=84, BEV 240x240
-MM_PER_PIX_X = 210.0 / 67.2    # 3.125 mm/px
-MM_PER_PIX_Y = 594.0 / 192.0   # 3.094 mm/px
+MM_PER_PIX_X = 3.134328
+MM_PER_PIX_Y = 3.093750
 BEV_CENTER_X = IPM_MATRIX_DST_W // 2   # 96
 BEV_CENTER_Y = IPM_MATRIX_DST_H // 2   # 96
-BEV_TARGET_Y = 191    # pre-push target line in BEV
+BEV_TARGET_Y = 181    # pre-push target line in BEV
 BEV_FLIP_X = True
 BEV_FLIP_Y = False
 

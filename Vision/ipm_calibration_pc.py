@@ -7,7 +7,7 @@ import numpy as np
 
 WINDOW_NAME = "IPM Calibration"
 BEV_WINDOW_NAME = "BEV Preview"
-IMAGE_SIZE = 240
+IMAGE_SIZE = 192
 POINT_NAMES = [
     "1 LB",
     "2 RB",
@@ -22,10 +22,15 @@ POINT_COLORS = [
 ]
 MEASURE_COLOR = (255, 0, 255)
 
-_bev_w = int(240 * 210 / 594)
-_x0 = (240 - _bev_w) // 2
+_bev_w = int(IMAGE_SIZE * 210 / 594)
+_x0 = (IMAGE_SIZE - _bev_w) // 2
 dst_pts = np.array(
-    [[_x0, 239], [_x0 + _bev_w - 1, 239], [_x0 + _bev_w - 1, 0], [_x0, 0]],
+    [
+        [_x0, IMAGE_SIZE - 1],
+        [_x0 + _bev_w - 1, IMAGE_SIZE - 1],
+        [_x0 + _bev_w - 1, 0],
+        [_x0, 0],
+    ],
     dtype=np.float32,
 )
 MM_PER_PIX_X = 210.0 / _bev_w

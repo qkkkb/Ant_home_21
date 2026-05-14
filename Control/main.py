@@ -10,11 +10,8 @@ import pid as _pid_mod
 import config as cfg
 from hardware import Motor
 from coop_protocol import (
-    ACK_PUSH_START,
-    ACK_PUSH_STOP,
     ACK_TARGET_LOCK,
     CoopFrameParser,
-    decode_status,
     encode_ack,
     encode_status,
     encode_target_lock,
@@ -26,7 +23,6 @@ from coop_protocol import (
     MSG_PUSH_STOP,
     MSG_SLAVE_APPROACHING,
     MSG_SLAVE_READY,
-    MSG_TARGET_LOCK,
 )
 
 # 设置 PID 最大 PWM 值
@@ -389,59 +385,6 @@ def update_push_orbit_radius(err_y):
         push_orbit_radius_ratio = 0.8
     elif push_orbit_radius_ratio > 2.5:
         push_orbit_radius_ratio = 2.5
-
-
-def log_push_debug(prefix, yaw_deg, low_speed):
-    if nav_state not in (
-        NAV_STATE_PUSH_CLASSIFY,
-        NAV_STATE_PUSH_ORIENT,
-        NAV_STATE_PUSH_PREPARE,
-        NAV_STATE_PUSH,
-        NAV_STATE_PUSH_BACK,
-        NAV_STATE_PUSH_TURN,
-    ):
-        return
-
-    msg = (
-        "[PUSH_DBG] %s state=%s dir=%s seen=%d age=%dms line=%d field=(up=%.1f right=%.1f left=%.1f) yaw=%.2f face=%.2f yaw_tar=%.2f orbit_dir=%d vy_sign=%d ret_yaw=%.2f yaw_err=%.2f orb=%.1f/%.1f low=%d cmd_xy=(%.1f,%.1f) turn=%.2f vz=%.2f"
-        % (
-            prefix,
-            nav_state,
-            push_dir_name,
-            1 if cam_target_seen() else 0,
-            utime.ticks_diff(utime.ticks_ms(), cam_last_rx_ms),
-            1 if line_crossed else 0,
-            field_up_yaw,
-            field_right_yaw,
-            field_left_yaw,
-            yaw_deg,
-            push_face_obj_yaw,
-            push_yaw_target,
-            push_orbit_dir,
-            push_orbit_vy_sign,
-            push_return_yaw_target,
-            push_yaw_error_deg(yaw_deg),
-            push_orbit_progress_deg,
-            push_orbit_target_delta,
-            1 if low_speed else 0,
-            cam_target_vx,
-            cam_target_vy,
-            last_turn_rate_cmd,
-            last_vz_cmd,
-        )
-    )
-    if nav_state == NAV_STATE_PUSH_PREPARE:
-        prep_x_ok = 1 if abs(cam_error_x) <= Nav_Push_Prepare_Ok_X else 0
-        prep_y_ok = 1 if cam_error_y <= Nav_Push_Prepare_Ok_Y_Max else 0
-        prep_yaw_ok = 1 if ((not ENABLE_IMU) or (abs(push_yaw_error_deg(yaw_deg)) <= Nav_Push_Prepare_Ok_Yaw)) else 0
-        prep_spd_ok = 1 if low_speed else 0
-        msg += " gate=(x=%d y=%d yaw=%d spd=%d)" % (
-            prep_x_ok,
-            prep_y_ok,
-            prep_yaw_ok,
-            prep_spd_ok,
-        )
-    log(msg)
 
 
 def update_cam_target(err_x, err_y):
@@ -1047,44 +990,17 @@ def coop_next_seq():
 
 
 def coop_wireless_write(data):
-    try:
-        write_fn = getattr(wireless, "write", None)
-        if write_fn is not None:
-            write_fn(data)
-            return True
-    except Exception:
-        pass
-    try:
-        send_fn = getattr(wireless, "send", None)
-        if send_fn is not None:
-            send_fn(data)
-            return True
-    except Exception:
-        pass
-    try:
-        # Fallback for firmware that only exposes string sending.
-        wireless.send_str("".join(chr(b) for b in data))
-        return True
-    except Exception:
-        return False
+    wireless.write(data)
+    return True
 
 
 def coop_wireless_read():
-    try:
-        any_fn = getattr(wireless, "any", None)
-        read_fn = getattr(wireless, "read", None)
-        if read_fn is None:
-            return None
-        if any_fn is not None:
-            pending = any_fn()
-            if not pending:
-                return None
-            if pending > 32:
-                pending = 32
-            return read_fn(pending)
-        return read_fn()
-    except Exception:
+    pending = wireless.any()
+    if not pending:
         return None
+    if pending > 32:
+        pending = 32
+    return wireless.read(pending)
 
 
 def coop_send_ack(seq, msg_type):
@@ -1827,165 +1743,14 @@ try:
             pit_flag = False
             snap = calc_speed_closed_loop()
 
-            if pit_count % DEBUG_DIV == 0 and snap is not None and cam_rx_started:
-                if ENABLE_IMU:
-                    if TUNE_LOG_VERBOSE:
-                        log(
-                            "[速度环] t=%.2fs nav=%s ready=%d err_xy=(%d,%d)|abs=(%d,%d) cmd_xy=(%.1f,%.1f) turn=%.2f enc=(%d,%d,%d) tar=(%.1f,%.1f,%.1f) pwm=(%d,%d,%d) gyro=%.2f yaw=%.2f yaw_err=%.2f vz=%.2f"
-                            % (
-                                elapsed_s,
-                                snap["nav_state"],
-                                snap["nav_ready"],
-                                int(snap["cam_x"]),
-                                int(snap["cam_y"]),
-                                int(snap["abs_err_x"]),
-                                int(snap["abs_err_y"]),
-                                snap["body_vx"],
-                                snap["body_vy"],
-                                snap["turn_rate_cmd"],
-                                int(snap["enc_fl"]),
-                                int(snap["enc_fr"]),
-                                int(snap["enc_b"]),
-                                snap["tar_fl"],
-                                snap["tar_fr"],
-                                snap["tar_b"],
-                                int(snap["pwm_fl"]),
-                                int(snap["pwm_fr"]),
-                                int(snap["pwm_b"]),
-                                snap["gyro_z"],
-                                snap["yaw_deg"],
-                                snap["yaw_err_deg"],
-                                snap["vz_cmd"],
-                            )
-                        )
-                    else:
-                        log(
-                            "[速度环] t=%.2fs err_xy=(%d,%d) cmd_xy=(%.1f,%.1f) turn=%.2f enc=(%d,%d,%d) tar=(%.1f,%.1f,%.1f) out=(%.1f,%.1f,%.1f) pwm=(%d,%d,%d) raw_gz=%.1f gyro=%.2f yaw=%.2f yaw_err=%.2f vz=%.2f"
-                            % (
-                                elapsed_s,
-                                int(snap["cam_x"]),
-                                int(snap["cam_y"]),
-                                snap["body_vx"],
-                                snap["body_vy"],
-                                snap["turn_rate_cmd"],
-                                int(snap["enc_fl"]),
-                                int(snap["enc_fr"]),
-                                int(snap["enc_b"]),
-                                snap["tar_fl"],
-                                snap["tar_fr"],
-                                snap["tar_b"],
-                                snap["out_fl"],
-                                snap["out_fr"],
-                                snap["out_b"],
-                                int(snap["pwm_fl"]),
-                                int(snap["pwm_fr"]),
-                                int(snap["pwm_b"]),
-                                snap["raw_gyro_z"],
-                                snap["gyro_z"],
-                                snap["yaw_deg"],
-                                snap["yaw_err_deg"],
-                                snap["vz_cmd"],
-                            )
-                        )
-                else:
-                    log(
-                        "[速度环] t=%.2fs err_xy=(%d,%d) cmd_xy=(%.1f,%.1f) enc=(%d,%d,%d) tar=(%.1f,%.1f,%.1f) out=(%.1f,%.1f,%.1f) pwm=(%d,%d,%d)"
-                        % (
-                            elapsed_s,
-                            int(snap["cam_x"]),
-                            int(snap["cam_y"]),
-                            snap["body_vx"],
-                            snap["body_vy"],
-                            int(snap["enc_fl"]),
-                            int(snap["enc_fr"]),
-                            int(snap["enc_b"]),
-                            snap["tar_fl"],
-                            snap["tar_fr"],
-                            snap["tar_b"],
-                            snap["out_fl"],
-                            snap["out_fr"],
-                            snap["out_b"],
-                            int(snap["pwm_fl"]),
-                            int(snap["pwm_fr"]),
-                            int(snap["pwm_b"]),
-                        )
-                    )
-                if ENABLE_IMU:
-                    log_push_debug(
-                        "speed",
-                        snap["yaw_deg"],
-                        abs(snap["enc_fl"]) <= Nav_Low_Speed_Th
-                        and abs(snap["enc_fr"]) <= Nav_Low_Speed_Th
-                        and abs(snap["enc_b"]) <= Nav_Low_Speed_Th,
-                    )
+            if pit_count % DEBUG_DIV == 0 and snap is not None and cam_rx_started and TUNE_LOG_VERBOSE:
+                log("[S] %s r=%d e=(%d,%d) y=%.1f" % (
+                    snap["nav_state"], snap["nav_ready"], int(snap["cam_x"]), int(snap["cam_y"]), snap["yaw_deg"]
+                ))
 
         if utime.ticks_diff(now, last_status_ms) >= 1000:
             led.toggle()
             last_status_ms = now
-            if cam_rx_started:
-                if ENABLE_IMU:
-                    if TUNE_LOG_VERBOSE:
-                        log(
-                            "[状态] t=%.1fs started=%d ch7=%.1f nav=%s ready=%d err_xy=(%d,%d)|abs=(%d,%d) cmd_xy=(%.1f,%.1f) gyro=%.2f yaw=%.2f yaw_ref_err=%.2f turn=%.2f vz=%.2f"
-                            % (
-                                elapsed_s,
-                                1 if car_started else 0,
-                                ch7_init_value,
-                                nav_state,
-                                1 if nav_ready_for_push else 0,
-                                cam_error_x,
-                                cam_error_y,
-                                abs(cam_error_x),
-                                abs(cam_error_y),
-                                cam_target_vx,
-                                cam_target_vy,
-                                imu_runtime.gyro_z_deg,
-                                imu_runtime.yaw_deg,
-                                -wrapped_yaw_error(yaw_ref_deg, imu_runtime.yaw_deg),
-                                last_turn_rate_cmd,
-                                last_vz_cmd,
-                            )
-                        )
-                    else:
-                        log(
-                            "[状态] t=%.1fs started=%d ch7=%.1f err_xy=(%d,%d) cmd_xy=(%.1f,%.1f) raw_gz=%.1f gyro=%.2f yaw=%.2f yaw_ref_err=%.2f turn=%.2f vz=%.2f"
-                            % (
-                                elapsed_s,
-                                1 if car_started else 0,
-                                ch7_init_value,
-                                cam_error_x,
-                                cam_error_y,
-                                cam_target_vx,
-                                cam_target_vy,
-                                imu_runtime.raw_gyro_z,
-                                imu_runtime.gyro_z_deg,
-                                imu_runtime.yaw_deg,
-                                -wrapped_yaw_error(yaw_ref_deg, imu_runtime.yaw_deg),
-                                last_turn_rate_cmd,
-                                last_vz_cmd,
-                            )
-                        )
-                else:
-                    log(
-                        "[状态] t=%.1fs started=%d ch7=%.1f err_xy=(%d,%d) cmd_xy=(%.1f, %.1f, %.1f)"
-                        % (
-                            elapsed_s,
-                            1 if car_started else 0,
-                            ch7_init_value,
-                            cam_error_x,
-                            cam_error_y,
-                            cam_target_vx,
-                            cam_target_vy,
-                            0.0,
-                        )
-                    )
-
-                if ENABLE_IMU:
-                    log_push_debug(
-                        "status",
-                        imu_runtime.yaw_deg,
-                        False,
-                    )
 
         if loop_count % EXIT_CHECK_DIV == 0 and check_upper_exit():
             log("=== CH7 触发退出，程序停止 ===")

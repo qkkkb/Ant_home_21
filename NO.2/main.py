@@ -9,6 +9,24 @@ from move_base import calc_wheel_spd
 import pid as _pid_mod
 import config as cfg
 from hardware import Motor
+from coop_protocol import (
+    ACK_PUSH_START,
+    ACK_PUSH_STOP,
+    ACK_TARGET_LOCK,
+    CoopFrameParser,
+    decode_target_lock,
+    encode_ack,
+    encode_status,
+    MSG_ACK,
+    MSG_DONE,
+    MSG_ERROR,
+    MSG_MASTER_READY,
+    MSG_PUSH_START,
+    MSG_PUSH_STOP,
+    MSG_SLAVE_APPROACHING,
+    MSG_SLAVE_READY,
+    MSG_TARGET_LOCK,
+)
 
 # 设置 PID 最大 PWM 值uart
 _pid_mod.PWM_MAX = cfg.PWM_MAX
@@ -30,7 +48,7 @@ MAX_PWM_CHANGE = cfg.MAX_PWM_CHANGE
 # 默认开启速度环；需要方向控制时再叠加陀螺仪环
 ENABLE_GYRO_LOOP = True
 
-GYRO_SIGN = -1.0
+GYRO_SIGN = 1.0
 
 # 陀螺仪 Z 轴标定参数
 GYRO_OFFSET_Z = 3.16
@@ -76,6 +94,9 @@ NAV_STATE_PUSH = "PUSH_EXECUTE"
 NAV_STATE_PUSH_BACK = "PUSH_FINISH_BACK"
 NAV_STATE_PUSH_TURN = "PUSH_FINISH_TURN"
 NAV_STATE_POST_TURN_FORWARD = "POST_TURN_FORWARD"
+NAV_STATE_COOP_APPROACH = "COOP_APPROACH"
+NAV_STATE_COOP_WAIT_START = "COOP_WAIT_START"
+NAV_STATE_COOP_DONE = "COOP_DONE"
 ART_MODE_SEARCH_CMD = b"SEARCH\n"
 ART_MODE_COARSE_CMD = b"COARSE\n"
 ART_MODE_FINE_CMD = b"FINE\n"
@@ -86,6 +107,10 @@ Push_Dir_None = 0
 Push_Dir_Right = 1
 Push_Dir_Up = 2
 Push_Dir_Left = 3
+Push_Dir_Down = 4
+COOP_ROLE_MASTER = cfg.COOP_ROLE == "MASTER"
+COOP_ROLE_SLAVE = cfg.COOP_ROLE == "SLAVE"
+COOP_ENABLE = cfg.COOP_ENABLE
 Nav_Detect_Ms = 200
 Nav_Target_Lost_Ms = 500
 Nav_Search_Turn_Yaw = 30.0
@@ -139,7 +164,7 @@ Nav_Push_Prepare_Ok_X = 4    #准备阶段前进误差小于该值即认为横�
 Nav_Push_Prepare_Ok_Y_Max = 8  #准备阶段横移误差小于该值即认为前进准备就绪
 Nav_Push_Prepare_Ok_Yaw = 5.0   #准备阶段定向误差小于该值即认为定向准备就绪
 Nav_Push_Prepare_Ok_Ms = 150
-Nav_Push_Execute_Forward_Speed = 4.5
+Nav_Push_Execute_Forward_Speed = 8.5    #push 执行阶段前进速度
 Nav_Push_Line_Lost_Ms = 150
 Nav_Push_Line_Extra_Ms = 300
 Nav_Push_Back_Speed = 3.0
@@ -209,6 +234,22 @@ line_crossed = False
 push_line_seen_once = False
 push_line_lost_since_ms = 0
 push_line_extra_since_ms = 0
+coop_parser = CoopFrameParser()
+coop_seq = 0
+coop_target_received = False
+coop_target_seq = 0
+coop_master_dir = Push_Dir_None
+coop_slave_dir = Push_Dir_None
+coop_master_push_speed = 0.0
+coop_master_ready = False
+coop_push_start_received = False
+coop_push_stop_received = False
+coop_link_error = False
+coop_last_rx_ms = 0
+coop_approach_start_ms = 0
+coop_approach_last_tx_ms = 0
+coop_slave_ready_last_tx_ms = 0
+coop_slave_done_sent = False
 
 def wrapped_yaw_error(ref_deg, now_deg):
     err = now_deg - ref_deg
@@ -234,6 +275,8 @@ def push_dir_label(dir_code):
         return "UP"
     if dir_code == Push_Dir_Left:
         return "LEFT"
+    if dir_code == Push_Dir_Down:
+        return "DOWN"
     return "NONE"
 
 
@@ -244,7 +287,21 @@ def yaw_from_field_dir(dir_code):
         return field_up_yaw
     if dir_code == Push_Dir_Left:
         return field_left_yaw
+    if dir_code == Push_Dir_Down:
+        return field_down_yaw
     return field_up_yaw
+
+
+def opposite_push_dir(dir_code):
+    if dir_code == Push_Dir_Right:
+        return Push_Dir_Left
+    if dir_code == Push_Dir_Left:
+        return Push_Dir_Right
+    if dir_code == Push_Dir_Up:
+        return Push_Dir_Down
+    if dir_code == Push_Dir_Down:
+        return Push_Dir_Up
+    return Push_Dir_None
 
 
 def refresh_field_reference(force=False):
@@ -432,7 +489,7 @@ def send_art_mode_command(new_state):
         cam_uart.write(ART_MODE_FINE_CMD)
     elif new_state == NAV_STATE_PUSH:
         cam_uart.write(ART_MODE_LINE_CMD)
-    elif new_state in (NAV_STATE_PUSH_BACK, NAV_STATE_PUSH_TURN):
+    elif new_state in (NAV_STATE_PUSH_BACK, NAV_STATE_PUSH_TURN, NAV_STATE_COOP_APPROACH, NAV_STATE_COOP_WAIT_START, NAV_STATE_COOP_DONE):
         cam_uart.write(ART_MODE_IDLE_CMD)
 
 
@@ -447,6 +504,7 @@ def nav_set_state(new_state, reason="", force=False):
     global push_orbit_dir, push_orbit_vy_sign, push_orbit_done
     global push_orbit_reached, push_orbit_progress_deg, push_orbit_last_ms
     global push_orbit_brake_since_ms
+    global coop_approach_start_ms
 
     if nav_state == new_state and (not force):
         return
@@ -497,6 +555,8 @@ def nav_set_state(new_state, reason="", force=False):
         push_orbit_brake_since_ms = 0
     elif new_state == NAV_STATE_PUSH_BACK:
         push_return_yaw_target = normalize_yaw_deg(push_yaw_target + 180.0)
+    elif new_state == NAV_STATE_COOP_APPROACH:
+        coop_approach_start_ms = now
 
     if ENABLE_IMU and imu_runtime is not None:
         if new_state == NAV_STATE_SEARCH_TURN:
@@ -509,7 +569,7 @@ def nav_set_state(new_state, reason="", force=False):
                 yaw_ref_deg = imu_runtime.read_yaw()
         elif new_state in (NAV_STATE_COARSE, NAV_STATE_PUSH_CLASSIFY):
             yaw_ref_deg = imu_runtime.read_yaw()
-        elif new_state in (NAV_STATE_PUSH_ORIENT, NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH, NAV_STATE_PUSH_BACK):
+        elif new_state in (NAV_STATE_PUSH_ORIENT, NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH, NAV_STATE_PUSH_BACK, NAV_STATE_COOP_WAIT_START):
             yaw_ref_deg = push_yaw_target
         elif new_state == NAV_STATE_PUSH_TURN:
             yaw_ref_deg = push_return_yaw_target
@@ -553,7 +613,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
     global nav_coarse_ok_since_ms, nav_fine_ok_since_ms
     global nav_push_prepare_ok_since_ms, nav_push_turn_ok_since_ms
     global nav_ready_for_push
-    global cam_target_vx, cam_target_vy, yaw_ref_deg, push_yaw_target
+    global cam_target_vx, cam_target_vy, yaw_ref_deg, push_yaw_target, push_dir_code, push_dir_name
     global line_crossed, push_line_seen_once, push_line_lost_since_ms, push_line_extra_since_ms
     global push_return_yaw_target, push_face_obj_yaw
     global push_orbit_dir, push_orbit_vy_sign, push_orbit_blocked, push_orbit_done
@@ -583,6 +643,19 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
     else:
         nav_detect_since_ms = 0
         nav_target_lost_since_ms = 0
+
+    if nav_state == NAV_STATE_COOP_APPROACH:
+        nav_ready_for_push = False
+        cam_target_vx = cfg.COOP_SLAVE_APPROACH_SPEED
+        cam_target_vy = 0.0
+        if ENABLE_IMU:
+            yaw_ref_deg = field_up_yaw
+        coop_send_slave_approaching()
+        if utime.ticks_diff(now, coop_approach_start_ms) >= cfg.COOP_SLAVE_APPROACH_MS:
+            cam_target_vx = 0.0
+            cam_target_vy = 0.0
+            nav_set_state(NAV_STATE_SEARCH, "coop_approach_done_search")
+        return
 
     if nav_state == NAV_STATE_SEARCH_TURN:
         nav_ready_for_push = False
@@ -748,7 +821,22 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         nav_ready_for_push = False
         cam_target_vx = 0.0
         cam_target_vy = 0.0
-        if push_dir_code in (Push_Dir_Right, Push_Dir_Up, Push_Dir_Left):
+        if COOP_ENABLE and COOP_ROLE_SLAVE and coop_slave_dir in (Push_Dir_Right, Push_Dir_Up, Push_Dir_Left, Push_Dir_Down):
+            classify_ready = push_dir_code in (Push_Dir_Right, Push_Dir_Up, Push_Dir_Left)
+            classify_grace_done = utime.ticks_diff(now, nav_transition_ms) >= cfg.COOP_SLAVE_CLASSIFY_GRACE_MS
+            if classify_ready or classify_grace_done:
+                if classify_ready and push_dir_code != coop_slave_dir:
+                    log(
+                        "[COOP] slave classify mismatch cls=%s expected=%s master=%s"
+                        % (
+                            push_dir_label(push_dir_code),
+                            push_dir_label(coop_slave_dir),
+                            push_dir_label(coop_master_dir),
+                        )
+                    )
+                push_dir_code = coop_slave_dir
+                push_dir_name = push_dir_label(push_dir_code)
+        if push_dir_code in (Push_Dir_Right, Push_Dir_Up, Push_Dir_Left, Push_Dir_Down):
             push_yaw_target = yaw_from_field_dir(push_dir_code)
             push_orbit_dir = orbit_turn_dir_from_dir(push_dir_code)
             push_orbit_vy_sign = orbit_vy_sign_from_dir(push_dir_code)
@@ -860,16 +948,39 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             elif utime.ticks_diff(now, nav_push_prepare_ok_since_ms) >= Nav_Push_Prepare_Ok_Ms:
                 cam_target_vx = 0.0
                 cam_target_vy = 0.0
-                nav_set_state(NAV_STATE_PUSH, "push_pose_locked")
+                if COOP_ENABLE and COOP_ROLE_SLAVE:
+                    nav_set_state(NAV_STATE_COOP_WAIT_START, "slave_pose_locked_wait_start")
+                else:
+                    nav_set_state(NAV_STATE_PUSH, "push_pose_locked")
         else:
             nav_push_prepare_ok_since_ms = 0
         return
 
-    if nav_state == NAV_STATE_PUSH:
+    if nav_state == NAV_STATE_COOP_WAIT_START:
         nav_ready_for_push = True
-        cam_target_vx = Nav_Push_Execute_Forward_Speed
+        cam_target_vx = 0.0
         cam_target_vy = 0.0
         yaw_ref_deg = push_yaw_target
+        coop_send_slave_ready()
+        if coop_push_start_received:
+            nav_set_state(NAV_STATE_PUSH, "coop_push_start")
+        return
+
+    if nav_state == NAV_STATE_PUSH:
+        nav_ready_for_push = True
+        if COOP_ENABLE and COOP_ROLE_SLAVE:
+            hold_speed = coop_master_push_speed + cfg.COOP_SLAVE_HOLD_SPEED_BIAS
+            if hold_speed < Nav_Push_Execute_Forward_Speed:
+                hold_speed = Nav_Push_Execute_Forward_Speed
+            cam_target_vx = -hold_speed
+        else:
+            cam_target_vx = Nav_Push_Execute_Forward_Speed
+        cam_target_vy = 0.0
+        yaw_ref_deg = push_yaw_target
+        if COOP_ENABLE and COOP_ROLE_SLAVE:
+            if coop_push_stop_received:
+                nav_set_state(NAV_STATE_COOP_DONE, "coop_push_stop")
+            return
         if line_crossed:
             push_line_seen_once = True
             push_line_lost_since_ms = 0
@@ -908,6 +1019,13 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 nav_set_state(NAV_STATE_POST_TURN_FORWARD, "push_finish_wait_target")
         else:
             nav_push_turn_ok_since_ms = 0
+        return
+
+    if nav_state == NAV_STATE_COOP_DONE:
+        nav_ready_for_push = False
+        cam_target_vx = 0.0
+        cam_target_vy = 0.0
+        coop_send_done()
         return
 
     cam_target_vx = 0.0
@@ -963,6 +1081,186 @@ def poll_art_uart():
         cam_rx_buf = bytearray()
 
 
+def coop_next_seq():
+    global coop_seq
+    coop_seq = (coop_seq + 1) & 0xFF
+    if coop_seq == 0:
+        coop_seq = 1
+    return coop_seq
+
+
+def coop_wireless_write(data):
+    try:
+        write_fn = getattr(wireless, "write", None)
+        if write_fn is not None:
+            write_fn(data)
+            return True
+    except Exception:
+        pass
+    try:
+        send_fn = getattr(wireless, "send", None)
+        if send_fn is not None:
+            send_fn(data)
+            return True
+    except Exception:
+        pass
+    try:
+        wireless.send_str("".join(chr(b) for b in data))
+        return True
+    except Exception:
+        return False
+
+
+def coop_wireless_read():
+    try:
+        any_fn = getattr(wireless, "any", None)
+        read_fn = getattr(wireless, "read", None)
+        if read_fn is None:
+            return None
+        if any_fn is not None:
+            pending = any_fn()
+            if not pending:
+                return None
+            if pending > 32:
+                pending = 32
+            return read_fn(pending)
+        return read_fn()
+    except Exception:
+        return None
+
+
+def coop_send_ack(seq, msg_type):
+    if COOP_ENABLE:
+        coop_wireless_write(encode_ack(seq, msg_type))
+
+
+def coop_send_slave_approaching(force=False):
+    global coop_approach_last_tx_ms
+
+    if not (COOP_ENABLE and COOP_ROLE_SLAVE):
+        return
+    now = utime.ticks_ms()
+    if (not force) and utime.ticks_diff(now, coop_approach_last_tx_ms) < cfg.COOP_READY_REPEAT_MS:
+        return
+    coop_wireless_write(encode_status(MSG_SLAVE_APPROACHING, coop_next_seq(), 0, coop_slave_dir))
+    coop_approach_last_tx_ms = now
+
+
+def coop_send_slave_ready(force=False):
+    global coop_slave_ready_last_tx_ms
+
+    if not (COOP_ENABLE and COOP_ROLE_SLAVE):
+        return
+    now = utime.ticks_ms()
+    if (not force) and utime.ticks_diff(now, coop_slave_ready_last_tx_ms) < cfg.COOP_READY_REPEAT_MS:
+        return
+    coop_wireless_write(encode_status(MSG_SLAVE_READY, coop_next_seq(), 0, coop_slave_dir))
+    coop_slave_ready_last_tx_ms = now
+
+
+def coop_send_done(force=False):
+    global coop_slave_done_sent
+
+    if not (COOP_ENABLE and COOP_ROLE_SLAVE):
+        return
+    if coop_slave_done_sent and (not force):
+        return
+    coop_wireless_write(encode_status(MSG_DONE, coop_next_seq(), 0, coop_slave_dir))
+    coop_slave_done_sent = True
+
+
+def coop_start_from_target():
+    global car_started, auto_start_done, start_time, yaw_ref_deg
+    global push_dir_code, push_dir_name, push_yaw_target, push_face_obj_yaw
+
+    push_dir_code = coop_slave_dir
+    push_dir_name = push_dir_label(push_dir_code)
+    push_yaw_target = yaw_from_field_dir(push_dir_code)
+    push_face_obj_yaw = push_yaw_target
+
+    if not car_started:
+        calibrate_gyro_before_launch()
+        if ENABLE_IMU and imu_runtime is not None:
+            yaw_ref_deg = imu_runtime.read_yaw()
+        else:
+            yaw_ref_deg = 0.0
+        refresh_field_reference()
+        push_yaw_target = yaw_from_field_dir(push_dir_code)
+        car_started = True
+        auto_start_done = True
+        start_time = utime.ticks_ms()
+
+    nav_set_state(NAV_STATE_COOP_APPROACH, "coop_target_lock", force=True)
+
+
+def handle_coop_frame(msg_type, seq, payload):
+    global coop_target_received, coop_target_seq, coop_master_dir, coop_slave_dir
+    global coop_master_push_speed, coop_master_ready, coop_push_start_received
+    global coop_push_stop_received, coop_link_error, coop_last_rx_ms
+
+    coop_last_rx_ms = utime.ticks_ms()
+
+    if not COOP_ROLE_SLAVE:
+        return
+
+    if msg_type == MSG_TARGET_LOCK:
+        target = decode_target_lock(payload)
+        if target is None:
+            return
+        if coop_target_received and seq == coop_target_seq:
+            coop_send_ack(seq, ACK_TARGET_LOCK)
+            return
+        coop_target_seq = seq
+        coop_master_dir = int(target["master_dir"])
+        coop_slave_dir = int(target["slave_dir"])
+        coop_master_push_speed = float(target["push_speed"])
+        coop_target_received = True
+        coop_send_ack(seq, ACK_TARGET_LOCK)
+        coop_start_from_target()
+        return
+
+    if msg_type == MSG_MASTER_READY:
+        coop_master_ready = True
+        coop_send_ack(seq, MSG_MASTER_READY)
+        return
+
+    if msg_type == MSG_PUSH_START:
+        coop_push_start_received = True
+        coop_send_ack(seq, ACK_PUSH_START)
+        if nav_state == NAV_STATE_COOP_WAIT_START:
+            nav_set_state(NAV_STATE_PUSH, "coop_push_start")
+        return
+
+    if msg_type == MSG_PUSH_STOP:
+        coop_push_stop_received = True
+        coop_send_ack(seq, ACK_PUSH_STOP)
+        if nav_state == NAV_STATE_PUSH:
+            nav_set_state(NAV_STATE_COOP_DONE, "coop_push_stop")
+        return
+
+    if msg_type == MSG_ERROR:
+        coop_link_error = True
+
+
+def poll_coop_uart():
+    if not COOP_ENABLE:
+        return
+    data = coop_wireless_read()
+    if not data:
+        return
+    for msg_type, seq, payload in coop_parser.feed(data):
+        handle_coop_frame(msg_type, seq, payload)
+
+
+def coop_periodic():
+    if not (COOP_ENABLE and COOP_ROLE_SLAVE):
+        return
+    if nav_state == NAV_STATE_COOP_APPROACH:
+        coop_send_slave_approaching()
+    elif nav_state == NAV_STATE_COOP_WAIT_START:
+        coop_send_slave_ready()
+
+
 key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
 
 # ====================== 按键硬件初始化 ======================
@@ -988,7 +1286,7 @@ enc_fr = encoder(cfg.ENC_FR_A, cfg.ENC_FR_B, cfg.ENC_FR_INVERT)
 enc_b  = encoder(cfg.ENC_B_A,  cfg.ENC_B_B,  cfg.ENC_B_INVERT)
 
 # 无线串口初始化
-wireless = WIRELESS_UART(460800)
+wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
 cam_uart = UART(cfg.CAM_UART_ID, cfg.CAM_UART_BAUD)
 cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
 
@@ -1008,13 +1306,13 @@ def update_nav_led_display():
     led_straight.value(0)
     led_translate.value(0)
     led_rotate.value(0)
-    if nav_state == NAV_STATE_COARSE:
+    if nav_state == NAV_STATE_COARSE or nav_state == NAV_STATE_COOP_APPROACH:
         led_straight.value(1)
     elif nav_state == NAV_STATE_POST_TURN_FORWARD:
         led_straight.value(1)
     elif nav_state in (NAV_STATE_FINE, NAV_STATE_PUSH_CLASSIFY, NAV_STATE_PUSH_PREPARE):
         led_translate.value(1)
-    elif nav_state in (NAV_STATE_SEARCH_TURN, NAV_STATE_PUSH_ORIENT, NAV_STATE_PUSH, NAV_STATE_PUSH_BACK, NAV_STATE_PUSH_TURN):
+    elif nav_state in (NAV_STATE_SEARCH_TURN, NAV_STATE_PUSH_ORIENT, NAV_STATE_PUSH, NAV_STATE_PUSH_BACK, NAV_STATE_PUSH_TURN, NAV_STATE_COOP_WAIT_START):
         led_rotate.value(1)
 
 
@@ -1077,7 +1375,6 @@ def check_c8_exit():
 # 日志输出：串口 + 无线双发
 def log(msg):
     print(msg)
-    wireless.send_str(msg + "\r\n")
 
 # 停止所有电机
 def stop_all():
@@ -1130,25 +1427,11 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
 
 # 检查遥控器 7 通道是否触发退出
 def check_upper_exit():
-    wireless.data_analysis()
-    ch7_current = wireless.get_data(EXIT_TRIGGER_CHANNEL)
-    if abs(ch7_current - ch7_init_value) > CH7_TOLERANCE:
-        log("CH7 变化：基准=%.1f 当前=%.1f" % (ch7_init_value, ch7_current))
-        return True
     return False
 
 # ---------------------- CH7 exit calibration ----------------------
-log("=== CH7 通道基准校准开始 ===")
-
-ch7_samples = []
-for _ in range(5):
-    wireless.data_analysis()
-    utime.sleep_ms(10)
-    ch7_samples.append(wireless.get_data(EXIT_TRIGGER_CHANNEL))
-
-ch7_init_value = sum(ch7_samples) / len(ch7_samples)
-log("CH7 校准完成：%.1f" % ch7_init_value)
-log("CH7 退出阈值：±%.1f" % CH7_TOLERANCE)
+ch7_init_value = 0.0
+log("CH7 wireless exit disabled: wireless UART is reserved for coop")
 
 # ====================== 初始化 LED 显示 ======================
 update_nav_led_display()
@@ -1235,7 +1518,7 @@ def calc_speed_closed_loop():
             "cam_x": 0, "cam_y": 0,
             "abs_err_x": 0, "abs_err_y": 0,
             "nav_state": NAV_STATE_SEARCH,
-            "nav_ready": 0,
+            "nav_ready": 1 if nav_ready_for_push else 0,
             "push_dir": push_dir_name,
             "push_yaw_target": push_yaw_target,
         }
@@ -1256,7 +1539,7 @@ def calc_speed_closed_loop():
     low_speed = abs(e_fl) <= Nav_Low_Speed_Th and abs(e_fr) <= Nav_Low_Speed_Th and abs(e_b) <= Nav_Low_Speed_Th
     update_nav_state_and_targets(yaw_deg, low_speed, gyro_z)
 
-    if nav_state == NAV_STATE_SEARCH or nav_state == NAV_STATE_PUSH_CLASSIFY:
+    if nav_state in (NAV_STATE_SEARCH, NAV_STATE_PUSH_CLASSIFY, NAV_STATE_COOP_WAIT_START, NAV_STATE_COOP_DONE):
         move_cmd.tar_spd_x = 0.0
         move_cmd.tar_spd_y = 0.0
         move_cmd.tar_spd_z = 0.0
@@ -1550,8 +1833,11 @@ try:
 
         # ====================== 按键检查（主循环最前面） ======================
         check_c8_exit()
-        check_c9_start()
-        if AUTO_START_ON_BOOT and (not auto_start_done) and (not car_started):
+        poll_coop_uart()
+        coop_periodic()
+        if not (COOP_ENABLE and COOP_ROLE_SLAVE):
+            check_c9_start()
+        if AUTO_START_ON_BOOT and (not auto_start_done) and (not car_started) and (not (COOP_ENABLE and COOP_ROLE_SLAVE)):
             if utime.ticks_diff(now, start_time) >= AUTO_START_DELAY_MS:
                 calibrate_gyro_before_launch()
                 if ENABLE_IMU and imu_runtime is not None:
@@ -1567,6 +1853,7 @@ try:
         poll_art_uart()
         vision_ready = (
             (not car_started)
+            and (not (COOP_ENABLE and COOP_ROLE_SLAVE))
             and cam_rx_started
             and cam_packet_fresh()
         )

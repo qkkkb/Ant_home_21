@@ -28,12 +28,6 @@ TARGET_TENNIS = 3
 
 
 class CoopProtocol:
-    """
-    两车协同协议建议：
-    - 单字节状态位用于快速同步阶段
-    - 可选第二字节作为 payload，传目标类别/错误码/阶段编号
-    """
-
     IDLE = 0
     SEARCHING = 1
     READY = 2
@@ -224,4 +218,4 @@ def get_target_profile(label):
 def update_partner_flags(ctx, state, payload=0):
     ctx.partner_state = int(state)
     ctx.partner_payload = int(payload)
-    ctx.partner_ready = 1 if state >= CoopProtocol.READY else 0
+    ctx.partner_ready = 1 if state >= CoopProtocol.READY else 0

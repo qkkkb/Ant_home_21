@@ -1,4 +1,4 @@
-from machine import Pin, UART
+﻿from machine import Pin, UART
 import gc
 import utime
 from smartcar import ticker, encoder
@@ -9,6 +9,25 @@ from move_base import calc_wheel_spd
 import pid as _pid_mod
 import config as cfg
 from hardware import Motor
+from coop_protocol import (
+    ACK_PUSH_START,
+    ACK_PUSH_STOP,
+    ACK_TARGET_LOCK,
+    CoopFrameParser,
+    decode_status,
+    encode_ack,
+    encode_status,
+    encode_target_lock,
+    MSG_ACK,
+    MSG_DONE,
+    MSG_ERROR,
+    MSG_MASTER_READY,
+    MSG_PUSH_START,
+    MSG_PUSH_STOP,
+    MSG_SLAVE_APPROACHING,
+    MSG_SLAVE_READY,
+    MSG_TARGET_LOCK,
+)
 
 # 设置 PID 最大 PWM 值
 _pid_mod.PWM_MAX = cfg.PWM_MAX
@@ -39,7 +58,7 @@ GYRO_DEADBAND_DPS = 0.8  # 陀螺仪死区阈值
 GYRO_KP = 0.15
 GYRO_KI = 0.003
 GYRO_OUTPUT_LIMIT = 5.0
-AUTO_CALIBRATE_GYRO_ON_LAUNCH = True
+AUTO_CALIBRATE_GYRO_ON_LAUNCH = True   #是否在启动时自动进行陀螺仪标定
 GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
 
@@ -76,6 +95,8 @@ NAV_STATE_PUSH = "PUSH_EXECUTE"
 NAV_STATE_PUSH_BACK = "PUSH_FINISH_BACK"
 NAV_STATE_PUSH_TURN = "PUSH_FINISH_TURN"
 NAV_STATE_POST_TURN_FORWARD = "POST_TURN_FORWARD"
+NAV_STATE_COOP_WAIT_SLAVE = "COOP_WAIT_SLAVE"
+NAV_STATE_COOP_DONE = "COOP_DONE"
 ART_MODE_SEARCH_CMD = b"SEARCH\n"
 ART_MODE_COARSE_CMD = b"COARSE\n"
 ART_MODE_FINE_CMD = b"FINE\n"
@@ -86,6 +107,10 @@ Push_Dir_None = 0
 Push_Dir_Right = 1
 Push_Dir_Up = 2
 Push_Dir_Left = 3
+Push_Dir_Down = 4
+COOP_ROLE_MASTER = cfg.COOP_ROLE == "MASTER"
+COOP_ROLE_SLAVE = cfg.COOP_ROLE == "SLAVE"
+COOP_ENABLE = cfg.COOP_ENABLE
 Nav_Detect_Ms = 200
 Nav_Target_Lost_Ms = 500
 Nav_Search_Turn_Yaw = 30.0
@@ -97,8 +122,8 @@ Nav_Search_Turn_Gyro_Limit = 2.5
 Nav_Search_Turn_Open_Vz = 2.2
 Nav_Coarse_Exit_Y = 200
 Nav_Coarse_Ok_Ms = 30
-Nav_Fine_Ok_X = 4.5
-Nav_Fine_Ok_Y_Max = 18
+Nav_Fine_Ok_X = 4.5 
+Nav_Fine_Ok_Y_Max = 18  
 Nav_Fine_Ok_Ms = 200
 Nav_Transition_Grace_Ms = 200
 Nav_Low_Speed_Th = 30
@@ -109,22 +134,23 @@ Nav_Coarse_Lateral_Limit = 3.0
 Nav_Fine_Forward_Gain = 0.02
 Nav_Fine_Lateral_Gain = 0.05
 Nav_Fine_Forward_Limit = 3.5
-Nav_Fine_Lateral_Limit = 4.0
+Nav_Fine_Lateral_Limit = 4.0    
 Nav_Forward_Deadband = 4
-Nav_Lateral_Deadband = 6
+Nav_Lateral_Deadband = 3    #横移死区，单位像素；如果摄像头误差在这个范围内则认为不需要横移
 Nav_Classify_Timeout_Ms = 1500
-Nav_Push_Orient_Ok_Yaw = 8.0
+
+Nav_Push_Orient_Ok_Yaw = 5.0    #orbit 目标角度误差小于该值即认为定向完成
 Nav_Push_Orbit_Skip_Yaw = 15.0
 Nav_Push_Orient_Max_Ms = 15000
 Nav_Push_Orbit_Slow_Yaw = 40.0
-Nav_Push_Orbit_Fast_Vy = 3.0
-Nav_Push_Orbit_Slow_Vy = 2.5
-Nav_Push_Orbit_Fast_Rate = 60.0
-Nav_Push_Orbit_Slow_Rate = 25.0
+Nav_Push_Orbit_Fast_Vy = 2.6
+Nav_Push_Orbit_Slow_Vy = 1.5
+Nav_Push_Orbit_Fast_Rate = 75.0
+Nav_Push_Orbit_Slow_Rate = 35.0
 Nav_Push_Orbit_Gyro_Limit = 16.0
-Nav_Push_Orbit_Radius_Base = 1.6
-Nav_Push_Orbit_Radius_Gain = 0.02
-Nav_Push_Orbit_Stop_Gyro_Th = 4.0
+Nav_Push_Orbit_Radius_Base = 1.0   #orbit 基础半径系数，实际轨迹半径=该系数 * 车轮轴距；如果轨迹过大或过小可以调整该值
+Nav_Push_Orbit_Radius_Gain = 0.01
+Nav_Push_Orbit_Stop_Gyro_Th = 3.0   #orbit 过程中如果陀螺仪读数小于该值则认为已经接近目标角度，可以停止转向加速前进
 Nav_Push_Orbit_Brake_Max_Ms = 1000
 Nav_Push_Orbit_Vy_Sign_Right = -1
 Nav_Push_Orbit_Vy_Sign_Up = 0
@@ -134,24 +160,24 @@ Nav_Push_Prepare_Forward_Gain = 0.012
 Nav_Push_Prepare_Lateral_Gain = 0.030
 Nav_Push_Prepare_Forward_Limit = 1.2
 Nav_Push_Prepare_Lateral_Limit = 1.6
-Nav_Push_Prepare_Ok_X = 12
-Nav_Push_Prepare_Ok_Y_Max = 10
-Nav_Push_Prepare_Ok_Yaw = 6.0
-Nav_Push_Prepare_Ok_Ms = 80
-Nav_Push_Execute_Forward_Speed = 2.2
+Nav_Push_Prepare_Ok_X = 4    #准备阶段前进误差小于该值即认为横移准备就绪
+Nav_Push_Prepare_Ok_Y_Max = 8  #准备阶段横移误差小于该值即认为前进准备就绪
+Nav_Push_Prepare_Ok_Yaw = 5.0   #准备阶段定向误差小于该值即认为定向准备就绪
+Nav_Push_Prepare_Ok_Ms = 150
+Nav_Push_Execute_Forward_Speed = 3.0
 Nav_Push_Line_Lost_Ms = 150
-Nav_Push_Line_Extra_Ms = 500
-Nav_Push_Back_Speed = 1.2
-Nav_Push_Back_Ms = 350
+Nav_Push_Line_Extra_Ms = 300
+Nav_Push_Back_Speed = 2.0
+Nav_Push_Back_Ms = 800
 Nav_Push_Turn_Slow_Yaw = 35.0
-Nav_Push_Turn_Fast_Rate = 90.0
+Nav_Push_Turn_Fast_Rate = 120.0
 Nav_Push_Turn_Slow_Rate = 35.0
 Nav_Push_Turn_Gyro_Limit = 16.0
 Nav_Push_Turn_Ok_Yaw = 6.0
 Nav_Push_Turn_Ok_Ms = 150
 Nav_Post_Turn_No_Target_Ms = 200
-Nav_Post_Turn_Forward_Ms = 500
-Nav_Post_Turn_Forward_Speed = 1.2
+Nav_Post_Turn_Forward_Ms = 1500
+Nav_Post_Turn_Forward_Speed = 5
 
 # ====================== 全局状态变量 ======================
 # 小车启动标志：False=上电静止，True=已启动
@@ -208,6 +234,22 @@ line_crossed = False
 push_line_seen_once = False
 push_line_lost_since_ms = 0
 push_line_extra_since_ms = 0
+coop_parser = CoopFrameParser()
+coop_seq = 0
+coop_target_seq = 0
+coop_target_sent = False
+coop_target_ack = False
+coop_target_last_tx_ms = 0
+coop_ready_last_tx_ms = 0
+coop_push_start_sent = False
+coop_push_start_last_tx_ms = 0
+coop_push_stop_sent = False
+coop_push_stop_last_tx_ms = 0
+coop_slave_approaching = False
+coop_slave_ready = False
+coop_slave_done = False
+coop_link_error = False
+coop_last_rx_ms = 0
 
 def wrapped_yaw_error(ref_deg, now_deg):
     err = now_deg - ref_deg
@@ -233,6 +275,8 @@ def push_dir_label(dir_code):
         return "UP"
     if dir_code == Push_Dir_Left:
         return "LEFT"
+    if dir_code == Push_Dir_Down:
+        return "DOWN"
     return "NONE"
 
 
@@ -243,7 +287,21 @@ def yaw_from_field_dir(dir_code):
         return field_up_yaw
     if dir_code == Push_Dir_Left:
         return field_left_yaw
+    if dir_code == Push_Dir_Down:
+        return field_down_yaw
     return field_up_yaw
+
+
+def opposite_push_dir(dir_code):
+    if dir_code == Push_Dir_Right:
+        return Push_Dir_Left
+    if dir_code == Push_Dir_Left:
+        return Push_Dir_Right
+    if dir_code == Push_Dir_Up:
+        return Push_Dir_Down
+    if dir_code == Push_Dir_Down:
+        return Push_Dir_Up
+    return Push_Dir_None
 
 
 def refresh_field_reference(force=False):
@@ -431,7 +489,7 @@ def send_art_mode_command(new_state):
         cam_uart.write(ART_MODE_FINE_CMD)
     elif new_state == NAV_STATE_PUSH:
         cam_uart.write(ART_MODE_LINE_CMD)
-    elif new_state in (NAV_STATE_PUSH_BACK, NAV_STATE_PUSH_TURN):
+    elif new_state in (NAV_STATE_PUSH_BACK, NAV_STATE_PUSH_TURN, NAV_STATE_COOP_WAIT_SLAVE, NAV_STATE_COOP_DONE):
         cam_uart.write(ART_MODE_IDLE_CMD)
 
 
@@ -508,7 +566,7 @@ def nav_set_state(new_state, reason="", force=False):
                 yaw_ref_deg = imu_runtime.read_yaw()
         elif new_state in (NAV_STATE_COARSE, NAV_STATE_PUSH_CLASSIFY):
             yaw_ref_deg = imu_runtime.read_yaw()
-        elif new_state in (NAV_STATE_PUSH_ORIENT, NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH, NAV_STATE_PUSH_BACK):
+        elif new_state in (NAV_STATE_PUSH_ORIENT, NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH, NAV_STATE_PUSH_BACK, NAV_STATE_COOP_WAIT_SLAVE):
             yaw_ref_deg = push_yaw_target
         elif new_state == NAV_STATE_PUSH_TURN:
             yaw_ref_deg = push_return_yaw_target
@@ -747,7 +805,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         nav_ready_for_push = False
         cam_target_vx = 0.0
         cam_target_vy = 0.0
-        if push_dir_code in (Push_Dir_Right, Push_Dir_Up, Push_Dir_Left):
+        if push_dir_code in (Push_Dir_Right, Push_Dir_Up, Push_Dir_Left, Push_Dir_Down):
             push_yaw_target = yaw_from_field_dir(push_dir_code)
             push_orbit_dir = orbit_turn_dir_from_dir(push_dir_code)
             push_orbit_vy_sign = orbit_vy_sign_from_dir(push_dir_code)
@@ -766,6 +824,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             push_orbit_reached = False
             push_orbit_last_ms = now
             push_orbit_brake_since_ms = 0
+            coop_send_target_lock(force=True)
             if push_orbit_dir == 0:
                 push_orbit_done = True
                 nav_set_state(
@@ -859,9 +918,25 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             elif utime.ticks_diff(now, nav_push_prepare_ok_since_ms) >= Nav_Push_Prepare_Ok_Ms:
                 cam_target_vx = 0.0
                 cam_target_vy = 0.0
-                nav_set_state(NAV_STATE_PUSH, "push_pose_locked")
+                if COOP_ENABLE and COOP_ROLE_MASTER:
+                    nav_set_state(NAV_STATE_COOP_WAIT_SLAVE, "master_pose_locked_wait_slave")
+                else:
+                    nav_set_state(NAV_STATE_PUSH, "push_pose_locked")
         else:
             nav_push_prepare_ok_since_ms = 0
+        return
+
+    if nav_state == NAV_STATE_COOP_WAIT_SLAVE:
+        nav_ready_for_push = True
+        cam_target_vx = 0.0
+        cam_target_vy = 0.0
+        yaw_ref_deg = push_yaw_target
+        coop_send_master_ready()
+        if coop_slave_ready:
+            coop_send_push_start(force=True)
+            nav_set_state(NAV_STATE_PUSH, "slave_ready_push_start")
+        elif utime.ticks_diff(now, nav_transition_ms) >= cfg.COOP_MASTER_WAIT_SLAVE_MS:
+            nav_set_state(NAV_STATE_FINE, "slave_ready_timeout_refine")
         return
 
     if nav_state == NAV_STATE_PUSH:
@@ -880,6 +955,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 if push_line_extra_since_ms == 0:
                     push_line_extra_since_ms = now
                 elif utime.ticks_diff(now, push_line_extra_since_ms) >= Nav_Push_Line_Extra_Ms:
+                    coop_send_push_stop(force=True)
                     nav_set_state(NAV_STATE_PUSH_BACK, "line_extra_after_cross")
         return
 
@@ -962,6 +1038,184 @@ def poll_art_uart():
         cam_rx_buf = bytearray()
 
 
+def coop_next_seq():
+    global coop_seq
+    coop_seq = (coop_seq + 1) & 0xFF
+    if coop_seq == 0:
+        coop_seq = 1
+    return coop_seq
+
+
+def coop_wireless_write(data):
+    try:
+        write_fn = getattr(wireless, "write", None)
+        if write_fn is not None:
+            write_fn(data)
+            return True
+    except Exception:
+        pass
+    try:
+        send_fn = getattr(wireless, "send", None)
+        if send_fn is not None:
+            send_fn(data)
+            return True
+    except Exception:
+        pass
+    try:
+        # Fallback for firmware that only exposes string sending.
+        wireless.send_str("".join(chr(b) for b in data))
+        return True
+    except Exception:
+        return False
+
+
+def coop_wireless_read():
+    try:
+        any_fn = getattr(wireless, "any", None)
+        read_fn = getattr(wireless, "read", None)
+        if read_fn is None:
+            return None
+        if any_fn is not None:
+            pending = any_fn()
+            if not pending:
+                return None
+            if pending > 32:
+                pending = 32
+            return read_fn(pending)
+        return read_fn()
+    except Exception:
+        return None
+
+
+def coop_send_ack(seq, msg_type):
+    if COOP_ENABLE:
+        coop_wireless_write(encode_ack(seq, msg_type))
+
+
+def coop_send_target_lock(force=False):
+    global coop_target_seq, coop_target_sent, coop_target_last_tx_ms
+
+    if not (COOP_ENABLE and COOP_ROLE_MASTER):
+        return
+    if push_dir_code not in (Push_Dir_Right, Push_Dir_Up, Push_Dir_Left, Push_Dir_Down):
+        return
+
+    now = utime.ticks_ms()
+    if coop_target_sent and (not force):
+        if coop_target_ack:
+            return
+        if utime.ticks_diff(now, coop_target_last_tx_ms) < cfg.COOP_TARGET_REPEAT_MS:
+            return
+    if not coop_target_sent:
+        coop_target_seq = coop_next_seq()
+
+    frame = encode_target_lock(
+        coop_target_seq,
+        push_dir_code,
+        opposite_push_dir(push_dir_code),
+        push_yaw_target,
+        cam_error_x,
+        cam_error_y,
+        Nav_Push_Execute_Forward_Speed,
+    )
+    coop_wireless_write(frame)
+    coop_target_sent = True
+    coop_target_last_tx_ms = now
+
+
+def coop_send_master_ready(force=False):
+    global coop_ready_last_tx_ms
+
+    if not (COOP_ENABLE and COOP_ROLE_MASTER):
+        return
+    now = utime.ticks_ms()
+    if (not force) and utime.ticks_diff(now, coop_ready_last_tx_ms) < cfg.COOP_READY_REPEAT_MS:
+        return
+    coop_wireless_write(encode_status(MSG_MASTER_READY, coop_next_seq(), 0, push_dir_code))
+    coop_ready_last_tx_ms = now
+
+
+def coop_send_push_start(force=False):
+    global coop_push_start_sent, coop_push_start_last_tx_ms
+
+    if not (COOP_ENABLE and COOP_ROLE_MASTER):
+        return
+    now = utime.ticks_ms()
+    if (not force) and coop_push_start_sent:
+        if utime.ticks_diff(now, coop_push_start_last_tx_ms) < cfg.COOP_READY_REPEAT_MS:
+            return
+    coop_wireless_write(encode_status(MSG_PUSH_START, coop_next_seq(), 0, push_dir_code))
+    coop_push_start_sent = True
+    coop_push_start_last_tx_ms = now
+
+
+def coop_send_push_stop(force=False):
+    global coop_push_stop_sent, coop_push_stop_last_tx_ms
+
+    if not (COOP_ENABLE and COOP_ROLE_MASTER):
+        return
+    now = utime.ticks_ms()
+    if (not force) and coop_push_stop_sent:
+        if utime.ticks_diff(now, coop_push_stop_last_tx_ms) < cfg.COOP_STOP_REPEAT_MS:
+            return
+    coop_wireless_write(encode_status(MSG_PUSH_STOP, coop_next_seq(), 0, push_dir_code))
+    coop_push_stop_sent = True
+    coop_push_stop_last_tx_ms = now
+
+
+def handle_coop_frame(msg_type, seq, payload):
+    global coop_target_ack, coop_slave_approaching, coop_slave_ready
+    global coop_slave_done, coop_link_error, coop_last_rx_ms
+
+    coop_last_rx_ms = utime.ticks_ms()
+
+    if COOP_ROLE_MASTER:
+        if msg_type == MSG_ACK and len(payload) >= 1:
+            if int(payload[0]) == ACK_TARGET_LOCK and seq == coop_target_seq:
+                coop_target_ack = True
+            return
+        if msg_type == MSG_SLAVE_APPROACHING:
+            coop_slave_approaching = True
+            coop_send_ack(seq, MSG_SLAVE_APPROACHING)
+            return
+        if msg_type == MSG_SLAVE_READY:
+            coop_slave_ready = True
+            coop_send_ack(seq, MSG_SLAVE_READY)
+            return
+        if msg_type == MSG_DONE:
+            coop_slave_done = True
+            coop_send_ack(seq, MSG_DONE)
+            return
+        if msg_type == MSG_ERROR:
+            coop_link_error = True
+            return
+
+
+def poll_coop_uart():
+    if not COOP_ENABLE:
+        return
+    data = coop_wireless_read()
+    if not data:
+        return
+    for msg_type, seq, payload in coop_parser.feed(data):
+        handle_coop_frame(msg_type, seq, payload)
+
+
+def coop_periodic():
+    if not (COOP_ENABLE and COOP_ROLE_MASTER):
+        return
+    if coop_target_sent and (not coop_target_ack):
+        coop_send_target_lock()
+    if nav_state == NAV_STATE_COOP_WAIT_SLAVE:
+        coop_send_master_ready()
+        if coop_slave_ready:
+            coop_send_push_start()
+    elif nav_state == NAV_STATE_PUSH and coop_push_start_sent:
+        coop_send_push_start()
+    if coop_push_stop_sent:
+        coop_send_push_stop()
+
+
 key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
 
 # ====================== 按键硬件初始化 ======================
@@ -987,7 +1241,7 @@ enc_fr = encoder(cfg.ENC_FR_A, cfg.ENC_FR_B, cfg.ENC_FR_INVERT)
 enc_b  = encoder(cfg.ENC_B_A,  cfg.ENC_B_B,  cfg.ENC_B_INVERT)
 
 # 无线串口初始化
-wireless = WIRELESS_UART(460800)
+wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
 cam_uart = UART(cfg.CAM_UART_ID, cfg.CAM_UART_BAUD)
 cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
 
@@ -1013,7 +1267,7 @@ def update_nav_led_display():
         led_straight.value(1)
     elif nav_state in (NAV_STATE_FINE, NAV_STATE_PUSH_CLASSIFY, NAV_STATE_PUSH_PREPARE):
         led_translate.value(1)
-    elif nav_state in (NAV_STATE_SEARCH_TURN, NAV_STATE_PUSH_ORIENT, NAV_STATE_PUSH, NAV_STATE_PUSH_BACK, NAV_STATE_PUSH_TURN):
+    elif nav_state in (NAV_STATE_SEARCH_TURN, NAV_STATE_PUSH_ORIENT, NAV_STATE_PUSH, NAV_STATE_PUSH_BACK, NAV_STATE_PUSH_TURN, NAV_STATE_COOP_WAIT_SLAVE):
         led_rotate.value(1)
 
 
@@ -1076,7 +1330,6 @@ def check_c8_exit():
 # 日志输出：串口 + 无线双发
 def log(msg):
     print(msg)
-    wireless.send_str(msg + "\r\n")
 
 # 停止所有电机
 def stop_all():
@@ -1129,25 +1382,11 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
 
 # 检查遥控器 7 通道是否触发退出
 def check_upper_exit():
-    wireless.data_analysis()
-    ch7_current = wireless.get_data(EXIT_TRIGGER_CHANNEL)
-    if abs(ch7_current - ch7_init_value) > CH7_TOLERANCE:
-        log("CH7 变化：基准=%.1f 当前=%.1f" % (ch7_init_value, ch7_current))
-        return True
     return False
 
 # ---------------------- CH7 exit calibration ----------------------
-log("=== CH7 通道基准校准开始 ===")
-
-ch7_samples = []
-for _ in range(5):
-    wireless.data_analysis()
-    utime.sleep_ms(10)
-    ch7_samples.append(wireless.get_data(EXIT_TRIGGER_CHANNEL))
-
-ch7_init_value = sum(ch7_samples) / len(ch7_samples)
-log("CH7 校准完成：%.1f" % ch7_init_value)
-log("CH7 退出阈值：±%.1f" % CH7_TOLERANCE)
+ch7_init_value = 0.0
+log("CH7 wireless exit disabled: wireless UART is reserved for coop")
 
 # ====================== 初始化 LED 显示 ======================
 update_nav_led_display()
@@ -1234,7 +1473,7 @@ def calc_speed_closed_loop():
             "cam_x": 0, "cam_y": 0,
             "abs_err_x": 0, "abs_err_y": 0,
             "nav_state": NAV_STATE_SEARCH,
-            "nav_ready": 0,
+            "nav_ready": 1 if nav_ready_for_push else 0,
             "push_dir": push_dir_name,
             "push_yaw_target": push_yaw_target,
         }
@@ -1255,7 +1494,7 @@ def calc_speed_closed_loop():
     low_speed = abs(e_fl) <= Nav_Low_Speed_Th and abs(e_fr) <= Nav_Low_Speed_Th and abs(e_b) <= Nav_Low_Speed_Th
     update_nav_state_and_targets(yaw_deg, low_speed, gyro_z)
 
-    if nav_state == NAV_STATE_SEARCH or nav_state == NAV_STATE_PUSH_CLASSIFY:
+    if nav_state in (NAV_STATE_SEARCH, NAV_STATE_PUSH_CLASSIFY, NAV_STATE_COOP_WAIT_SLAVE, NAV_STATE_COOP_DONE):
         move_cmd.tar_spd_x = 0.0
         move_cmd.tar_spd_y = 0.0
         move_cmd.tar_spd_z = 0.0
@@ -1564,6 +1803,8 @@ try:
                 nav_set_state(NAV_STATE_SEARCH_TURN, "launch_search_turn", force=True)
                 log("[自动发车] 到达开机延时，car_started=1")
         poll_art_uart()
+        poll_coop_uart()
+        coop_periodic()
         vision_ready = (
             (not car_started)
             and cam_rx_started

@@ -1036,17 +1036,26 @@ def coop_next_seq():
 
 
 def coop_wireless_write(data):
-    wireless.write(data)
-    return True
+    try:
+        wireless.write(data)
+        return True
+    except AttributeError:
+        try:
+            wireless.send_str("".join(chr(b) for b in data))
+            return True
+        except Exception:
+            return False
+    except Exception:
+        return False
 
 
 def coop_wireless_read():
-    pending = wireless.any()
-    if not pending:
+    try:
+        return wireless.read()
+    except AttributeError:
         return None
-    if pending > 32:
-        pending = 32
-    return wireless.read(pending)
+    except Exception:
+        return None
 
 
 def coop_send_ack(seq, msg_type):

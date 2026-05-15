@@ -1033,13 +1033,18 @@ def coop_next_seq():
     return coop_seq
 
 
+def coop_signed_byte(value):
+    value &= 0xFF
+    return value if value < 128 else value - 256
+
+
 def coop_wireless_write(data):
     try:
         n = len(data)
         if n > len(coop_tx_buf):
             return False
         for i in range(n):
-            coop_tx_buf[i] = int(data[i]) & 0xFF
+            coop_tx_buf[i] = coop_signed_byte(int(data[i]))
         wireless.send_bytearray(coop_tx_buf, n)
         coop_flash_tx()
         return True
@@ -1066,8 +1071,8 @@ def coop_wireless_send_frame(msg, seq, p0=-1, p1=-1):
             payload_len = 2
         n = payload_len + 2
         s = n & 0xFF
-        coop_tx_buf[0] = 0xA5
-        coop_tx_buf[1] = 0x5A
+        coop_tx_buf[0] = coop_signed_byte(0xA5)
+        coop_tx_buf[1] = coop_signed_byte(0x5A)
         coop_tx_buf[2] = n
         coop_tx_buf[3] = msg & 0xFF
         coop_tx_buf[4] = seq & 0xFF
@@ -1078,7 +1083,7 @@ def coop_wireless_send_frame(msg, seq, p0=-1, p1=-1):
         if payload_len > 1:
             coop_tx_buf[6] = p1 & 0xFF
             s = (s + coop_tx_buf[6]) & 0xFF
-        coop_tx_buf[5 + payload_len] = s
+        coop_tx_buf[5 + payload_len] = coop_signed_byte(s)
         wireless.send_bytearray(coop_tx_buf, n + 4)
         coop_flash_tx()
         return True

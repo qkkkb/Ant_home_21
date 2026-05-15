@@ -254,8 +254,10 @@ coop_approach_last_tx_ms = 0
 coop_slave_ready_last_tx_ms = 0
 coop_slave_done_sent = False
 COOP_LED_PULSE_MS = 40
+COOP_RX_LED_PULSE_MS = 200
 coop_tx_led_until_ms = 0
 coop_rx_led_until_ms = 0
+coop_rx_error_latched = False
 
 def wrapped_yaw_error(ref_deg, now_deg):
     err = now_deg - ref_deg
@@ -1075,12 +1077,16 @@ def coop_next_seq():
 
 
 def coop_wireless_read():
+    global coop_rx_error_latched
+
     try:
         n = wireless.receive_bytearray(coop_rx_buf, len(coop_rx_buf))
         if n:
             coop_flash_rx()
         return n
     except Exception:
+        coop_rx_error_latched = True
+        update_nav_led_display()
         return 0
 
 
@@ -1342,6 +1348,8 @@ def update_nav_led_display():
         translate_value = 0 if translate_value else 1
     else:
         coop_rx_led_until_ms = 0
+    if coop_rx_error_latched:
+        rotate_value = 1
 
     led_straight.value(straight_value)
     led_translate.value(translate_value)
@@ -1356,7 +1364,7 @@ def coop_flash_tx():
 
 def coop_flash_rx():
     global coop_rx_led_until_ms
-    coop_rx_led_until_ms = utime.ticks_add(utime.ticks_ms(), COOP_LED_PULSE_MS)
+    coop_rx_led_until_ms = utime.ticks_add(utime.ticks_ms(), COOP_RX_LED_PULSE_MS)
     update_nav_led_display()
 
 

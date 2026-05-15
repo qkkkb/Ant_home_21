@@ -1,4 +1,5 @@
 ﻿from machine import Pin, UART
+from array import array
 import gc
 import utime
 from smartcar import ticker, encoder
@@ -991,23 +992,29 @@ def coop_next_seq():
 
 def coop_wireless_write(data):
     try:
-        wireless.write(data)
-        return True
-    except AttributeError:
-        try:
-            wireless.send_str("".join(chr(b) for b in data))
-            return True
-        except Exception:
+        n = len(data)
+        if n > len(coop_tx_buf):
             return False
+        for i in range(n):
+            v = int(data[i]) & 0xFF
+            if v > 127:
+                v -= 256
+            coop_tx_buf[i] = v
+        wireless.send_bytearray(coop_tx_buf, n)
+        return True
     except Exception:
         return False
 
 
 def coop_wireless_read():
     try:
-        return wireless.read()
-    except AttributeError:
-        return None
+        n = wireless.receive_bytearray(coop_rx_buf, len(coop_rx_buf))
+        if not n:
+            return None
+        data = bytearray(n)
+        for i in range(n):
+            data[i] = int(coop_rx_buf[i]) & 0xFF
+        return data
     except Exception:
         return None
 
@@ -1167,6 +1174,8 @@ enc_b  = encoder(cfg.ENC_B_A,  cfg.ENC_B_B,  cfg.ENC_B_INVERT)
 
 # 无线串口初始化
 wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
+coop_rx_buf = array("b", [0] * 32)
+coop_tx_buf = array("b", [0] * 32)
 cam_uart = UART(cfg.CAM_UART_ID, cfg.CAM_UART_BAUD)
 cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
 

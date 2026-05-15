@@ -1,5 +1,4 @@
 from machine import Pin, UART
-from array import array
 import gc
 import utime
 from smartcar import ticker, encoder
@@ -16,8 +15,7 @@ from coop_protocol import (
     ACK_TARGET_LOCK,
     CoopFrameParser,
     decode_target_lock,
-    encode_ack,
-    encode_status,
+    MSG_ACK,
     MSG_DONE,
     MSG_ERROR,
     MSG_MASTER_READY,
@@ -1036,38 +1034,44 @@ def coop_next_seq():
     return coop_seq
 
 
-def coop_wireless_write(data):
+def coop_wireless_read():
     try:
-        n = len(data)
-        if n > len(coop_tx_buf):
-            return False
-        for i in range(n):
-            v = int(data[i]) & 0xFF
-            if v > 127:
-                v -= 256
-            coop_tx_buf[i] = v
-        wireless.send_bytearray(coop_tx_buf, n)
+        return wireless.receive_bytearray(coop_rx_buf, len(coop_rx_buf))
+    except Exception:
+        return 0
+
+
+def coop_wireless_send_frame(msg, seq, p0=-1, p1=-1):
+    try:
+        payload_len = 0
+        if p0 >= 0:
+            payload_len = 1
+        if p1 >= 0:
+            payload_len = 2
+        n = payload_len + 2
+        s = n & 0xFF
+        coop_tx_buf[0] = 0xA5
+        coop_tx_buf[1] = 0x5A
+        coop_tx_buf[2] = n
+        coop_tx_buf[3] = msg & 0xFF
+        coop_tx_buf[4] = seq & 0xFF
+        s = (s + coop_tx_buf[3] + coop_tx_buf[4]) & 0xFF
+        if payload_len > 0:
+            coop_tx_buf[5] = p0 & 0xFF
+            s = (s + coop_tx_buf[5]) & 0xFF
+        if payload_len > 1:
+            coop_tx_buf[6] = p1 & 0xFF
+            s = (s + coop_tx_buf[6]) & 0xFF
+        coop_tx_buf[5 + payload_len] = s
+        wireless.send_bytearray(coop_tx_buf, n + 4)
         return True
     except Exception:
         return False
 
 
-def coop_wireless_read():
-    try:
-        n = wireless.receive_bytearray(coop_rx_buf, len(coop_rx_buf))
-        if not n:
-            return None
-        data = bytearray(n)
-        for i in range(n):
-            data[i] = int(coop_rx_buf[i]) & 0xFF
-        return data
-    except Exception:
-        return None
-
-
 def coop_send_ack(seq, msg_type):
     if COOP_ENABLE:
-        coop_wireless_write(encode_ack(seq, msg_type))
+        coop_wireless_send_frame(MSG_ACK, seq, msg_type)
 
 
 def coop_send_slave_approaching(force=False):
@@ -1078,7 +1082,7 @@ def coop_send_slave_approaching(force=False):
     now = utime.ticks_ms()
     if (not force) and utime.ticks_diff(now, coop_approach_last_tx_ms) < cfg.COOP_READY_REPEAT_MS:
         return
-    coop_wireless_write(encode_status(MSG_SLAVE_APPROACHING, coop_next_seq(), 0, coop_slave_dir))
+    coop_wireless_send_frame(MSG_SLAVE_APPROACHING, coop_next_seq(), 0, coop_slave_dir)
     coop_approach_last_tx_ms = now
 
 
@@ -1090,7 +1094,7 @@ def coop_send_slave_ready(force=False):
     now = utime.ticks_ms()
     if (not force) and utime.ticks_diff(now, coop_slave_ready_last_tx_ms) < cfg.COOP_READY_REPEAT_MS:
         return
-    coop_wireless_write(encode_status(MSG_SLAVE_READY, coop_next_seq(), 0, coop_slave_dir))
+    coop_wireless_send_frame(MSG_SLAVE_READY, coop_next_seq(), 0, coop_slave_dir)
     coop_slave_ready_last_tx_ms = now
 
 
@@ -1101,7 +1105,7 @@ def coop_send_done(force=False):
         return
     if coop_slave_done_sent and (not force):
         return
-    coop_wireless_write(encode_status(MSG_DONE, coop_next_seq(), 0, coop_slave_dir))
+    coop_wireless_send_frame(MSG_DONE, coop_next_seq(), 0, coop_slave_dir)
     coop_slave_done_sent = True
 
 
@@ -1129,7 +1133,7 @@ def coop_start_from_target():
     nav_set_state(NAV_STATE_COOP_APPROACH, "coop_target_lock", force=True)
 
 
-def handle_coop_frame(msg_type, seq, payload):
+def handle_coop_frame(msg_type, seq, payload, payload_len):
     global coop_target_received, coop_target_seq, coop_master_dir, coop_slave_dir
     global coop_master_push_speed, coop_master_ready, coop_push_start_received
     global coop_push_stop_received, coop_link_error, coop_last_rx_ms
@@ -1140,7 +1144,7 @@ def handle_coop_frame(msg_type, seq, payload):
         return
 
     if msg_type == MSG_TARGET_LOCK:
-        target = decode_target_lock(payload)
+        target = decode_target_lock(payload, payload_len)
         if target is None:
             return
         if coop_target_received and seq == coop_target_seq:
@@ -1181,11 +1185,10 @@ def handle_coop_frame(msg_type, seq, payload):
 def poll_coop_uart():
     if not COOP_ENABLE:
         return
-    data = coop_wireless_read()
-    if not data:
+    n = coop_wireless_read()
+    if not n:
         return
-    for msg_type, seq, payload in coop_parser.feed(data):
-        handle_coop_frame(msg_type, seq, payload)
+    coop_parser.feed(coop_rx_buf, n, handle_coop_frame)
 
 
 def coop_periodic():
@@ -1223,8 +1226,8 @@ enc_b  = encoder(cfg.ENC_B_A,  cfg.ENC_B_B,  cfg.ENC_B_INVERT)
 
 # 无线串口初始化
 wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
-coop_rx_buf = array("b", [0] * 32)
-coop_tx_buf = array("b", [0] * 32)
+coop_rx_buf = bytearray(32)
+coop_tx_buf = bytearray(32)
 cam_uart = UART(cfg.CAM_UART_ID, cfg.CAM_UART_BAUD)
 cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
 
@@ -1806,7 +1809,7 @@ try:
             auto_start_done = True
             start_time = now
             nav_set_state(NAV_STATE_SEARCH_TURN, "vision_launch_search_turn", force=True)
-            log("[瑙嗚鍙戣溅] 棣栨鏀跺埌鏈夋晥鐩爣锛宑ar_started=1")
+            log("[VISION] first valid target, car_started=1")
 
         if pit_flag:
             pit_flag = False

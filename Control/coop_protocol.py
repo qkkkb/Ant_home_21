@@ -17,35 +17,54 @@ ACK_TARGET_LOCK = MSG_TARGET_LOCK
 
 class CoopFrameParser:
     def __init__(self):
-        self.buf = bytearray()
+        self.state = 0
+        self.n = 0
+        self.idx = 0
+        self.sum = 0
+        self.msg = 0
+        self.seq = 0
+        self.payload = bytearray(MAX_LEN)
 
-    def feed(self, data):
-        out = []
-        if not data:
-            return out
-        self.buf += data
-        while len(self.buf) >= 6:
-            if self.buf[0] != H1 or self.buf[1] != H2:
-                self.buf = self.buf[1:]
-                continue
-            n = self.buf[2]
-            if n < 2 or n > MAX_LEN:
-                self.buf = self.buf[1:]
-                continue
-            total = n + 4
-            if len(self.buf) < total:
-                break
-            s = 0
-            for v in self.buf[2:3 + n]:
-                s = (s + v) & 0xFF
-            if s == self.buf[3 + n]:
-                out.append((self.buf[3], self.buf[4], self.buf[5:3 + n]))
-                self.buf = self.buf[total:]
+    def reset(self):
+        self.state = 0
+        self.n = 0
+        self.idx = 0
+        self.sum = 0
+
+    def feed(self, data, data_len, handler):
+        for i in range(data_len):
+            b = int(data[i]) & 0xFF
+            if self.state == 0:
+                if b == H1:
+                    self.state = 1
+            elif self.state == 1:
+                if b == H2:
+                    self.state = 2
+                elif b != H1:
+                    self.state = 0
+            elif self.state == 2:
+                if b < 2 or b > MAX_LEN:
+                    self.reset()
+                else:
+                    self.n = b
+                    self.idx = 0
+                    self.sum = b
+                    self.state = 3
+            elif self.state == 3:
+                self.sum = (self.sum + b) & 0xFF
+                if self.idx == 0:
+                    self.msg = b
+                elif self.idx == 1:
+                    self.seq = b
+                else:
+                    self.payload[self.idx - 2] = b
+                self.idx += 1
+                if self.idx >= self.n:
+                    self.state = 4
             else:
-                self.buf = self.buf[1:]
-        if len(self.buf) > 32:
-            self.buf = bytearray()
-        return out
+                if b == self.sum:
+                    handler(self.msg, self.seq, self.payload, self.n - 2)
+                self.reset()
 
 
 def _p16(v):
@@ -68,14 +87,6 @@ def encode_frame(msg, seq, payload=b""):
         s = (s + v) & 0xFF
     frame.append(s)
     return frame
-
-
-def encode_ack(seq, ack_msg):
-    return encode_frame(MSG_ACK, seq, bytearray([ack_msg & 0xFF]))
-
-
-def encode_status(msg, seq, nav=0, detail=0):
-    return encode_frame(msg, seq, bytearray([nav & 0xFF, detail & 0xFF]))
 
 
 def encode_target_lock(seq, master_dir, slave_dir, yaw_deg, err_x, err_y, push_speed):

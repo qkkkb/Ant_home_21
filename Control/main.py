@@ -1055,11 +1055,15 @@ def coop_wireless_write(data):
 def coop_wireless_read():
     try:
         n = wireless.receive_bytearray(coop_rx_buf, len(coop_rx_buf))
-        if n:
-            coop_flash_rx()
-        return n
+        if not n:
+            return None
+        data = bytearray(n)
+        for i in range(n):
+            data[i] = int(coop_rx_buf[i]) & 0xFF
+        coop_flash_rx()
+        return data
     except Exception:
-        return 0
+        return None
 
 
 def coop_wireless_send_frame(msg, seq, p0=-1, p1=-1):
@@ -1073,16 +1077,20 @@ def coop_wireless_send_frame(msg, seq, p0=-1, p1=-1):
         s = n & 0xFF
         coop_tx_buf[0] = coop_signed_byte(0xA5)
         coop_tx_buf[1] = coop_signed_byte(0x5A)
-        coop_tx_buf[2] = n
-        coop_tx_buf[3] = msg & 0xFF
-        coop_tx_buf[4] = seq & 0xFF
-        s = (s + coop_tx_buf[3] + coop_tx_buf[4]) & 0xFF
+        coop_tx_buf[2] = coop_signed_byte(n)
+        msg_u8 = msg & 0xFF
+        seq_u8 = seq & 0xFF
+        coop_tx_buf[3] = coop_signed_byte(msg_u8)
+        coop_tx_buf[4] = coop_signed_byte(seq_u8)
+        s = (s + msg_u8 + seq_u8) & 0xFF
         if payload_len > 0:
-            coop_tx_buf[5] = p0 & 0xFF
-            s = (s + coop_tx_buf[5]) & 0xFF
+            p0_u8 = p0 & 0xFF
+            coop_tx_buf[5] = coop_signed_byte(p0_u8)
+            s = (s + p0_u8) & 0xFF
         if payload_len > 1:
-            coop_tx_buf[6] = p1 & 0xFF
-            s = (s + coop_tx_buf[6]) & 0xFF
+            p1_u8 = p1 & 0xFF
+            coop_tx_buf[6] = coop_signed_byte(p1_u8)
+            s = (s + p1_u8) & 0xFF
         coop_tx_buf[5 + payload_len] = coop_signed_byte(s)
         wireless.send_bytearray(coop_tx_buf, n + 4)
         coop_flash_tx()
@@ -1212,10 +1220,10 @@ def handle_coop_frame(msg_type, seq, payload, payload_len):
 def poll_coop_uart():
     if not COOP_ENABLE:
         return
-    n = coop_wireless_read()
-    if not n:
+    data = coop_wireless_read()
+    if not data:
         return
-    coop_parser.feed(coop_rx_buf, n, handle_coop_frame)
+    coop_parser.feed(data, len(data), handle_coop_frame)
 
 
 def coop_periodic():

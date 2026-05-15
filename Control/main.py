@@ -1126,9 +1126,9 @@ def coop_send_target_lock(force=False):
         coop_target_seq,
         push_dir_code,
         opposite_push_dir(push_dir_code),
-        coop_lock_yaw_deg,
-        coop_lock_field_x_mm,
-        coop_lock_field_y_mm,
+        push_yaw_target,
+        cam_error_x,
+        cam_error_y,
         Nav_Push_Execute_Forward_Speed,
     )
     coop_wireless_write(frame)

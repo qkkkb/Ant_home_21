@@ -60,13 +60,11 @@ GYRO_CALIBRATE_DELAY_MS = 2
 ENABLE_IMU = ENABLE_GYRO_LOOP
 
 # 调试与退出配置
-DEBUG_DIV = 20
 EXIT_CHECK_DIV = 5
 GC_DIV = 50
 FORCE_MOTOR_OFF = False  # 调试开关：True 时程序继续运行，但三个电机始终断输出
 AUTO_START_ON_BOOT = False
 AUTO_START_DELAY_MS = 2000
-TUNE_LOG_VERBOSE = True
 
 # 无线遥控器 7 通道作为退出触发
 EXIT_TRIGGER_CHANNEL = 7
@@ -1411,21 +1409,7 @@ def calc_speed_closed_loop():
     # 未发车：直接输出 0，占空比清零
     if not car_started:
         set_three_pwm_smooth(0, 0, 0)
-        return {
-            "enc_fl": 0, "enc_fr": 0, "enc_b": 0,
-            "tar_fl": 0, "tar_fr": 0, "tar_b": 0,
-            "out_fl": 0, "out_fr": 0, "out_b": 0,
-            "pwm_fl": 0, "pwm_fr": 0, "pwm_b": 0,
-            "raw_gyro_z": 0, "gyro_z": 0, "yaw_deg": 0, "yaw_err_deg": 0,
-            "turn_rate_cmd": 0, "vz_cmd": 0,
-            "body_vx": 0, "body_vy": 0,
-            "cam_x": 0, "cam_y": 0,
-            "abs_err_x": 0, "abs_err_y": 0,
-            "nav_state": NAV_STATE_SEARCH,
-            "nav_ready": 1 if nav_ready_for_push else 0,
-            "push_dir": push_dir_name,
-            "push_yaw_target": push_yaw_target,
-        }
+        return None
 
     # 已发车：执行闭环逻辑
     # 读取陀螺仪数据
@@ -1487,30 +1471,7 @@ def calc_speed_closed_loop():
         motor_fl.duty(0)
         motor_fr.duty(0)
         motor_b.duty(0)
-        return {
-            "enc_fl": e_fl,
-            "enc_fr": e_fr,
-            "enc_b": e_b,
-            "tar_fl": 0.0, "tar_fr": 0.0, "tar_b": 0.0,
-            "out_fl": 0.0, "out_fr": 0.0, "out_b": 0.0,
-            "pwm_fl": 0, "pwm_fr": 0, "pwm_b": 0,
-            "raw_gyro_z": raw_gyro_z,
-            "gyro_z": gyro_z,
-            "yaw_deg": yaw_deg,
-            "yaw_err_deg": 0.0,
-            "turn_rate_cmd": 0.0,
-            "vz_cmd": 0.0,
-            "body_vx": 0.0,
-            "body_vy": 0.0,
-            "cam_x": cam_error_x,
-            "cam_y": cam_error_y,
-            "abs_err_x": abs(cam_error_x),
-            "abs_err_y": abs(cam_error_y),
-            "nav_state": nav_state,
-            "nav_ready": 0,
-            "push_dir": push_dir_name,
-            "push_yaw_target": push_yaw_target,
-        }
+        return None
 
     yaw_err_deg = -wrapped_yaw_error(yaw_ref_deg, yaw_deg) if ENABLE_IMU else 0.0
     if nav_state == NAV_STATE_SEARCH_TURN:
@@ -1546,30 +1507,7 @@ def calc_speed_closed_loop():
             s_b = 0
         else:
             s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
-        return {
-            "enc_fl": e_fl,
-            "enc_fr": e_fr,
-            "enc_b": e_b,
-            "tar_fl": t_fl, "tar_fr": t_fr, "tar_b": t_b,
-            "out_fl": u_fl, "out_fr": u_fr, "out_b": u_b,
-            "pwm_fl": s_fl, "pwm_fr": s_fr, "pwm_b": s_b,
-            "raw_gyro_z": raw_gyro_z,
-            "gyro_z": gyro_z,
-            "yaw_deg": yaw_deg,
-            "yaw_err_deg": yaw_err_deg,
-            "turn_rate_cmd": turn_rate_cmd,
-            "vz_cmd": vz_cmd,
-            "body_vx": cam_target_vx,
-            "body_vy": cam_target_vy,
-            "cam_x": cam_error_x,
-            "cam_y": cam_error_y,
-            "abs_err_x": abs(cam_error_x),
-            "abs_err_y": abs(cam_error_y),
-            "nav_state": nav_state,
-            "nav_ready": 1 if nav_ready_for_push else 0,
-            "push_dir": push_dir_name,
-            "push_yaw_target": push_yaw_target,
-        }
+        return None
 
     gyro_rate_mode = False
     if nav_state == NAV_STATE_PUSH_ORIENT:
@@ -1664,70 +1602,11 @@ def calc_speed_closed_loop():
     else:
         s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
 
-    return {
-        "enc_fl": e_fl,
-        "enc_fr": e_fr,
-        "enc_b": e_b,
-        "tar_fl": t_fl,
-        "tar_fr": t_fr,
-        "tar_b": t_b,
-        "out_fl": u_fl,
-        "out_fr": u_fr,
-        "out_b": u_b,
-        "pwm_fl": s_fl,
-        "pwm_fr": s_fr,
-        "pwm_b": s_b,
-        "raw_gyro_z": raw_gyro_z,
-        "gyro_z": gyro_z,
-        "yaw_deg": yaw_deg,
-        "yaw_err_deg": yaw_err_deg,
-        "turn_rate_cmd": turn_rate_cmd,
-        "vz_cmd": vz_cmd,
-        "body_vx": cam_target_vx,
-        "body_vy": cam_target_vy,
-        "cam_x": cam_error_x,
-        "cam_y": cam_error_y,
-        "abs_err_x": abs(cam_error_x),
-        "abs_err_y": abs(cam_error_y),
-        "nav_state": nav_state,
-        "nav_ready": 1 if nav_ready_for_push else 0,
-        "push_dir": push_dir_name,
-        "push_yaw_target": push_yaw_target,
-    }
+    return None
 
-log("=== 速度闭环启动 ===")
-log(
-    "tick=%dms speed_loop=on gyro_loop=%s yaw_loop=on cam_uart=%d@%d"
-    % (
-        TICK_PERIOD_MS,
-        "on" if ENABLE_GYRO_LOOP else "off",
-        cfg.CAM_UART_ID,
-        cfg.CAM_UART_BAUD,
-    )
-)
+log("speed loop start")
 if FORCE_MOTOR_OFF:
-    log("[调试] FORCE_MOTOR_OFF=1，电机输出已强制关闭，可手动转动车身观察 yaw")
-log(
-    "电机映射：fl=%s/%s inv=%s, fr=%s/%s inv=%s, b=%s/%s inv=%s"
-    % (cfg.MOTOR_FL_PH, cfg.MOTOR_FL_PWM, cfg.MOTOR_FL_INVERT,
-       cfg.MOTOR_FR_PH, cfg.MOTOR_FR_PWM, cfg.MOTOR_FR_INVERT,
-       cfg.MOTOR_B_PH,  cfg.MOTOR_B_PWM,  cfg.MOTOR_B_INVERT)
-)
-log(
-    "编码器映射：fl=%s/%s inv=%s, fr=%s/%s inv=%s, b=%s/%s inv=%s"
-    % (cfg.ENC_FL_A, cfg.ENC_FL_B, cfg.ENC_FL_INVERT,
-       cfg.ENC_FR_A, cfg.ENC_FR_B, cfg.ENC_FR_INVERT,
-       cfg.ENC_B_A,  cfg.ENC_B_B,  cfg.ENC_B_INVERT)
-)
-if ENABLE_IMU:
-    log(
-        "imu: official_demo_style yaw_axis=z offset_z=%.2f scale=%.8f deadband=%.2f"
-        % (GYRO_OFFSET_Z, GYRO_SCALE, GYRO_DEADBAND_DPS)
-    )
-    log(
-        "gyro loop cfg: sign=%.1f kp=%.3f ki=%.3f limit=%.1f"
-        % (GYRO_SIGN, GYRO_KP, GYRO_KI, GYRO_OUTPUT_LIMIT)
-    )
+    log("FORCE_MOTOR_OFF=1")
 
 try:
     while True:
@@ -1774,12 +1653,7 @@ try:
 
         if pit_flag:
             pit_flag = False
-            snap = calc_speed_closed_loop()
-
-            if pit_count % DEBUG_DIV == 0 and snap is not None and cam_rx_started and TUNE_LOG_VERBOSE:
-                log("[S] %s r=%d e=(%d,%d) y=%.1f" % (
-                    snap["nav_state"], snap["nav_ready"], int(snap["cam_x"]), int(snap["cam_y"]), snap["yaw_deg"]
-                ))
+            calc_speed_closed_loop()
 
         if utime.ticks_diff(now, last_status_ms) >= 1000:
             led.toggle()

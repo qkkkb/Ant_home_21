@@ -1,4 +1,5 @@
 from machine import Pin, UART
+from array import array
 import gc
 import utime
 from smartcar import ticker, encoder
@@ -1231,8 +1232,8 @@ enc_b  = encoder(cfg.ENC_B_A,  cfg.ENC_B_B,  cfg.ENC_B_INVERT)
 
 # 无线串口初始化
 wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
-coop_rx_buf = bytearray(32)
-coop_tx_buf = bytearray(32)
+coop_rx_buf = array('b', [0] * 32)
+coop_tx_buf = array('b', [0] * 32)
 cam_uart = UART(cfg.CAM_UART_ID, cfg.CAM_UART_BAUD)
 cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
 

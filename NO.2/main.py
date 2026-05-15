@@ -246,6 +246,9 @@ coop_approach_start_ms = 0
 coop_approach_last_tx_ms = 0
 coop_slave_ready_last_tx_ms = 0
 coop_slave_done_sent = False
+COOP_LED_PULSE_MS = 40
+coop_tx_led_until_ms = 0
+coop_rx_led_until_ms = 0
 
 def wrapped_yaw_error(ref_deg, now_deg):
     err = now_deg - ref_deg
@@ -1034,7 +1037,10 @@ def coop_next_seq():
 
 def coop_wireless_read():
     try:
-        return wireless.receive_bytearray(coop_rx_buf, len(coop_rx_buf))
+        n = wireless.receive_bytearray(coop_rx_buf, len(coop_rx_buf))
+        if n:
+            coop_flash_rx()
+        return n
     except Exception:
         return 0
 
@@ -1062,6 +1068,7 @@ def coop_wireless_send_frame(msg, seq, p0=-1, p1=-1):
             s = (s + coop_tx_buf[6]) & 0xFF
         coop_tx_buf[5 + payload_len] = s
         wireless.send_bytearray(coop_tx_buf, n + 4)
+        coop_flash_tx()
         return True
     except Exception:
         return False
@@ -1242,17 +1249,47 @@ if ENABLE_IMU:
 
 # ====================== LED 导航显示辅助 ======================
 def update_nav_led_display():
-    led_straight.value(0)
-    led_translate.value(0)
-    led_rotate.value(0)
+    global coop_tx_led_until_ms, coop_rx_led_until_ms
+
+    straight_value = 0
+    translate_value = 0
+    rotate_value = 0
     if nav_state == NAV_STATE_COARSE or nav_state == NAV_STATE_COOP_APPROACH:
-        led_straight.value(1)
+        straight_value = 1
     elif nav_state == NAV_STATE_POST_TURN_FORWARD:
-        led_straight.value(1)
+        straight_value = 1
     elif nav_state in (NAV_STATE_FINE, NAV_STATE_PUSH_CLASSIFY, NAV_STATE_PUSH_PREPARE):
-        led_translate.value(1)
+        translate_value = 1
     elif nav_state in (NAV_STATE_SEARCH_TURN, NAV_STATE_PUSH_ORIENT, NAV_STATE_PUSH, NAV_STATE_PUSH_BACK, NAV_STATE_PUSH_TURN, NAV_STATE_COOP_WAIT_START):
-        led_rotate.value(1)
+        rotate_value = 1
+
+    now = utime.ticks_ms()
+    tx_active = coop_tx_led_until_ms and utime.ticks_diff(coop_tx_led_until_ms, now) > 0
+    rx_active = coop_rx_led_until_ms and utime.ticks_diff(coop_rx_led_until_ms, now) > 0
+    if tx_active:
+        straight_value = 0 if straight_value else 1
+    else:
+        coop_tx_led_until_ms = 0
+    if rx_active:
+        translate_value = 0 if translate_value else 1
+    else:
+        coop_rx_led_until_ms = 0
+
+    led_straight.value(straight_value)
+    led_translate.value(translate_value)
+    led_rotate.value(rotate_value)
+
+
+def coop_flash_tx():
+    global coop_tx_led_until_ms
+    coop_tx_led_until_ms = utime.ticks_add(utime.ticks_ms(), COOP_LED_PULSE_MS)
+    update_nav_led_display()
+
+
+def coop_flash_rx():
+    global coop_rx_led_until_ms
+    coop_rx_led_until_ms = utime.ticks_add(utime.ticks_ms(), COOP_LED_PULSE_MS)
+    update_nav_led_display()
 
 
 def calibrate_gyro_before_launch():
@@ -1655,6 +1692,7 @@ try:
         check_c8_exit()
         poll_coop_uart()
         coop_periodic()
+        update_nav_led_display()
         if not (COOP_ENABLE and COOP_ROLE_SLAVE):
             check_c9_start()
         if AUTO_START_ON_BOOT and (not auto_start_done) and (not car_started) and (not (COOP_ENABLE and COOP_ROLE_SLAVE)):

@@ -89,9 +89,10 @@ def encode_frame(msg, seq, payload=b""):
     return frame
 
 
-def encode_target_lock(seq, master_dir, slave_dir, yaw_deg, err_x, err_y, push_speed):
+def encode_target_lock(seq, master_dir, slave_dir, yaw_deg, field_x_mm, field_y_mm, push_speed):
+    # slave_dir is the support-side direction used for clamp/hold behavior, not an independent target class.
     payload = bytearray([master_dir & 0xFF, slave_dir & 0xFF])
-    for v in (int(yaw_deg * 10), err_x, err_y, int(push_speed * 10)):
+    for v in (int(yaw_deg * 10), field_x_mm, field_y_mm, int(push_speed * 10)):
         lo, hi = _p16(v)
         payload.append(lo)
         payload.append(hi)

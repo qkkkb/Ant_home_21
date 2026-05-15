@@ -1,13 +1,12 @@
 from machine import Pin, UART
 from array import array
-from math import cos, sin, sqrt
 import gc
 import utime
 from smartcar import ticker, encoder
 from seekfree import WIRELESS_UART
 from imu_runtime import IMUYawRuntime
 from models import AnglePID, MoveBase, SpeedPID
-from move_base import calc_wheel_spd, get_car_spd
+from move_base import calc_wheel_spd
 import pid as _pid_mod
 import config as cfg
 from hardware import Motor
@@ -241,8 +240,9 @@ coop_slave_dir = Push_Dir_None
 coop_master_lock_yaw = 0.0
 coop_master_lock_field_x_mm = 0
 coop_master_lock_field_y_mm = 0
-coop_guide_target_x_mm = 0.0
-coop_guide_target_y_mm = 0.0
+coop_guide_forward_ms = 0
+coop_guide_lateral_ms = 0
+coop_guide_lateral_sign = 0
 coop_master_push_speed = 0.0
 coop_master_ready = False
 coop_push_start_received = False
@@ -256,10 +256,6 @@ coop_slave_done_sent = False
 COOP_LED_PULSE_MS = 40
 coop_tx_led_until_ms = 0
 coop_rx_led_until_ms = 0
-field_pos_x_mm = 0.0
-field_pos_y_mm = 0.0
-field_pose_last_ms = 0
-field_pose_valid = False
 
 def wrapped_yaw_error(ref_deg, now_deg):
     err = now_deg - ref_deg
@@ -341,50 +337,6 @@ def refresh_field_reference(force=False):
     )
     field_reference_valid = True
     return True
-
-
-def reset_field_pose():
-    global field_pos_x_mm, field_pos_y_mm, field_pose_last_ms, field_pose_valid
-
-    field_pos_x_mm = 0.0
-    field_pos_y_mm = 0.0
-    field_pose_last_ms = utime.ticks_ms()
-    field_pose_valid = True
-    log("[FIELD] pose reset x=0.0 y=0.0")
-
-
-def update_field_pose_from_encoder(yaw_deg, e_fl, e_fr, e_b):
-    global field_pos_x_mm, field_pos_y_mm, field_pose_last_ms
-
-    if not field_pose_valid:
-        return
-
-    now = utime.ticks_ms()
-    dt_ms = utime.ticks_diff(now, field_pose_last_ms)
-    field_pose_last_ms = now
-    if dt_ms <= 0 or dt_ms > 200:
-        return
-
-    get_car_spd(move_cmd, e_fr, e_fl, e_b)
-    body_vx_mm_s = move_cmd.speed_x * cfg.COOP_ODOM_MM_PER_SPEED_UNIT_S
-    body_vy_mm_s = move_cmd.speed_y * cfg.COOP_ODOM_MM_PER_SPEED_UNIT_S
-    yaw_rel_deg = wrapped_yaw_error(field_up_yaw, yaw_deg)
-    yaw_rel_rad = yaw_rel_deg * 0.017453292519943295
-    sin_yaw = sin(yaw_rel_rad)
-    cos_yaw = cos(yaw_rel_rad)
-    field_vx_mm_s = body_vx_mm_s * sin_yaw + body_vy_mm_s * cos_yaw
-    field_vy_mm_s = body_vx_mm_s * cos_yaw - body_vy_mm_s * sin_yaw
-    dt_s = dt_ms / 1000.0
-    field_pos_x_mm += field_vx_mm_s * dt_s
-    field_pos_y_mm += field_vy_mm_s * dt_s
-
-
-def clamp_nav_speed(value, limit):
-    if value > limit:
-        return limit
-    if value < -limit:
-        return -limit
-    return value
 
 
 def push_yaw_error_deg(yaw_deg):
@@ -649,27 +601,18 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
 
     if nav_state == NAV_STATE_COOP_APPROACH:
         nav_ready_for_push = False
-        field_err_x = coop_guide_target_x_mm - field_pos_x_mm
-        field_err_y = coop_guide_target_y_mm - field_pos_y_mm
-        guide_dist_mm = sqrt(field_err_x * field_err_x + field_err_y * field_err_y)
         if ENABLE_IMU:
             yaw_ref_deg = coop_master_lock_yaw
-            yaw_rel_deg = wrapped_yaw_error(field_up_yaw, yaw_deg)
+        guide_elapsed_ms = utime.ticks_diff(now, coop_approach_start_ms)
+        if guide_elapsed_ms < coop_guide_lateral_ms:
+            cam_target_vx = 0.0
+            cam_target_vy = coop_guide_lateral_sign * cfg.COOP_GUIDE_LATERAL_SPEED
+        elif guide_elapsed_ms < coop_guide_lateral_ms + coop_guide_forward_ms:
+            cam_target_vx = cfg.COOP_SLAVE_APPROACH_SPEED
+            cam_target_vy = 0.0
         else:
-            yaw_rel_deg = 0.0
-        yaw_rel_rad = yaw_rel_deg * 0.017453292519943295
-        sin_yaw = sin(yaw_rel_rad)
-        cos_yaw = cos(yaw_rel_rad)
-        body_forward_err = field_err_x * sin_yaw + field_err_y * cos_yaw
-        body_lateral_err = field_err_x * cos_yaw - field_err_y * sin_yaw
-        cam_target_vx = clamp_nav_speed(
-            body_forward_err * cfg.COOP_GUIDE_GAIN,
-            cfg.COOP_GUIDE_MAX_FORWARD_SPEED,
-        )
-        cam_target_vy = clamp_nav_speed(
-            body_lateral_err * cfg.COOP_GUIDE_GAIN,
-            cfg.COOP_GUIDE_MAX_LATERAL_SPEED,
-        )
+            cam_target_vx = 0.0
+            cam_target_vy = 0.0
         coop_send_slave_approaching()
         if seen and nav_detect_since_ms > 0:
             if utime.ticks_diff(now, nav_detect_since_ms) >= Nav_Detect_Ms:
@@ -679,21 +622,8 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                     yaw_ref_deg = yaw_deg
                 nav_set_state(NAV_STATE_COARSE, "coop_guide_target_seen")
                 return
-        guide_elapsed_ms = utime.ticks_diff(now, coop_approach_start_ms)
-        if guide_dist_mm <= cfg.COOP_GUIDE_STOP_RADIUS_MM:
-            cam_target_vx = 0.0
-            cam_target_vy = 0.0
-            nav_set_state(
-                NAV_STATE_SEARCH,
-                "coop_guide_arrived dist=%d" % int(guide_dist_mm),
-            )
-        elif guide_elapsed_ms >= cfg.COOP_GUIDE_TIMEOUT_MS:
-            cam_target_vx = 0.0
-            cam_target_vy = 0.0
-            nav_set_state(
-                NAV_STATE_SEARCH,
-                "coop_guide_timeout dist=%d" % int(guide_dist_mm),
-            )
+        if guide_elapsed_ms >= coop_guide_lateral_ms + coop_guide_forward_ms:
+            nav_set_state(NAV_STATE_SEARCH, "coop_guide_done")
         return
 
     if nav_state == NAV_STATE_SEARCH_TURN:
@@ -1239,20 +1169,16 @@ def coop_start_from_target():
         else:
             yaw_ref_deg = 0.0
         refresh_field_reference()
-        reset_field_pose()
         push_yaw_target = yaw_from_field_dir(push_dir_code)
         car_started = True
         auto_start_done = True
         start_time = utime.ticks_ms()
 
     log(
-        "[COOP] guide target=(%d,%d) master_pose=(%d,%d) master_yaw=%.1f support=%s"
+        "[COOP] guide lat=%dms fwd=%dms support=%s"
         % (
-            int(coop_guide_target_x_mm),
-            int(coop_guide_target_y_mm),
-            coop_master_lock_field_x_mm,
-            coop_master_lock_field_y_mm,
-            coop_master_lock_yaw,
+            coop_guide_lateral_ms,
+            coop_guide_forward_ms,
             push_dir_label(coop_slave_dir),
         )
     )
@@ -1262,7 +1188,7 @@ def coop_start_from_target():
 def handle_coop_frame(msg_type, seq, payload, payload_len):
     global coop_target_received, coop_target_seq, coop_master_dir, coop_slave_dir
     global coop_master_lock_yaw, coop_master_lock_field_x_mm, coop_master_lock_field_y_mm
-    global coop_guide_target_x_mm, coop_guide_target_y_mm
+    global coop_guide_forward_ms, coop_guide_lateral_ms, coop_guide_lateral_sign
     global coop_master_push_speed, coop_master_ready, coop_push_start_received
     global coop_push_stop_received, coop_link_error, coop_last_rx_ms
 
@@ -1284,8 +1210,22 @@ def handle_coop_frame(msg_type, seq, payload, payload_len):
         coop_master_lock_yaw = float(target[2])
         coop_master_lock_field_x_mm = int(target[3])
         coop_master_lock_field_y_mm = int(target[4])
-        coop_guide_target_x_mm = coop_master_lock_field_x_mm + cfg.COOP_INITIAL_MASTER_OFFSET_X_MM
-        coop_guide_target_y_mm = coop_master_lock_field_y_mm + cfg.COOP_INITIAL_MASTER_OFFSET_Y_MM
+        guide_x_mm = coop_master_lock_field_x_mm + cfg.COOP_INITIAL_MASTER_OFFSET_X_MM
+        guide_y_mm = coop_master_lock_field_y_mm + cfg.COOP_INITIAL_MASTER_OFFSET_Y_MM
+        if guide_x_mm > 0:
+            coop_guide_lateral_sign = 1
+        elif guide_x_mm < 0:
+            coop_guide_lateral_sign = -1
+        else:
+            coop_guide_lateral_sign = 0
+        coop_guide_lateral_ms = abs(int(guide_x_mm)) * 2
+        if coop_guide_lateral_ms > cfg.COOP_GUIDE_MAX_LATERAL_MS:
+            coop_guide_lateral_ms = cfg.COOP_GUIDE_MAX_LATERAL_MS
+        coop_guide_forward_ms = int(guide_y_mm) * 2
+        if coop_guide_forward_ms < 0:
+            coop_guide_forward_ms = 0
+        elif coop_guide_forward_ms > cfg.COOP_GUIDE_MAX_FORWARD_MS:
+            coop_guide_forward_ms = cfg.COOP_GUIDE_MAX_FORWARD_MS
         coop_master_push_speed = float(target[5])
         coop_target_received = True
         coop_send_ack(seq, ACK_TARGET_LOCK)
@@ -1455,7 +1395,6 @@ def check_c9_start():
                 else:
                     yaw_ref_deg = 0.0
                 refresh_field_reference()
-                reset_field_pose()
                 car_started = True
                 auto_start_done = True
                 start_time = utime.ticks_ms()
@@ -1627,7 +1566,6 @@ def calc_speed_closed_loop():
     e_fl = enc_fl.get()
     e_fr = enc_fr.get()
     e_b = enc_b.get()
-    update_field_pose_from_encoder(yaw_deg, e_fl, e_fr, e_b)
     low_speed = abs(e_fl) <= Nav_Low_Speed_Th and abs(e_fr) <= Nav_Low_Speed_Th and abs(e_b) <= Nav_Low_Speed_Th
     update_nav_state_and_targets(yaw_deg, low_speed, gyro_z)
 
@@ -1833,7 +1771,6 @@ try:
                 else:
                     yaw_ref_deg = 0.0
                 refresh_field_reference()
-                reset_field_pose()
                 car_started = True
                 auto_start_done = True
                 start_time = now
@@ -1853,7 +1790,6 @@ try:
             else:
                 yaw_ref_deg = 0.0
             refresh_field_reference()
-            reset_field_pose()
             car_started = True
             auto_start_done = True
             start_time = now

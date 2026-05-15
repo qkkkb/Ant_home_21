@@ -256,6 +256,7 @@ coop_slave_done_sent = False
 COOP_LED_PULSE_MS = 40
 coop_tx_led_until_ms = 0
 coop_rx_led_until_ms = 0
+coop_err_led_until_ms = 0
 field_pos_x_mm = 0.0
 field_pos_y_mm = 0.0
 field_pose_last_ms = 0
@@ -1145,12 +1146,16 @@ def coop_next_seq():
 
 
 def coop_wireless_read():
+    global coop_err_led_until_ms
+
     try:
         n = wireless.receive_bytearray(coop_rx_buf, len(coop_rx_buf))
         if n:
             coop_flash_rx()
         return n
     except Exception:
+        coop_err_led_until_ms = utime.ticks_add(utime.ticks_ms(), COOP_LED_PULSE_MS)
+        update_nav_led_display()
         return 0
 
 
@@ -1377,7 +1382,7 @@ if ENABLE_IMU:
 
 # ====================== LED 导航显示辅助 ======================
 def update_nav_led_display():
-    global coop_tx_led_until_ms, coop_rx_led_until_ms
+    global coop_tx_led_until_ms, coop_rx_led_until_ms, coop_err_led_until_ms
 
     straight_value = 0
     translate_value = 0
@@ -1394,6 +1399,7 @@ def update_nav_led_display():
     now = utime.ticks_ms()
     tx_active = coop_tx_led_until_ms and utime.ticks_diff(coop_tx_led_until_ms, now) > 0
     rx_active = coop_rx_led_until_ms and utime.ticks_diff(coop_rx_led_until_ms, now) > 0
+    err_active = coop_err_led_until_ms and utime.ticks_diff(coop_err_led_until_ms, now) > 0
     if tx_active:
         straight_value = 0 if straight_value else 1
     else:
@@ -1402,6 +1408,10 @@ def update_nav_led_display():
         translate_value = 0 if translate_value else 1
     else:
         coop_rx_led_until_ms = 0
+    if err_active:
+        rotate_value = 0 if rotate_value else 1
+    else:
+        coop_err_led_until_ms = 0
 
     led_straight.value(straight_value)
     led_translate.value(translate_value)

@@ -77,7 +77,6 @@ def _u16(data, off):
 def decode_target_lock(payload, payload_len):
     if payload_len < 10:
         return None
-    # master_dir, slave_support_dir, lock_yaw_deg, lock_field_x_mm, lock_field_y_mm, push_speed
     return (
         payload[0],
         payload[1],

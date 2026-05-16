@@ -237,12 +237,6 @@ coop_target_received = False
 coop_target_seq = 0
 coop_master_dir = Push_Dir_None
 coop_slave_dir = Push_Dir_None
-coop_master_lock_yaw = 0.0
-coop_master_lock_field_x_mm = 0
-coop_master_lock_field_y_mm = 0
-coop_guide_forward_ms = 0
-coop_guide_lateral_ms = 0
-coop_guide_lateral_sign = 0
 coop_master_push_speed = 0.0
 coop_master_ready = False
 coop_push_start_received = False
@@ -250,14 +244,15 @@ coop_push_stop_received = False
 coop_link_error = False
 coop_last_rx_ms = 0
 coop_approach_start_ms = 0
+coop_guide_forward_ms = 0
+coop_guide_lateral_ms = 0
+coop_guide_lateral_sign = 0
 coop_approach_last_tx_ms = 0
 coop_slave_ready_last_tx_ms = 0
 coop_slave_done_sent = False
 COOP_LED_PULSE_MS = 40
-COOP_RX_LED_PULSE_MS = 200
 coop_tx_led_until_ms = 0
 coop_rx_led_until_ms = 0
-coop_rx_error_latched = False
 
 def wrapped_yaw_error(ref_deg, now_deg):
     err = now_deg - ref_deg
@@ -604,17 +599,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
     if nav_state == NAV_STATE_COOP_APPROACH:
         nav_ready_for_push = False
         if ENABLE_IMU:
-            yaw_ref_deg = coop_master_lock_yaw
-        guide_elapsed_ms = utime.ticks_diff(now, coop_approach_start_ms)
-        if guide_elapsed_ms < coop_guide_lateral_ms:
-            cam_target_vx = 0.0
-            cam_target_vy = coop_guide_lateral_sign * cfg.COOP_GUIDE_LATERAL_SPEED
-        elif guide_elapsed_ms < coop_guide_lateral_ms + coop_guide_forward_ms:
-            cam_target_vx = cfg.COOP_SLAVE_APPROACH_SPEED
-            cam_target_vy = 0.0
-        else:
-            cam_target_vx = 0.0
-            cam_target_vy = 0.0
+            yaw_ref_deg = field_up_yaw
         coop_send_slave_approaching()
         if seen and nav_detect_since_ms > 0:
             if utime.ticks_diff(now, nav_detect_since_ms) >= Nav_Detect_Ms:
@@ -622,10 +607,19 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 cam_target_vy = 0.0
                 if ENABLE_IMU:
                     yaw_ref_deg = yaw_deg
-                nav_set_state(NAV_STATE_COARSE, "coop_guide_target_seen")
+                nav_set_state(NAV_STATE_COARSE, "coop_target_seen")
                 return
-        if guide_elapsed_ms >= coop_guide_lateral_ms + coop_guide_forward_ms:
-            nav_set_state(NAV_STATE_SEARCH, "coop_guide_done")
+        guide_elapsed_ms = utime.ticks_diff(now, coop_approach_start_ms)
+        if guide_elapsed_ms < coop_guide_lateral_ms:
+            cam_target_vx = 0.0
+            cam_target_vy = coop_guide_lateral_sign * getattr(cfg, "COOP_GUIDE_LATERAL_SPEED", 3.0)
+        elif guide_elapsed_ms < coop_guide_lateral_ms + coop_guide_forward_ms:
+            cam_target_vx = cfg.COOP_SLAVE_APPROACH_SPEED
+            cam_target_vy = 0.0
+        else:
+            cam_target_vx = 0.0
+            cam_target_vy = 0.0
+            nav_set_state(NAV_STATE_SEARCH, "coop_approach_done_search")
         return
 
     if nav_state == NAV_STATE_SEARCH_TURN:
@@ -801,22 +795,6 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                         "[COOP] slave classify mismatch cls=%s expected=%s master=%s"
                         % (
                             push_dir_label(push_dir_code),
-                            push_dir_label(coop_slave_dir),
-                            push_dir_label(coop_master_dir),
-                        )
-                    )
-                elif classify_ready:
-                    log(
-                        "[COOP] slave classify confirmed cls=%s master=%s"
-                        % (
-                            push_dir_label(push_dir_code),
-                            push_dir_label(coop_master_dir),
-                        )
-                    )
-                else:
-                    log(
-                        "[COOP] slave classify timeout, use support=%s master=%s"
-                        % (
                             push_dir_label(coop_slave_dir),
                             push_dir_label(coop_master_dir),
                         )
@@ -1077,16 +1055,12 @@ def coop_next_seq():
 
 
 def coop_wireless_read():
-    global coop_rx_error_latched
-
     try:
         n = wireless.receive_bytearray(coop_rx_buf, len(coop_rx_buf))
         if n:
             coop_flash_rx()
         return n
     except Exception:
-        coop_rx_error_latched = True
-        update_nav_led_display()
         return 0
 
 
@@ -1180,20 +1154,11 @@ def coop_start_from_target():
         auto_start_done = True
         start_time = utime.ticks_ms()
 
-    log(
-        "[COOP] guide lat=%dms fwd=%dms support=%s"
-        % (
-            coop_guide_lateral_ms,
-            coop_guide_forward_ms,
-            push_dir_label(coop_slave_dir),
-        )
-    )
     nav_set_state(NAV_STATE_COOP_APPROACH, "coop_target_lock", force=True)
 
 
 def handle_coop_frame(msg_type, seq, payload, payload_len):
     global coop_target_received, coop_target_seq, coop_master_dir, coop_slave_dir
-    global coop_master_lock_yaw, coop_master_lock_field_x_mm, coop_master_lock_field_y_mm
     global coop_guide_forward_ms, coop_guide_lateral_ms, coop_guide_lateral_sign
     global coop_master_push_speed, coop_master_ready, coop_push_start_received
     global coop_push_stop_received, coop_link_error, coop_last_rx_ms
@@ -1213,26 +1178,27 @@ def handle_coop_frame(msg_type, seq, payload, payload_len):
         coop_target_seq = seq
         coop_master_dir = int(target[0])
         coop_slave_dir = int(target[1])
-        coop_master_lock_yaw = float(target[2])
-        coop_master_lock_field_x_mm = int(target[3])
-        coop_master_lock_field_y_mm = int(target[4])
-        guide_x_mm = coop_master_lock_field_x_mm + cfg.COOP_INITIAL_MASTER_OFFSET_X_MM
-        guide_y_mm = coop_master_lock_field_y_mm + cfg.COOP_INITIAL_MASTER_OFFSET_Y_MM
-        if guide_x_mm > 0:
-            coop_guide_lateral_sign = 1
-        elif guide_x_mm < 0:
+        coop_master_push_speed = float(target[5])
+        guide_x_mm = int(target[3]) + int(getattr(cfg, "COOP_INITIAL_MASTER_OFFSET_X_MM", 0))
+        guide_y_mm = int(target[4]) + int(getattr(cfg, "COOP_INITIAL_MASTER_OFFSET_Y_MM", 200))
+        ms_per_mm = int(getattr(cfg, "COOP_GUIDE_MS_PER_MM", 3))
+        if guide_x_mm < 0:
             coop_guide_lateral_sign = -1
+            guide_x_mm = -guide_x_mm
+        elif guide_x_mm > 0:
+            coop_guide_lateral_sign = 1
         else:
             coop_guide_lateral_sign = 0
-        coop_guide_lateral_ms = abs(int(guide_x_mm)) * 2
-        if coop_guide_lateral_ms > cfg.COOP_GUIDE_MAX_LATERAL_MS:
-            coop_guide_lateral_ms = cfg.COOP_GUIDE_MAX_LATERAL_MS
-        coop_guide_forward_ms = int(guide_y_mm) * 2
-        if coop_guide_forward_ms < 0:
-            coop_guide_forward_ms = 0
-        elif coop_guide_forward_ms > cfg.COOP_GUIDE_MAX_FORWARD_MS:
-            coop_guide_forward_ms = cfg.COOP_GUIDE_MAX_FORWARD_MS
-        coop_master_push_speed = float(target[5])
+        coop_guide_lateral_ms = guide_x_mm * ms_per_mm
+        max_lateral_ms = int(getattr(cfg, "COOP_GUIDE_MAX_LATERAL_MS", 1500))
+        if coop_guide_lateral_ms > max_lateral_ms:
+            coop_guide_lateral_ms = max_lateral_ms
+        if guide_y_mm < 0:
+            guide_y_mm = 0
+        coop_guide_forward_ms = guide_y_mm * ms_per_mm
+        max_forward_ms = int(getattr(cfg, "COOP_GUIDE_MAX_FORWARD_MS", 4500))
+        if coop_guide_forward_ms > max_forward_ms:
+            coop_guide_forward_ms = max_forward_ms
         coop_target_received = True
         coop_send_ack(seq, ACK_TARGET_LOCK)
         coop_start_from_target()
@@ -1348,8 +1314,6 @@ def update_nav_led_display():
         translate_value = 0 if translate_value else 1
     else:
         coop_rx_led_until_ms = 0
-    if coop_rx_error_latched:
-        rotate_value = 1
 
     led_straight.value(straight_value)
     led_translate.value(translate_value)
@@ -1364,7 +1328,7 @@ def coop_flash_tx():
 
 def coop_flash_rx():
     global coop_rx_led_until_ms
-    coop_rx_led_until_ms = utime.ticks_add(utime.ticks_ms(), COOP_RX_LED_PULSE_MS)
+    coop_rx_led_until_ms = utime.ticks_add(utime.ticks_ms(), COOP_LED_PULSE_MS)
     update_nav_led_display()
 
 

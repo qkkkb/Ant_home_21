@@ -1,13 +1,12 @@
 ﻿from machine import Pin, UART
 from array import array
-from math import cos, sin
 import gc
 import utime
 from smartcar import ticker, encoder
 from seekfree import WIRELESS_UART
 from imu_runtime import IMUYawRuntime
 from models import AnglePID, MoveBase, SpeedPID
-from move_base import calc_wheel_spd, get_car_spd
+from move_base import calc_wheel_spd
 import pid as _pid_mod
 import config as cfg
 from hardware import Motor
@@ -234,9 +233,6 @@ coop_target_seq = 0
 coop_target_sent = False
 coop_target_ack = False
 coop_target_last_tx_ms = 0
-coop_lock_yaw_deg = 0.0
-coop_lock_field_x_mm = 0
-coop_lock_field_y_mm = 0
 coop_ready_last_tx_ms = 0
 coop_push_start_sent = False
 coop_push_start_last_tx_ms = 0
@@ -250,10 +246,11 @@ coop_last_rx_ms = 0
 COOP_LED_PULSE_MS = 40
 coop_tx_led_until_ms = 0
 coop_rx_led_until_ms = 0
-field_pos_x_mm = 0.0
-field_pos_y_mm = 0.0
-field_pose_last_ms = 0
-field_pose_valid = False
+coop_guide_pos_x_milli = 0
+coop_guide_pos_y_milli = 0
+coop_guide_last_ms = 0
+coop_lock_pos_x_mm = 0
+coop_lock_pos_y_mm = 0
 
 def wrapped_yaw_error(ref_deg, now_deg):
     err = now_deg - ref_deg
@@ -337,40 +334,35 @@ def refresh_field_reference(force=False):
     return True
 
 
-def reset_field_pose():
-    global field_pos_x_mm, field_pos_y_mm, field_pose_last_ms, field_pose_valid
+def reset_coop_guide_pose():
+    global coop_guide_pos_x_milli, coop_guide_pos_y_milli, coop_guide_last_ms
 
-    field_pos_x_mm = 0.0
-    field_pos_y_mm = 0.0
-    field_pose_last_ms = utime.ticks_ms()
-    field_pose_valid = True
-    log("[FIELD] pose reset x=0.0 y=0.0")
+    coop_guide_pos_x_milli = 0
+    coop_guide_pos_y_milli = 0
+    coop_guide_last_ms = utime.ticks_ms()
 
 
-def update_field_pose_from_encoder(yaw_deg, e_fl, e_fr, e_b):
-    global field_pos_x_mm, field_pos_y_mm, field_pose_last_ms
+def update_coop_guide_pose(now):
+    global coop_guide_pos_x_milli, coop_guide_pos_y_milli, coop_guide_last_ms
 
-    if not field_pose_valid:
+    if not (COOP_ENABLE and COOP_ROLE_MASTER and car_started):
+        coop_guide_last_ms = now
         return
-
-    now = utime.ticks_ms()
-    dt_ms = utime.ticks_diff(now, field_pose_last_ms)
-    field_pose_last_ms = now
+    if coop_target_sent:
+        coop_guide_last_ms = now
+        return
+    if coop_guide_last_ms == 0:
+        coop_guide_last_ms = now
+        return
+    dt_ms = utime.ticks_diff(now, coop_guide_last_ms)
+    coop_guide_last_ms = now
     if dt_ms <= 0 or dt_ms > 200:
         return
-
-    get_car_spd(move_cmd, e_fr, e_fl, e_b)
-    body_vx_mm_s = move_cmd.speed_x * cfg.COOP_ODOM_MM_PER_SPEED_UNIT_S
-    body_vy_mm_s = move_cmd.speed_y * cfg.COOP_ODOM_MM_PER_SPEED_UNIT_S
-    yaw_rel_deg = wrapped_yaw_error(field_up_yaw, yaw_deg)
-    yaw_rel_rad = yaw_rel_deg * 0.017453292519943295
-    sin_yaw = sin(yaw_rel_rad)
-    cos_yaw = cos(yaw_rel_rad)
-    field_vx_mm_s = body_vx_mm_s * sin_yaw + body_vy_mm_s * cos_yaw
-    field_vy_mm_s = body_vx_mm_s * cos_yaw - body_vy_mm_s * sin_yaw
-    dt_s = dt_ms / 1000.0
-    field_pos_x_mm += field_vx_mm_s * dt_s
-    field_pos_y_mm += field_vy_mm_s * dt_s
+    scale = getattr(cfg, "COOP_GUIDE_MM_PER_SPEED_UNIT_S", 50)
+    if cam_target_vy:
+        coop_guide_pos_x_milli += int(cam_target_vy * scale * dt_ms)
+    if cam_target_vx:
+        coop_guide_pos_y_milli += int(cam_target_vx * scale * dt_ms)
 
 
 def push_yaw_error_deg(yaw_deg):
@@ -1093,7 +1085,7 @@ def coop_send_ack(seq, msg_type):
 
 def coop_send_target_lock(force=False):
     global coop_target_seq, coop_target_sent, coop_target_last_tx_ms
-    global coop_lock_yaw_deg, coop_lock_field_x_mm, coop_lock_field_y_mm
+    global coop_lock_pos_x_mm, coop_lock_pos_y_mm
 
     if not (COOP_ENABLE and COOP_ROLE_MASTER):
         return
@@ -1108,27 +1100,16 @@ def coop_send_target_lock(force=False):
             return
     if not coop_target_sent:
         coop_target_seq = coop_next_seq()
-        coop_lock_yaw_deg = push_face_obj_yaw
-        coop_lock_field_x_mm = int(field_pos_x_mm)
-        coop_lock_field_y_mm = int(field_pos_y_mm)
-        log(
-            "[COOP] target_lock dir=%s support=%s pose=(%d,%d) yaw=%.1f"
-            % (
-                push_dir_label(push_dir_code),
-                push_dir_label(opposite_push_dir(push_dir_code)),
-                coop_lock_field_x_mm,
-                coop_lock_field_y_mm,
-                coop_lock_yaw_deg,
-            )
-        )
+        coop_lock_pos_x_mm = int(coop_guide_pos_x_milli // 1000)
+        coop_lock_pos_y_mm = int(coop_guide_pos_y_milli // 1000)
 
     frame = encode_target_lock(
         coop_target_seq,
         push_dir_code,
         opposite_push_dir(push_dir_code),
-        coop_lock_yaw_deg,
-        coop_lock_field_x_mm,
-        coop_lock_field_y_mm,
+        push_face_obj_yaw,
+        coop_lock_pos_x_mm,
+        coop_lock_pos_y_mm,
         Nav_Push_Execute_Forward_Speed,
     )
     coop_wireless_write(frame)
@@ -1350,7 +1331,7 @@ def check_c9_start():
                 else:
                     yaw_ref_deg = 0.0
                 refresh_field_reference()
-                reset_field_pose()
+                reset_coop_guide_pose()
                 car_started = True
                 auto_start_done = True
                 start_time = utime.ticks_ms()
@@ -1522,9 +1503,9 @@ def calc_speed_closed_loop():
     e_fl = enc_fl.get()
     e_fr = enc_fr.get()
     e_b = enc_b.get()
-    update_field_pose_from_encoder(yaw_deg, e_fl, e_fr, e_b)
     low_speed = abs(e_fl) <= Nav_Low_Speed_Th and abs(e_fr) <= Nav_Low_Speed_Th and abs(e_b) <= Nav_Low_Speed_Th
     update_nav_state_and_targets(yaw_deg, low_speed, gyro_z)
+    update_coop_guide_pose(utime.ticks_ms())
 
     if nav_state in (NAV_STATE_SEARCH, NAV_STATE_PUSH_CLASSIFY, NAV_STATE_COOP_WAIT_SLAVE, NAV_STATE_COOP_DONE):
         move_cmd.tar_spd_x = 0.0
@@ -1724,7 +1705,7 @@ try:
                 else:
                     yaw_ref_deg = 0.0
                 refresh_field_reference()
-                reset_field_pose()
+                reset_coop_guide_pose()
                 car_started = True
                 auto_start_done = True
                 start_time = now
@@ -1746,7 +1727,7 @@ try:
             else:
                 yaw_ref_deg = 0.0
             refresh_field_reference()
-            reset_field_pose()
+            reset_coop_guide_pose()
             car_started = True
             auto_start_done = True
             start_time = now

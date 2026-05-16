@@ -1077,14 +1077,11 @@ def coop_next_seq():
 
 
 def coop_wireless_read():
-    global coop_rx_error_latched, diag_rx_hits, diag_rx_bytes, diag_rx_last_n
+    global coop_rx_error_latched
 
     try:
         n = wireless.receive_bytearray(coop_rx_buf, len(coop_rx_buf))
         if n:
-            diag_rx_hits += 1
-            diag_rx_bytes += n
-            diag_rx_last_n = n
             coop_flash_rx()
         return n
     except Exception:
@@ -1552,14 +1549,6 @@ loop_count = 0
 last_vz_cmd = 0.0
 last_turn_rate_cmd = 0.0
 yaw_ref_deg = 0.0
-DIAG_STARTUP_MS = 5000
-diag_start_ms = start_time
-diag_last_ms = start_time
-diag_last_loop_count = 0
-diag_done = False
-diag_rx_hits = 0
-diag_rx_bytes = 0
-diag_rx_last_n = 0
 
 # ====================== 速度闭环主函数（含发车判断） ======================
 def calc_speed_closed_loop():
@@ -1778,35 +1767,6 @@ try:
         # ====================== 按键检查（主循环最前面） ======================
         check_c8_exit()
         poll_coop_uart()
-        if not diag_done:
-            diag_elapsed_ms = utime.ticks_diff(now, diag_start_ms)
-            if diag_elapsed_ms <= DIAG_STARTUP_MS:
-                if utime.ticks_diff(now, diag_last_ms) >= 1000:
-                    log(
-                        "[DIAG] mem=%d loops=%d rx_hits=%d rx_bytes=%d last_n=%d err=%d"
-                        % (
-                            gc.mem_free(),
-                            loop_count - diag_last_loop_count,
-                            diag_rx_hits,
-                            diag_rx_bytes,
-                            diag_rx_last_n,
-                            1 if coop_rx_error_latched else 0,
-                        )
-                    )
-                    diag_last_ms = now
-                    diag_last_loop_count = loop_count
-            else:
-                log(
-                    "[DIAG] done mem=%d rx_hits=%d rx_bytes=%d last_n=%d err=%d"
-                    % (
-                        gc.mem_free(),
-                        diag_rx_hits,
-                        diag_rx_bytes,
-                        diag_rx_last_n,
-                        1 if coop_rx_error_latched else 0,
-                    )
-                )
-                diag_done = True
         coop_periodic()
         update_nav_led_display()
         if not (COOP_ENABLE and COOP_ROLE_SLAVE):

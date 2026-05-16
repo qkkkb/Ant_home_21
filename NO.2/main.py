@@ -258,6 +258,8 @@ COOP_RX_LED_PULSE_MS = 200
 coop_tx_led_until_ms = 0
 coop_rx_led_until_ms = 0
 coop_rx_error_latched = False
+slog_rx_sent = False
+slog_target_sent = False
 
 def wrapped_yaw_error(ref_deg, now_deg):
     err = now_deg - ref_deg
@@ -1077,17 +1079,45 @@ def coop_next_seq():
 
 
 def coop_wireless_read():
-    global coop_rx_error_latched
+    global coop_rx_error_latched, slog_rx_sent
 
     try:
         n = wireless.receive_bytearray(coop_rx_buf, len(coop_rx_buf))
         if n:
+            if not slog_rx_sent:
+                wireless_debug_log("RX")
+                slog_rx_sent = True
             coop_flash_rx()
         return n
     except Exception:
         coop_rx_error_latched = True
+        wireless_debug_log("RXERR")
         update_nav_led_display()
         return 0
+
+
+def wireless_debug_log(code):
+    if not getattr(cfg, "COOP_WIRELESS_DEBUG_LOG", False):
+        return False
+    try:
+        prefix = "SLOG "
+        n = 0
+        for i in range(len(prefix)):
+            coop_tx_buf[n] = ord(prefix[i])
+            n += 1
+        for i in range(len(code)):
+            if n >= len(coop_tx_buf) - 2:
+                break
+            coop_tx_buf[n] = ord(code[i])
+            n += 1
+        coop_tx_buf[n] = 13
+        n += 1
+        coop_tx_buf[n] = 10
+        n += 1
+        wireless.send_bytearray(coop_tx_buf, n)
+        return True
+    except Exception:
+        return False
 
 
 def coop_wireless_send_frame(msg, seq, p0=-1, p1=-1):
@@ -1188,10 +1218,12 @@ def coop_start_from_target():
             push_dir_label(coop_slave_dir),
         )
     )
+    wireless_debug_log("START")
     nav_set_state(NAV_STATE_COOP_APPROACH, "coop_target_lock", force=True)
 
 
 def handle_coop_frame(msg_type, seq, payload, payload_len):
+    global slog_target_sent
     global coop_target_received, coop_target_seq, coop_master_dir, coop_slave_dir
     global coop_master_lock_yaw, coop_master_lock_field_x_mm, coop_master_lock_field_y_mm
     global coop_guide_forward_ms, coop_guide_lateral_ms, coop_guide_lateral_sign
@@ -1204,6 +1236,9 @@ def handle_coop_frame(msg_type, seq, payload, payload_len):
         return
 
     if msg_type == MSG_TARGET_LOCK:
+        if not slog_target_sent:
+            wireless_debug_log("TARGET")
+            slog_target_sent = True
         target = decode_target_lock(payload, payload_len)
         if target is None:
             return
@@ -1307,6 +1342,7 @@ enc_b  = encoder(cfg.ENC_B_A,  cfg.ENC_B_B,  cfg.ENC_B_INVERT)
 wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
 coop_rx_buf = array('b', [0] * 32)
 coop_tx_buf = array('b', [0] * 32)
+wireless_debug_log("BOOT")
 cam_uart = UART(cfg.CAM_UART_ID, cfg.CAM_UART_BAUD)
 cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
 
@@ -1755,6 +1791,7 @@ def calc_speed_closed_loop():
     return None
 
 log("speed loop start")
+wireless_debug_log("LOOP")
 if FORCE_MOTOR_OFF:
     log("FORCE_MOTOR_OFF=1")
 
@@ -1819,7 +1856,12 @@ try:
 
         utime.sleep_ms(1)
 
+except Exception:
+    wireless_debug_log("EXC")
+    raise
+
 finally:
+    wireless_debug_log("STOP")
     pit1.stop()
     stop_all()
     led.value(True)

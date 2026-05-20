@@ -106,3 +106,15 @@
 6. 使用 `heap_lock()` 时必须用 `try/finally` 确保解锁；锁堆期间禁止创建新对象、字符串格式化、切片复制、`list` 或 `dict` 扩容、`import`、异常构造、`print` 调试等可能分配堆内存的操作。
 7. `gc.disable()` 只是不自动 GC，不代表禁止分配；若目标是验证“无堆分配”，应使用 `heap_lock()`。
 8. `heap_lock()` 属于严苛场景工具，不作为普通优化手段；普通代码优先通过预分配 `buffer`、复用对象、减少临时对象来降低 GC 压力。
+
+## MicroPython 项目分文件约束：
+
+1. 不要把代码拆成大量很小的 .py 文件；普通文件系统上的 .py 在 import 时会被编译成 bytecode，并占用 RAM。
+2. 每个模块 import 时只能定义 const、类、函数、少量不可变常量；禁止在模块顶层初始化硬件、创建大对象、创建 buffer、启动循环或执行业务逻辑。
+3. 所有模块先 import 完，再由 main.py 统一调用 init()/setup() 创建运行期对象，这样能给编译器留下最大 RAM。
+4. 可复用且稳定的驱动、算法、查表数据、协议解析模块，优先独立成文件，方便之后编译成 .mpy 或 frozen bytecode。
+5. 大型只读数据应单独放到常量模块里，用 bytes、tuple、str 等不可变对象表示；如果固化到 firmware，可尽量留在 flash。
+6. 可变运行状态、buffer、队列、传感器对象、电机对象不要放在常量模块顶层，应在 init 阶段集中创建。
+7. 避免循环 import；模块依赖方向保持简单：main -> app/control -> drivers/utils/config。
+8. 高频控制循环相关代码应少跨模块调用、少动态查找；必要时把热路径函数集中在少数模块中。
+9. boot.py 保持极简，只做必须的启动配置；main.py 负责 import、gc.collect()、gc.threshold()、初始化、进入主循环。但目前该项目已经不需要boot.py文件了，可直接main.py启动

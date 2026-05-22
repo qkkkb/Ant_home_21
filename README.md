@@ -17,7 +17,7 @@ Ant_Home/
 
 `Control/` 是主车控制模块。当前真实运行入口主要是 `Control/main.py`，它负责三轮底盘速度闭环、陀螺仪 yaw/gyro rate 控制、ART 视觉串口解析、目标推送状态机、按键启停，并通过当前无线帧结构周期发送主车运动前馈给从车。详细说明见 `Control/README.md`。
 
-`NO.2/` 保存第二辆车相关程序。`NO.2/main.py` 是从车持续跟随入口，读取 OpenMV 红外灯板误差和主车无线运动前馈；`NO.2/mini_main.py` 是从车 OpenMV 红外视觉脚本，按摄像头 180 度旋转校正后识别横排两点红外灯板。
+`NO.2/` 保存第二辆车相关程序。`NO.2/main.py` 是从车持续跟随入口，读取 OpenMV 红外灯板误差和主车无线运动前馈；`NO.2/mini_main.py` 是从车 OpenMV 红外视觉脚本，按摄像头 180 度旋转校正后识别横排两点红外灯板，并使用 `TRACK`/`IDLE` 命令、QQVGA 与 ROI 锁定来优先保证帧率。
 
 `Vision/` 保存视觉端脚本。`Vision/art_main.py` 使用检测模型和分类模型处理画面，通过 UART 输出目标误差、分类方向和黄线状态；`ipm_calibration_pc.py`、`openmv_ipm_calibration.py` 等脚本用于逆透视标定和参数更新。
 

@@ -4,6 +4,9 @@ from machine import UART
 from pyb import LED
 
 
+EXPOSURE_US = 1200
+
+
 # ================= Camera =================
 sensor.reset()
 sensor.set_pixformat(sensor.GRAYSCALE)
@@ -11,7 +14,7 @@ sensor.set_framesize(sensor.QQVGA)
 sensor.set_vflip(True)
 sensor.set_hmirror(True)
 sensor.set_auto_gain(False)
-sensor.set_auto_exposure(False, exposure_us=1200)
+sensor.set_auto_exposure(False, exposure_us=EXPOSURE_US)
 try:
     sensor.set_auto_whitebal(False)
 except Exception:
@@ -61,8 +64,10 @@ ROI_MISS_RESET = 2
 EMA_ALPHA_NUM = 3
 EMA_ALPHA_DEN = 4
 SEND_NO_TARGET_WHEN_EMPTY = True
-PRINT_DEBUG = False
-DRAW_DEBUG = False
+PRINT_DEBUG = True
+DRAW_DEBUG = True
+DRAW_ROI_DEBUG = False
+DEBUG_PRINT_INTERVAL = 5
 GC_FRAME_MASK = 0x3F
 
 
@@ -259,6 +264,28 @@ def update_ema(err_x, err_y):
     return ema_err_x, ema_err_y
 
 
+def should_print_debug():
+    if not PRINT_DEBUG:
+        return False
+    return (frame_count % DEBUG_PRINT_INTERVAL) == 0
+
+
+def print_blob_debug(name, blob):
+    print(
+        "%s x=%d y=%d w=%d h=%d cx=%d cy=%d pixels=%d"
+        % (
+            name,
+            blob.x(),
+            blob.y(),
+            blob.w(),
+            blob.h(),
+            blob.cx(),
+            blob.cy(),
+            blob.pixels(),
+        )
+    )
+
+
 def process_frame(img):
     global track_roi, roi_miss_count
 
@@ -269,8 +296,13 @@ def process_frame(img):
             track_roi = None
         if SEND_NO_TARGET_WHEN_EMPTY:
             send_no_target()
-        if PRINT_DEBUG:
-            print("IR MISS")
+        if should_print_debug():
+            print("IR MISS roi=%s threshold=%s exposure_us=%d target_dx=%d" % (
+                track_roi,
+                IR_THRESHOLDS,
+                EXPOSURE_US,
+                TARGET_PAIR_DX,
+            ))
         return
 
     b0, b1, span_x = pair
@@ -278,6 +310,7 @@ def process_frame(img):
     track_roi = make_track_roi(b0, b1)
 
     center_x = (b0.cx() + b1.cx()) // 2
+    center_y = (b0.cy() + b1.cy()) // 2
     err_x = (center_x - (IMG_CENTER_X + TARGET_CENTER_X_OFFSET)) * ERROR_OUTPUT_SCALE
     err_y = (TARGET_PAIR_DX - span_x) * ERROR_OUTPUT_SCALE
     err_x, err_y = update_ema(int(err_x), int(err_y))
@@ -286,11 +319,27 @@ def process_frame(img):
     if DRAW_DEBUG:
         img.draw_rectangle(b0.rect(), color=255)
         img.draw_rectangle(b1.rect(), color=255)
-        img.draw_cross(center_x, (b0.cy() + b1.cy()) // 2, color=255)
-        if track_roi is not None:
+        img.draw_cross(center_x, center_y, color=255)
+        if DRAW_ROI_DEBUG and track_roi is not None:
             img.draw_rectangle(track_roi, color=255)
-    if PRINT_DEBUG:
-        print("IR err=(%d,%d) span=%d" % (err_x, err_y, span_x))
+    if should_print_debug():
+        print(
+            "IR center=(%d,%d) span_x=%d err=(%d,%d) roi=%s "
+            "threshold=%s exposure_us=%d target_dx=%d"
+            % (
+                center_x,
+                center_y,
+                span_x,
+                err_x,
+                err_y,
+                track_roi,
+                IR_THRESHOLDS,
+                EXPOSURE_US,
+                TARGET_PAIR_DX,
+            )
+        )
+        print_blob_debug("L0", b0)
+        print_blob_debug("L1", b1)
 
 
 while True:

@@ -1091,6 +1091,11 @@ def check_c8_exit():
 # 日志输出：串口 + 无线双发
 def log(msg):
     print(msg)
+    try:
+        wireless.send_str(msg)
+        wireless.send_str("\r\n")
+    except Exception:
+        pass
 
 
 def log_control_params():
@@ -1119,6 +1124,17 @@ def log_control_params():
             GYRO_KI,
             GYRO_OUTPUT_LIMIT,
             1 if ENABLE_COOP_MOTION_TX else 0,
+        )
+    )
+    log(
+        "[P] pid pwm=%d duty=%d kp=%.0f ki=%.0f chg=%d sm=%.2f"
+        % (
+            cfg.PWM_MAX,
+            MOTOR_DUTY_MAX,
+            pid_fl.kp,
+            pid_fl.ki,
+            MAX_PWM_CHANGE,
+            PWM_SMOOTH_FACTOR,
         )
     )
 
@@ -1245,7 +1261,6 @@ if ENABLE_IMU:
     log("IMU 偏移预设：%.2f" % GYRO_OFFSET_Z)
 else:
     log("IMU 未启用，仅运行速度环")
-log_control_params()
 
 # ---------------------- Ticker ----------------------
 pit_flag = False
@@ -1301,6 +1316,7 @@ loop_count = 0
 last_vz_cmd = 0.0
 last_turn_rate_cmd = 0.0
 yaw_ref_deg = 0.0
+log_control_params()
 
 
 def update_master_actual_motion(e_fl, e_fr, e_b, gyro_z):

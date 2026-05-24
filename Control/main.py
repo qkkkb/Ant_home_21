@@ -6,11 +6,12 @@ from smartcar import ticker, encoder
 from seekfree import WIRELESS_UART
 from imu_runtime import IMUYawRuntime
 from models import AnglePID, MoveBase, SpeedPID
-from move_base import calc_wheel_spd
+from move_base import calc_wheel_spd, get_car_spd
 import pid as _pid_mod
 import config as cfg
 from hardware import Motor
 from coop_protocol import (
+    MASTER_MOTION_FLAG_CLOSED_LOOP,
     MASTER_MOTION_FLAG_STARTED,
     MASTER_MOTION_FLAG_TARGET,
     encode_master_motion,
@@ -1144,6 +1145,9 @@ log("CH7 wireless exit disabled: wireless UART sends master motion")
 
 motion_seq = 0
 motion_last_tx_ms = 0
+master_actual_vx = 0.0
+master_actual_vy = 0.0
+master_actual_wz = 0.0
 
 
 def motion_next_seq():
@@ -1178,10 +1182,10 @@ def send_master_motion(now):
     wz = 0.0
     yaw_deg = 0.0
     if car_started:
-        flags |= MASTER_MOTION_FLAG_STARTED
-        vx = cam_target_vx
-        vy = cam_target_vy
-        wz = last_turn_rate_cmd
+        flags |= MASTER_MOTION_FLAG_STARTED | MASTER_MOTION_FLAG_CLOSED_LOOP
+        vx = master_actual_vx
+        vy = master_actual_vy
+        wz = master_actual_wz
     if cam_target_seen():
         flags |= MASTER_MOTION_FLAG_TARGET
     if ENABLE_IMU and imu_runtime is not None:
@@ -1221,6 +1225,7 @@ pit1.start(TICK_PERIOD_MS)
 
 # ---------------------- Controller state ----------------------
 move_cmd = MoveBase()
+motion_feedback = MoveBase()
 
 pid_fl = SpeedPID()
 pid_fr = SpeedPID()
@@ -1255,6 +1260,24 @@ last_vz_cmd = 0.0
 last_turn_rate_cmd = 0.0
 yaw_ref_deg = 0.0
 
+
+def update_master_actual_motion(e_fl, e_fr, e_b, gyro_z):
+    global master_actual_vx, master_actual_vy, master_actual_wz
+
+    get_car_spd(motion_feedback, e_fr, e_fl, e_b)
+    master_actual_vx = motion_feedback.speed_x
+    master_actual_vy = motion_feedback.speed_y
+    master_actual_wz = gyro_z
+
+
+def clear_master_actual_motion():
+    global master_actual_vx, master_actual_vy, master_actual_wz
+
+    master_actual_vx = 0.0
+    master_actual_vy = 0.0
+    master_actual_wz = 0.0
+
+
 # ====================== 速度闭环主函数（含发车判断） ======================
 def calc_speed_closed_loop():
     global last_vz_cmd, last_turn_rate_cmd
@@ -1264,6 +1287,7 @@ def calc_speed_closed_loop():
     # 未发车：直接输出 0，占空比清零
     if not car_started:
         set_three_pwm_smooth(0, 0, 0)
+        clear_master_actual_motion()
         return {
             "enc_fl": 0, "enc_fr": 0, "enc_b": 0,
             "tar_fl": 0, "tar_fr": 0, "tar_b": 0,
@@ -1340,6 +1364,7 @@ def calc_speed_closed_loop():
         motor_fl.duty(0)
         motor_fr.duty(0)
         motor_b.duty(0)
+        update_master_actual_motion(e_fl, e_fr, e_b, gyro_z)
         return {
             "enc_fl": e_fl,
             "enc_fr": e_fr,
@@ -1399,6 +1424,7 @@ def calc_speed_closed_loop():
             s_b = 0
         else:
             s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
+        update_master_actual_motion(e_fl, e_fr, e_b, gyro_z)
         return {
             "enc_fl": e_fl,
             "enc_fr": e_fr,
@@ -1516,6 +1542,7 @@ def calc_speed_closed_loop():
         s_b = 0
     else:
         s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
+    update_master_actual_motion(e_fl, e_fr, e_b, gyro_z)
 
     return {
         "enc_fl": e_fl,

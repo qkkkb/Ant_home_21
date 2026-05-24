@@ -77,6 +77,8 @@ Follow_Yaw_Gain = 0.08
 Follow_Yaw_Limit = 15.0
 Follow_Target_Lost_Hold_Ms = 250
 Master_Motion_Timeout_Ms = 250
+Camera_Right_Yaw_Cos = 0.7071068
+Camera_Right_Yaw_Sin = 0.7071068
 
 
 # ====================== Runtime state ======================
@@ -178,6 +180,12 @@ def master_started():
     return master_motion_fresh() and ((master_flags & MASTER_MOTION_FLAG_STARTED) != 0)
 
 
+def rotate_camera_velocity_to_body(cam_vx, cam_vy):
+    body_vx = cam_vx * Camera_Right_Yaw_Cos + cam_vy * Camera_Right_Yaw_Sin
+    body_vy = -cam_vx * Camera_Right_Yaw_Sin + cam_vy * Camera_Right_Yaw_Cos
+    return body_vx, body_vy
+
+
 def poll_art_uart():
     global cam_rx_buf, cam_has_target, cam_rx_started, cam_valid_target_since_ms
     global cam_last_rx_ms, target_lost_since_ms
@@ -256,12 +264,15 @@ def update_follow_targets(yaw_deg, gyro_z):
 
     if seen:
         target_lost_since_ms = 0
-        vx = cam_error_y * Follow_Forward_Gain + ff_vx * Follow_Feedforward_Gain
-        vy = -cam_error_x * Follow_Lateral_Gain + ff_vy * Follow_Feedforward_Gain
+        cam_vx = cam_error_y * Follow_Forward_Gain
+        cam_vy = -cam_error_x * Follow_Lateral_Gain
         if -Follow_Forward_Deadband <= cam_error_y <= Follow_Forward_Deadband:
-            vx = ff_vx * Follow_Feedforward_Gain
+            cam_vx = 0.0
         if -Follow_Lateral_Deadband <= cam_error_x <= Follow_Lateral_Deadband:
-            vy = ff_vy * Follow_Feedforward_Gain
+            cam_vy = 0.0
+        body_vx, body_vy = rotate_camera_velocity_to_body(cam_vx, cam_vy)
+        vx = body_vx + ff_vx * Follow_Feedforward_Gain
+        vy = body_vy + ff_vy * Follow_Feedforward_Gain
     else:
         if target_lost_since_ms == 0:
             target_lost_since_ms = now

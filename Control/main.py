@@ -67,6 +67,16 @@ GC_DIV = 50
 FORCE_MOTOR_OFF = False  # 调试开关：True 时程序继续运行，但三个电机始终断输出
 AUTO_START_ON_BOOT = False
 AUTO_START_DELAY_MS = 2000
+CONTROL_LOG_ENABLE = True
+CONTROL_LOG_PARAM_ON_BOOT = True
+CONTROL_LOG_PERIOD_MS = 200
+CONTROL_SPIKE_LOG_ENABLE = True
+CONTROL_SPIKE_LOG_PERIOD_MS = 120
+CONTROL_SPIKE_OUTPUT_TH = int(MOTOR_DUTY_MAX * 0.75)
+CONTROL_SPIKE_PWM_STEP_TH = 1800
+CONTROL_SPIKE_TARGET_STEP_TH = 2.5
+CONTROL_SPIKE_GYRO_ERR_TH = 25.0
+# SPIKE reason bits: 1=PID output, 2=PWM step, 4=wheel target step, 8=gyro rate error.
 
 # 无线遥控器 7 通道作为退出触发
 EXIT_TRIGGER_CHANNEL = 7
@@ -1368,6 +1378,192 @@ def check_c8_exit():
 def log(msg):
     print(msg)
 
+
+def max_abs3(a, b, c):
+    a = abs(a)
+    b = abs(b)
+    c = abs(c)
+    if a < b:
+        a = b
+    if a < c:
+        a = c
+    return a
+
+
+def log_control_params():
+    log(
+        "[PARAM] tick=%d pwm_max=%d duty_max=%d duty_min=%d smooth=%.2f max_step=%d force_off=%d"
+        % (
+            TICK_PERIOD_MS,
+            cfg.PWM_MAX,
+            MOTOR_DUTY_MAX,
+            MOTOR_DUTY_MIN,
+            PWM_SMOOTH_FACTOR,
+            MAX_PWM_CHANGE,
+            1 if FORCE_MOTOR_OFF else 0,
+        )
+    )
+    log(
+        "[PARAM] speed_pid kp=%.1f ki=%.1f kd=%.1f gama=%.2f c=(%.4f,%.4f,%.4f)"
+        % (pid_fl.kp, pid_fl.ki, pid_fl.kd, pid_fl.gama, pid_fl.c1, pid_fl.c2, pid_fl.c3)
+    )
+    log(
+        "[PARAM] gyro imu=%d sign=%.1f offset=%.2f scale=%.6f db=%.2f kp=%.2f ki=%.3f out=%.1f"
+        % (
+            1 if ENABLE_IMU else 0,
+            GYRO_SIGN,
+            GYRO_OFFSET_Z,
+            GYRO_SCALE,
+            GYRO_DEADBAND_DPS,
+            GYRO_KP,
+            GYRO_KI,
+            GYRO_OUTPUT_LIMIT,
+        )
+    )
+    log(
+        "[PARAM] nav coarse_gain=(%.3f,%.3f) coarse_lim=(%.1f,%.1f) fine_gain=(%.3f,%.3f) fine_lim=(%.1f,%.1f)"
+        % (
+            Nav_Coarse_Forward_Gain,
+            Nav_Coarse_Lateral_Gain,
+            Nav_Coarse_Forward_Limit,
+            Nav_Coarse_Lateral_Limit,
+            Nav_Fine_Forward_Gain,
+            Nav_Fine_Lateral_Gain,
+            Nav_Fine_Forward_Limit,
+            Nav_Fine_Lateral_Limit,
+        )
+    )
+    log(
+        "[PARAM] nav ok fine=(x%.1f,y%d,%dms) deadband=(%d,%d) coarse_exit_y=%d detect=%d lost=%d"
+        % (
+            Nav_Fine_Ok_X,
+            Nav_Fine_Ok_Y_Max,
+            Nav_Fine_Ok_Ms,
+            Nav_Forward_Deadband,
+            Nav_Lateral_Deadband,
+            Nav_Coarse_Exit_Y,
+            Nav_Detect_Ms,
+            Nav_Target_Lost_Ms,
+        )
+    )
+    log(
+        "[PARAM] push prep_gain=(%.3f,%.3f) prep_lim=(%.1f,%.1f) prep_ok=(x%d,y%d,yaw%.1f,%dms) exec=%.1f back=(%.1f,%dms)"
+        % (
+            Nav_Push_Prepare_Forward_Gain,
+            Nav_Push_Prepare_Lateral_Gain,
+            Nav_Push_Prepare_Forward_Limit,
+            Nav_Push_Prepare_Lateral_Limit,
+            Nav_Push_Prepare_Ok_X,
+            Nav_Push_Prepare_Ok_Y_Max,
+            Nav_Push_Prepare_Ok_Yaw,
+            Nav_Push_Prepare_Ok_Ms,
+            Nav_Push_Execute_Forward_Speed,
+            Nav_Push_Back_Speed,
+            Nav_Push_Back_Ms,
+        )
+    )
+    log(
+        "[PARAM] turn search_yaw=%.1f open_vz=%.1f max_rate=%.1f gyro_lim=%.1f orbit_rate=(%.1f,%.1f) orbit_vy=(%.1f,%.1f) turn_rate=(%.1f,%.1f)"
+        % (
+            Nav_Search_Turn_Yaw,
+            Nav_Search_Turn_Open_Vz,
+            Nav_Search_Turn_Max_Rate,
+            Nav_Search_Turn_Gyro_Limit,
+            Nav_Push_Orbit_Slow_Rate,
+            Nav_Push_Orbit_Fast_Rate,
+            Nav_Push_Orbit_Slow_Vy,
+            Nav_Push_Orbit_Fast_Vy,
+            Nav_Push_Turn_Slow_Rate,
+            Nav_Push_Turn_Fast_Rate,
+        )
+    )
+    log(
+        "[PARAM] log period=%d spike_period=%d out_th=%d pwm_step_th=%d tar_step_th=%.1f gyro_err_th=%.1f"
+        % (
+            CONTROL_LOG_PERIOD_MS,
+            CONTROL_SPIKE_LOG_PERIOD_MS,
+            CONTROL_SPIKE_OUTPUT_TH,
+            CONTROL_SPIKE_PWM_STEP_TH,
+            CONTROL_SPIKE_TARGET_STEP_TH,
+            CONTROL_SPIKE_GYRO_ERR_TH,
+        )
+    )
+    log("[PARAM] spike_reason bits: 1=out 2=pwm_step 4=tar_step 8=gyro_err")
+
+
+def log_control_status(now, force):
+    global last_control_log_ms
+
+    if (not CONTROL_LOG_ENABLE) or (not ctrl_log_valid):
+        return
+    if (not force) and utime.ticks_diff(now, last_control_log_ms) < CONTROL_LOG_PERIOD_MS:
+        return
+    last_control_log_ms = now
+    log(
+        "[CTRL] st=%s age=%d err=(%d,%d) cmd=(%.1f,%.1f) turn=%.1f vz=%.1f yaw=%.1f yerr=%.1f gz=%.1f raw=%.1f gl=%.1f low=%d"
+        % (
+            nav_state,
+            utime.ticks_diff(now, cam_last_rx_ms),
+            cam_error_x,
+            cam_error_y,
+            ctrl_log_cmd_vx,
+            ctrl_log_cmd_vy,
+            ctrl_log_turn,
+            ctrl_log_vz,
+            ctrl_log_yaw,
+            ctrl_log_yaw_err,
+            ctrl_log_gyro_z,
+            ctrl_log_raw_gyro_z,
+            ctrl_log_gyro_limit,
+            ctrl_log_low_speed,
+        )
+    )
+    log(
+        "[CTRL] enc=(%d,%d,%d) tar=(%.1f,%.1f,%.1f) out=(%d,%d,%d) pwm=(%d,%d,%d) step=(%d,%d,%d) pid_err=(%.1f,%.1f,%.1f)"
+        % (
+            ctrl_log_e_fl,
+            ctrl_log_e_fr,
+            ctrl_log_e_b,
+            ctrl_log_t_fl,
+            ctrl_log_t_fr,
+            ctrl_log_t_b,
+            ctrl_log_u_fl,
+            ctrl_log_u_fr,
+            ctrl_log_u_b,
+            ctrl_log_s_fl,
+            ctrl_log_s_fr,
+            ctrl_log_s_b,
+            ctrl_pwm_step_fl,
+            ctrl_pwm_step_fr,
+            ctrl_pwm_step_b,
+            ctrl_log_pid_err_fl,
+            ctrl_log_pid_err_fr,
+            ctrl_log_pid_err_b,
+        )
+    )
+
+
+def log_control_spike(now):
+    global last_control_spike_ms
+
+    if (not CONTROL_SPIKE_LOG_ENABLE) or (not ctrl_log_valid) or ctrl_spike_reason == 0:
+        return
+    if utime.ticks_diff(now, last_control_spike_ms) < CONTROL_SPIKE_LOG_PERIOD_MS:
+        return
+    last_control_spike_ms = now
+    log(
+        "[SPIKE] reason=%d max_out=%d max_step=%d tar_step=%.1f gyro_err=%.1f"
+        % (
+            ctrl_spike_reason,
+            ctrl_log_max_out,
+            ctrl_log_max_pwm_step,
+            ctrl_log_target_step,
+            ctrl_log_gyro_err,
+        )
+    )
+    log_control_status(now, True)
+
+
 # 停止所有电机
 def stop_all():
     motor_fl.duty(0)
@@ -1402,10 +1598,14 @@ def apply_motor_duty(cmd, motor):
 # 三路电机 PWM 平滑设置
 def set_three_pwm_smooth(u_fl, u_fr, u_b):
     global last_pwm_fl, last_pwm_fr, last_pwm_b
+    global ctrl_pwm_step_fl, ctrl_pwm_step_fr, ctrl_pwm_step_b
 
     s_fl = smooth_value(int(u_fl), last_pwm_fl)
     s_fr = smooth_value(int(u_fr), last_pwm_fr)
     s_b = smooth_value(int(u_b), last_pwm_b)
+    ctrl_pwm_step_fl = s_fl - last_pwm_fl
+    ctrl_pwm_step_fr = s_fr - last_pwm_fr
+    ctrl_pwm_step_b = s_b - last_pwm_b
 
     apply_motor_duty(s_fl, motor_fl)
     apply_motor_duty(s_fr, motor_fr)
@@ -1489,11 +1689,87 @@ loop_count = 0
 last_vz_cmd = 0.0
 last_turn_rate_cmd = 0.0
 yaw_ref_deg = 0.0
+last_control_log_ms = start_time
+last_control_spike_ms = start_time
+ctrl_log_valid = False
+ctrl_spike_reason = 0
+ctrl_log_e_fl = 0
+ctrl_log_e_fr = 0
+ctrl_log_e_b = 0
+ctrl_log_t_fl = 0.0
+ctrl_log_t_fr = 0.0
+ctrl_log_t_b = 0.0
+ctrl_log_u_fl = 0
+ctrl_log_u_fr = 0
+ctrl_log_u_b = 0
+ctrl_log_s_fl = 0
+ctrl_log_s_fr = 0
+ctrl_log_s_b = 0
+ctrl_pwm_step_fl = 0
+ctrl_pwm_step_fr = 0
+ctrl_pwm_step_b = 0
+ctrl_log_cmd_vx = 0.0
+ctrl_log_cmd_vy = 0.0
+ctrl_log_turn = 0.0
+ctrl_log_vz = 0.0
+ctrl_log_yaw = 0.0
+ctrl_log_yaw_err = 0.0
+ctrl_log_gyro_z = 0.0
+ctrl_log_raw_gyro_z = 0.0
+ctrl_log_gyro_limit = 0.0
+ctrl_log_low_speed = 0
+ctrl_log_pid_err_fl = 0.0
+ctrl_log_pid_err_fr = 0.0
+ctrl_log_pid_err_b = 0.0
+ctrl_log_max_out = 0
+ctrl_log_max_pwm_step = 0
+ctrl_log_target_step = 0.0
+ctrl_log_gyro_err = 0.0
+ctrl_prev_t_fl = 0.0
+ctrl_prev_t_fr = 0.0
+ctrl_prev_t_b = 0.0
+
+
+def finish_control_snapshot():
+    global ctrl_log_valid, ctrl_spike_reason
+    global ctrl_log_max_out, ctrl_log_max_pwm_step, ctrl_log_target_step, ctrl_log_gyro_err
+    global ctrl_prev_t_fl, ctrl_prev_t_fr, ctrl_prev_t_b
+
+    ctrl_log_valid = True
+    ctrl_log_max_out = int(max_abs3(ctrl_log_u_fl, ctrl_log_u_fr, ctrl_log_u_b))
+    ctrl_log_max_pwm_step = int(max_abs3(ctrl_pwm_step_fl, ctrl_pwm_step_fr, ctrl_pwm_step_b))
+    ctrl_log_target_step = max_abs3(
+        ctrl_log_t_fl - ctrl_prev_t_fl,
+        ctrl_log_t_fr - ctrl_prev_t_fr,
+        ctrl_log_t_b - ctrl_prev_t_b,
+    )
+    ctrl_log_gyro_err = ctrl_log_turn - ctrl_log_gyro_z
+    ctrl_prev_t_fl = ctrl_log_t_fl
+    ctrl_prev_t_fr = ctrl_log_t_fr
+    ctrl_prev_t_b = ctrl_log_t_b
+    ctrl_spike_reason = 0
+    if ctrl_log_max_out >= CONTROL_SPIKE_OUTPUT_TH:
+        ctrl_spike_reason |= 1
+    if ctrl_log_max_pwm_step >= CONTROL_SPIKE_PWM_STEP_TH:
+        ctrl_spike_reason |= 2
+    if ctrl_log_target_step >= CONTROL_SPIKE_TARGET_STEP_TH:
+        ctrl_spike_reason |= 4
+    if abs(ctrl_log_gyro_err) >= CONTROL_SPIKE_GYRO_ERR_TH:
+        ctrl_spike_reason |= 8
 
 # ====================== 速度闭环主函数（含发车判断） ======================
 def calc_speed_closed_loop():
     global last_vz_cmd, last_turn_rate_cmd
     global last_pwm_fl, last_pwm_fr, last_pwm_b
+    global ctrl_pwm_step_fl, ctrl_pwm_step_fr, ctrl_pwm_step_b
+    global ctrl_log_e_fl, ctrl_log_e_fr, ctrl_log_e_b
+    global ctrl_log_t_fl, ctrl_log_t_fr, ctrl_log_t_b
+    global ctrl_log_u_fl, ctrl_log_u_fr, ctrl_log_u_b
+    global ctrl_log_s_fl, ctrl_log_s_fr, ctrl_log_s_b
+    global ctrl_log_cmd_vx, ctrl_log_cmd_vy, ctrl_log_turn, ctrl_log_vz
+    global ctrl_log_yaw, ctrl_log_yaw_err, ctrl_log_gyro_z, ctrl_log_raw_gyro_z
+    global ctrl_log_gyro_limit, ctrl_log_low_speed
+    global ctrl_log_pid_err_fl, ctrl_log_pid_err_fr, ctrl_log_pid_err_b
     global cam_target_vx, cam_target_vy
 
     # 未发车：直接输出 0，占空比清零
@@ -1557,12 +1833,41 @@ def calc_speed_closed_loop():
             gyro_pid.err = 0.0
             gyro_pid.err_last = 0.0
             gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
+        ctrl_pwm_step_fl = -last_pwm_fl
+        ctrl_pwm_step_fr = -last_pwm_fr
+        ctrl_pwm_step_b = -last_pwm_b
         last_pwm_fl = 0
         last_pwm_fr = 0
         last_pwm_b = 0
         motor_fl.duty(0)
         motor_fr.duty(0)
         motor_b.duty(0)
+        ctrl_log_e_fl = int(e_fl)
+        ctrl_log_e_fr = int(e_fr)
+        ctrl_log_e_b = int(e_b)
+        ctrl_log_t_fl = 0.0
+        ctrl_log_t_fr = 0.0
+        ctrl_log_t_b = 0.0
+        ctrl_log_u_fl = 0
+        ctrl_log_u_fr = 0
+        ctrl_log_u_b = 0
+        ctrl_log_s_fl = 0
+        ctrl_log_s_fr = 0
+        ctrl_log_s_b = 0
+        ctrl_log_cmd_vx = cam_target_vx
+        ctrl_log_cmd_vy = cam_target_vy
+        ctrl_log_turn = 0.0
+        ctrl_log_vz = 0.0
+        ctrl_log_yaw = yaw_deg
+        ctrl_log_yaw_err = 0.0
+        ctrl_log_gyro_z = gyro_z
+        ctrl_log_raw_gyro_z = raw_gyro_z
+        ctrl_log_gyro_limit = gyro_pid.gyro_output_limit if gyro_pid is not None else 0.0
+        ctrl_log_low_speed = 1 if low_speed else 0
+        ctrl_log_pid_err_fl = pid_fl.err
+        ctrl_log_pid_err_fr = pid_fr.err
+        ctrl_log_pid_err_b = pid_b.err
+        finish_control_snapshot()
         return None
 
     yaw_err_deg = -wrapped_yaw_error(yaw_ref_deg, yaw_deg) if ENABLE_IMU else 0.0
@@ -1599,6 +1904,32 @@ def calc_speed_closed_loop():
             s_b = 0
         else:
             s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
+        ctrl_log_e_fl = int(e_fl)
+        ctrl_log_e_fr = int(e_fr)
+        ctrl_log_e_b = int(e_b)
+        ctrl_log_t_fl = t_fl
+        ctrl_log_t_fr = t_fr
+        ctrl_log_t_b = t_b
+        ctrl_log_u_fl = int(u_fl)
+        ctrl_log_u_fr = int(u_fr)
+        ctrl_log_u_b = int(u_b)
+        ctrl_log_s_fl = int(s_fl)
+        ctrl_log_s_fr = int(s_fr)
+        ctrl_log_s_b = int(s_b)
+        ctrl_log_cmd_vx = cam_target_vx
+        ctrl_log_cmd_vy = cam_target_vy
+        ctrl_log_turn = turn_rate_cmd
+        ctrl_log_vz = vz_cmd
+        ctrl_log_yaw = yaw_deg
+        ctrl_log_yaw_err = yaw_err_deg
+        ctrl_log_gyro_z = gyro_z
+        ctrl_log_raw_gyro_z = raw_gyro_z
+        ctrl_log_gyro_limit = gyro_pid.gyro_output_limit if gyro_pid is not None else 0.0
+        ctrl_log_low_speed = 1 if low_speed else 0
+        ctrl_log_pid_err_fl = pid_fl.err
+        ctrl_log_pid_err_fr = pid_fr.err
+        ctrl_log_pid_err_b = pid_b.err
+        finish_control_snapshot()
         return None
 
     gyro_rate_mode = False
@@ -1693,12 +2024,40 @@ def calc_speed_closed_loop():
         s_b = 0
     else:
         s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
+    ctrl_log_e_fl = int(e_fl)
+    ctrl_log_e_fr = int(e_fr)
+    ctrl_log_e_b = int(e_b)
+    ctrl_log_t_fl = t_fl
+    ctrl_log_t_fr = t_fr
+    ctrl_log_t_b = t_b
+    ctrl_log_u_fl = int(u_fl)
+    ctrl_log_u_fr = int(u_fr)
+    ctrl_log_u_b = int(u_b)
+    ctrl_log_s_fl = int(s_fl)
+    ctrl_log_s_fr = int(s_fr)
+    ctrl_log_s_b = int(s_b)
+    ctrl_log_cmd_vx = cam_target_vx
+    ctrl_log_cmd_vy = cam_target_vy
+    ctrl_log_turn = turn_rate_cmd
+    ctrl_log_vz = vz_cmd
+    ctrl_log_yaw = yaw_deg
+    ctrl_log_yaw_err = yaw_err_deg
+    ctrl_log_gyro_z = gyro_z
+    ctrl_log_raw_gyro_z = raw_gyro_z
+    ctrl_log_gyro_limit = gyro_pid.gyro_output_limit if gyro_pid is not None else 0.0
+    ctrl_log_low_speed = 1 if low_speed else 0
+    ctrl_log_pid_err_fl = pid_fl.err
+    ctrl_log_pid_err_fr = pid_fr.err
+    ctrl_log_pid_err_b = pid_b.err
+    finish_control_snapshot()
 
     return None
 
 log("speed loop start")
 if FORCE_MOTOR_OFF:
     log("FORCE_MOTOR_OFF=1")
+if CONTROL_LOG_PARAM_ON_BOOT:
+    log_control_params()
 
 try:
     while True:
@@ -1750,6 +2109,8 @@ try:
         if pit_flag:
             pit_flag = False
             calc_speed_closed_loop()
+            log_control_spike(now)
+            log_control_status(now, False)
 
         if utime.ticks_diff(now, last_status_ms) >= 1000:
             led.toggle()

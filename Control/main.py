@@ -68,8 +68,8 @@ FORCE_MOTOR_OFF = False  # 调试开关：True 时程序继续运行，但三个
 AUTO_START_ON_BOOT = False
 AUTO_START_DELAY_MS = 2000
 CONTROL_LOG_ENABLE = True
-CONTROL_LOG_PARAM_ON_BOOT = True
-CONTROL_LOG_PERIOD_MS = 200
+CONTROL_LOG_PARAM_ON_BOOT = False
+CONTROL_LOG_PERIOD_MS = 300
 CONTROL_SPIKE_LOG_ENABLE = True
 CONTROL_SPIKE_LOG_PERIOD_MS = 120
 CONTROL_SPIKE_OUTPUT_TH = int(MOTOR_DUTY_MAX * 0.75)
@@ -1344,7 +1344,7 @@ def check_c9_start():
         utime.sleep_ms(10)
         if key_start.value() == 0:
             if not car_started:
-                log("[C9] 0.5 秒后发车...")
+                log("[C9] launch in 0.5s")
                 utime.sleep_ms(500)
                 calibrate_gyro_before_launch()
                 if ENABLE_IMU and imu_runtime is not None:
@@ -1357,7 +1357,7 @@ def check_c9_start():
                 auto_start_done = True
                 start_time = utime.ticks_ms()
                 nav_set_state(NAV_STATE_SEARCH_TURN, "launch_search_turn", force=True)
-                log("[C9] 已发车，视觉闭环启动")
+                log("[C9] launched, vision loop on")
     last_c9_state = current_c9
 
 
@@ -1369,7 +1369,7 @@ def check_c8_exit():
     if current_c8 == 0 and last_c8_state == 1:
         utime.sleep_ms(10)
         if key_exit.value() == 0:
-            log("[C8] 请求退出")
+            log("[C8] exit requested")
             raise KeyboardInterrupt
     last_c8_state = current_c8
 
@@ -1391,104 +1391,11 @@ def max_abs3(a, b, c):
 
 
 def log_control_params():
-    log(
-        "[PARAM] tick=%d pwm_max=%d duty_max=%d duty_min=%d smooth=%.2f max_step=%d force_off=%d"
-        % (
-            TICK_PERIOD_MS,
-            cfg.PWM_MAX,
-            MOTOR_DUTY_MAX,
-            MOTOR_DUTY_MIN,
-            PWM_SMOOTH_FACTOR,
-            MAX_PWM_CHANGE,
-            1 if FORCE_MOTOR_OFF else 0,
-        )
-    )
-    log(
-        "[PARAM] speed_pid kp=%.1f ki=%.1f kd=%.1f gama=%.2f c=(%.4f,%.4f,%.4f)"
-        % (pid_fl.kp, pid_fl.ki, pid_fl.kd, pid_fl.gama, pid_fl.c1, pid_fl.c2, pid_fl.c3)
-    )
-    log(
-        "[PARAM] gyro imu=%d sign=%.1f offset=%.2f scale=%.6f db=%.2f kp=%.2f ki=%.3f out=%.1f"
-        % (
-            1 if ENABLE_IMU else 0,
-            GYRO_SIGN,
-            GYRO_OFFSET_Z,
-            GYRO_SCALE,
-            GYRO_DEADBAND_DPS,
-            GYRO_KP,
-            GYRO_KI,
-            GYRO_OUTPUT_LIMIT,
-        )
-    )
-    log(
-        "[PARAM] nav coarse_gain=(%.3f,%.3f) coarse_lim=(%.1f,%.1f) fine_gain=(%.3f,%.3f) fine_lim=(%.1f,%.1f)"
-        % (
-            Nav_Coarse_Forward_Gain,
-            Nav_Coarse_Lateral_Gain,
-            Nav_Coarse_Forward_Limit,
-            Nav_Coarse_Lateral_Limit,
-            Nav_Fine_Forward_Gain,
-            Nav_Fine_Lateral_Gain,
-            Nav_Fine_Forward_Limit,
-            Nav_Fine_Lateral_Limit,
-        )
-    )
-    log(
-        "[PARAM] nav ok fine=(x%.1f,y%d,%dms) deadband=(%d,%d) coarse_exit_y=%d detect=%d lost=%d"
-        % (
-            Nav_Fine_Ok_X,
-            Nav_Fine_Ok_Y_Max,
-            Nav_Fine_Ok_Ms,
-            Nav_Forward_Deadband,
-            Nav_Lateral_Deadband,
-            Nav_Coarse_Exit_Y,
-            Nav_Detect_Ms,
-            Nav_Target_Lost_Ms,
-        )
-    )
-    log(
-        "[PARAM] push prep_gain=(%.3f,%.3f) prep_lim=(%.1f,%.1f) prep_ok=(x%d,y%d,yaw%.1f,%dms) exec=%.1f back=(%.1f,%dms)"
-        % (
-            Nav_Push_Prepare_Forward_Gain,
-            Nav_Push_Prepare_Lateral_Gain,
-            Nav_Push_Prepare_Forward_Limit,
-            Nav_Push_Prepare_Lateral_Limit,
-            Nav_Push_Prepare_Ok_X,
-            Nav_Push_Prepare_Ok_Y_Max,
-            Nav_Push_Prepare_Ok_Yaw,
-            Nav_Push_Prepare_Ok_Ms,
-            Nav_Push_Execute_Forward_Speed,
-            Nav_Push_Back_Speed,
-            Nav_Push_Back_Ms,
-        )
-    )
-    log(
-        "[PARAM] turn search_yaw=%.1f open_vz=%.1f max_rate=%.1f gyro_lim=%.1f orbit_rate=(%.1f,%.1f) orbit_vy=(%.1f,%.1f) turn_rate=(%.1f,%.1f)"
-        % (
-            Nav_Search_Turn_Yaw,
-            Nav_Search_Turn_Open_Vz,
-            Nav_Search_Turn_Max_Rate,
-            Nav_Search_Turn_Gyro_Limit,
-            Nav_Push_Orbit_Slow_Rate,
-            Nav_Push_Orbit_Fast_Rate,
-            Nav_Push_Orbit_Slow_Vy,
-            Nav_Push_Orbit_Fast_Vy,
-            Nav_Push_Turn_Slow_Rate,
-            Nav_Push_Turn_Fast_Rate,
-        )
-    )
-    log(
-        "[PARAM] log period=%d spike_period=%d out_th=%d pwm_step_th=%d tar_step_th=%.1f gyro_err_th=%.1f"
-        % (
-            CONTROL_LOG_PERIOD_MS,
-            CONTROL_SPIKE_LOG_PERIOD_MS,
-            CONTROL_SPIKE_OUTPUT_TH,
-            CONTROL_SPIKE_PWM_STEP_TH,
-            CONTROL_SPIKE_TARGET_STEP_TH,
-            CONTROL_SPIKE_GYRO_ERR_TH,
-        )
-    )
-    log("[PARAM] spike_reason bits: 1=out 2=pwm_step 4=tar_step 8=gyro_err")
+    log("[P0] tick=%d max=%d step=%d" % (TICK_PERIOD_MS, MOTOR_DUTY_MAX, MAX_PWM_CHANGE))
+    log("[P1] spd_kp=%.1f ki=%.1f" % (pid_fl.kp, pid_fl.ki))
+    log("[P2] fine_g=%.3f %.3f" % (Nav_Fine_Forward_Gain, Nav_Fine_Lateral_Gain))
+    log("[P3] fine_lim=%.1f %.1f" % (Nav_Fine_Forward_Limit, Nav_Fine_Lateral_Limit))
+    log("[P4] spike bits 1out 2pwm 4tar 8gyro")
 
 
 def log_control_status(now, force):
@@ -1499,48 +1406,15 @@ def log_control_status(now, force):
     if (not force) and utime.ticks_diff(now, last_control_log_ms) < CONTROL_LOG_PERIOD_MS:
         return
     last_control_log_ms = now
-    log(
-        "[CTRL] st=%s age=%d err=(%d,%d) cmd=(%.1f,%.1f) turn=%.1f vz=%.1f yaw=%.1f yerr=%.1f gz=%.1f raw=%.1f gl=%.1f low=%d"
-        % (
-            nav_state,
-            utime.ticks_diff(now, cam_last_rx_ms),
-            cam_error_x,
-            cam_error_y,
-            ctrl_log_cmd_vx,
-            ctrl_log_cmd_vy,
-            ctrl_log_turn,
-            ctrl_log_vz,
-            ctrl_log_yaw,
-            ctrl_log_yaw_err,
-            ctrl_log_gyro_z,
-            ctrl_log_raw_gyro_z,
-            ctrl_log_gyro_limit,
-            ctrl_log_low_speed,
-        )
-    )
-    log(
-        "[CTRL] enc=(%d,%d,%d) tar=(%.1f,%.1f,%.1f) out=(%d,%d,%d) pwm=(%d,%d,%d) step=(%d,%d,%d) pid_err=(%.1f,%.1f,%.1f)"
-        % (
-            ctrl_log_e_fl,
-            ctrl_log_e_fr,
-            ctrl_log_e_b,
-            ctrl_log_t_fl,
-            ctrl_log_t_fr,
-            ctrl_log_t_b,
-            ctrl_log_u_fl,
-            ctrl_log_u_fr,
-            ctrl_log_u_b,
-            ctrl_log_s_fl,
-            ctrl_log_s_fr,
-            ctrl_log_s_b,
-            ctrl_pwm_step_fl,
-            ctrl_pwm_step_fr,
-            ctrl_pwm_step_b,
-            ctrl_log_pid_err_fl,
-            ctrl_log_pid_err_fr,
-            ctrl_log_pid_err_b,
-        )
-    )
+    log("[C0] st=%s age=%d low=%d" % (nav_state, utime.ticks_diff(now, cam_last_rx_ms), ctrl_log_low_speed))
+    log("[C1] err=%d,%d cmd=%.1f,%.1f" % (cam_error_x, cam_error_y, ctrl_log_cmd_vx, ctrl_log_cmd_vy))
+    log("[C2] trn=%.1f vz=%.1f gz=%.1f" % (ctrl_log_turn, ctrl_log_vz, ctrl_log_gyro_z))
+    log("[C3] enc=%d,%d,%d" % (ctrl_log_e_fl, ctrl_log_e_fr, ctrl_log_e_b))
+    log("[C4] tar=%.1f,%.1f,%.1f" % (ctrl_log_t_fl, ctrl_log_t_fr, ctrl_log_t_b))
+    log("[C5] out=%d,%d,%d" % (ctrl_log_u_fl, ctrl_log_u_fr, ctrl_log_u_b))
+    log("[C6] pwm=%d,%d,%d" % (ctrl_log_s_fl, ctrl_log_s_fr, ctrl_log_s_b))
+    log("[C7] step=%d,%d,%d" % (ctrl_pwm_step_fl, ctrl_pwm_step_fr, ctrl_pwm_step_b))
+    log("[C8] yaw=%.1f ye=%.1f ge=%.1f" % (ctrl_log_yaw, ctrl_log_yaw_err, ctrl_log_gyro_err))
 
 
 def log_control_spike(now):
@@ -1551,16 +1425,8 @@ def log_control_spike(now):
     if utime.ticks_diff(now, last_control_spike_ms) < CONTROL_SPIKE_LOG_PERIOD_MS:
         return
     last_control_spike_ms = now
-    log(
-        "[SPIKE] reason=%d max_out=%d max_step=%d tar_step=%.1f gyro_err=%.1f"
-        % (
-            ctrl_spike_reason,
-            ctrl_log_max_out,
-            ctrl_log_max_pwm_step,
-            ctrl_log_target_step,
-            ctrl_log_gyro_err,
-        )
-    )
+    log("[SPK] r=%d out=%d step=%d" % (ctrl_spike_reason, ctrl_log_max_out, ctrl_log_max_pwm_step))
+    log("[SPK] tar=%.1f ge=%.1f" % (ctrl_log_target_step, ctrl_log_gyro_err))
     log_control_status(now, True)
 
 
@@ -1569,7 +1435,7 @@ def stop_all():
     motor_fl.duty(0)
     motor_fr.duty(0)
     motor_b.duty(0)
-    log("[停止] 所有电机占空比已清零")
+    log("[STOP] all motor duty cleared")
 
 # 占空比限幅
 def clamp_duty(value):
@@ -1627,14 +1493,14 @@ log("CH7 wireless exit disabled: coop communication is off in single-car mode")
 
 # ====================== 初始化 LED 显示 ======================
 update_nav_led_display()
-log("[初始化] 程序启动，视觉闭环待发车")
-log("[说明] C9=发车 | C8=退出")
+log("[INIT] boot, vision loop waiting")
+log("[INFO] C9=start C8=exit")
 
 # 陀螺仪偏移设置
 if ENABLE_IMU:
-    log("IMU 偏移预设：%.2f" % GYRO_OFFSET_Z)
+    log("IMU offset preset %.2f" % GYRO_OFFSET_Z)
 else:
-    log("IMU 未启用，仅运行速度环")
+    log("IMU off, speed loop only")
 
 # ---------------------- Ticker ----------------------
 pit_flag = False
@@ -2081,7 +1947,7 @@ try:
                 auto_start_done = True
                 start_time = now
                 nav_set_state(NAV_STATE_SEARCH_TURN, "launch_search_turn", force=True)
-                log("[自动发车] 到达开机延时，car_started=1")
+                log("[AUTO] boot delay reached, started=1")
         poll_art_uart()
         if COOP_ENABLE:
             poll_coop_uart()
@@ -2117,7 +1983,7 @@ try:
             last_status_ms = now
 
         if loop_count % EXIT_CHECK_DIV == 0 and check_upper_exit():
-            log("=== CH7 触发退出，程序停止 ===")
+            log("=== CH7 exit, stopping ===")
             break
 
         if loop_count % GC_DIV == 0:
@@ -2133,4 +1999,4 @@ finally:
     led_straight.value(0)
     led_translate.value(0)
     led_rotate.value(0)
-    log("=== 程序已完全停止 ===")
+    log("=== program stopped ===")

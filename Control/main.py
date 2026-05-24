@@ -1,5 +1,4 @@
 from machine import Pin, UART
-from array import array
 import gc
 import utime
 from smartcar import ticker, encoder
@@ -10,12 +9,16 @@ from move_base import calc_wheel_spd, get_car_spd
 import pid as _pid_mod
 import config as cfg
 from hardware import Motor
-from coop_protocol import (
-    MASTER_MOTION_FLAG_CLOSED_LOOP,
-    MASTER_MOTION_FLAG_STARTED,
-    MASTER_MOTION_FLAG_TARGET,
-    encode_master_motion,
-)
+
+ENABLE_COOP_MOTION_TX = False
+if ENABLE_COOP_MOTION_TX:
+    from array import array
+    from coop_protocol import (
+        MASTER_MOTION_FLAG_CLOSED_LOOP,
+        MASTER_MOTION_FLAG_STARTED,
+        MASTER_MOTION_FLAG_TARGET,
+        encode_master_motion,
+    )
 
 # 设置 PID 最大 PWM 值
 _pid_mod.PWM_MAX = cfg.PWM_MAX
@@ -996,7 +999,10 @@ enc_b  = encoder(cfg.ENC_B_A,  cfg.ENC_B_B,  cfg.ENC_B_INVERT)
 
 # 无线串口初始化
 wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
-motion_tx_buf = array('b', [0] * 16)
+if ENABLE_COOP_MOTION_TX:
+    motion_tx_buf = array('b', [0] * 16)
+else:
+    motion_tx_buf = None
 cam_uart = UART(cfg.CAM_UART_ID, cfg.CAM_UART_BAUD)
 cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
 
@@ -1086,6 +1092,95 @@ def check_c8_exit():
 def log(msg):
     print(msg)
 
+
+def log_control_params():
+    log(
+        "[PARAM] gyro s=%.1f off=%.2f sc=%.8f db=%.2f kp=%.3f ki=%.3f lim=%.1f ac=%d"
+        % (
+            GYRO_SIGN,
+            GYRO_OFFSET_Z,
+            GYRO_SCALE,
+            GYRO_DEADBAND_DPS,
+            GYRO_KP,
+            GYRO_KI,
+            GYRO_OUTPUT_LIMIT,
+            1 if AUTO_CALIBRATE_GYRO_ON_LAUNCH else 0,
+        )
+    )
+    log(
+        "[PARAM] fine cg=(%.3f,%.3f) fg=(%.3f,%.3f) lim=(%.1f,%.1f) db=(%d,%d) ok=(%.1f,%d,%d)"
+        % (
+            Nav_Coarse_Forward_Gain,
+            Nav_Coarse_Lateral_Gain,
+            Nav_Fine_Forward_Gain,
+            Nav_Fine_Lateral_Gain,
+            Nav_Fine_Forward_Limit,
+            Nav_Fine_Lateral_Limit,
+            Nav_Forward_Deadband,
+            Nav_Lateral_Deadband,
+            Nav_Fine_Ok_X,
+            Nav_Fine_Ok_Y_Max,
+            Nav_Fine_Ok_Ms,
+        )
+    )
+    log(
+        "[PARAM] orbit ok=%.1f skip=%.1f slow=%.1f vy=(%.1f,%.1f) rate=(%.1f,%.1f) glim=%.1f r=(%.2f,%.3f) stop=%.1f"
+        % (
+            Nav_Push_Orient_Ok_Yaw,
+            Nav_Push_Orbit_Skip_Yaw,
+            Nav_Push_Orbit_Slow_Yaw,
+            Nav_Push_Orbit_Fast_Vy,
+            Nav_Push_Orbit_Slow_Vy,
+            Nav_Push_Orbit_Fast_Rate,
+            Nav_Push_Orbit_Slow_Rate,
+            Nav_Push_Orbit_Gyro_Limit,
+            Nav_Push_Orbit_Radius_Base,
+            Nav_Push_Orbit_Radius_Gain,
+            Nav_Push_Orbit_Stop_Gyro_Th,
+        )
+    )
+    log(
+        "[PARAM] prep re=%.1f gain=(%.3f,%.3f) lim=(%.1f,%.1f) ok=(%d,%d,%.1f,%d)"
+        % (
+            Nav_Push_Prepare_Reorient_Yaw,
+            Nav_Push_Prepare_Forward_Gain,
+            Nav_Push_Prepare_Lateral_Gain,
+            Nav_Push_Prepare_Forward_Limit,
+            Nav_Push_Prepare_Lateral_Limit,
+            Nav_Push_Prepare_Ok_X,
+            Nav_Push_Prepare_Ok_Y_Max,
+            Nav_Push_Prepare_Ok_Yaw,
+            Nav_Push_Prepare_Ok_Ms,
+        )
+    )
+    log(
+        "[PARAM] push fwd=%.1f line=(%d,%d) back=(%.1f,%d) turn=(%.1f,%.1f,%.1f,%.1f,%d)"
+        % (
+            Nav_Push_Execute_Forward_Speed,
+            Nav_Push_Line_Lost_Ms,
+            Nav_Push_Line_Extra_Ms,
+            Nav_Push_Back_Speed,
+            Nav_Push_Back_Ms,
+            Nav_Push_Turn_Slow_Yaw,
+            Nav_Push_Turn_Fast_Rate,
+            Nav_Push_Turn_Slow_Rate,
+            Nav_Push_Turn_Gyro_Limit,
+            Nav_Push_Turn_Ok_Ms,
+        )
+    )
+    log(
+        "[PARAM] post=(%d,%d,%.1f) loop tick=%d dbg=%d low=%d coop_tx=%d"
+        % (
+            Nav_Post_Turn_No_Target_Ms,
+            Nav_Post_Turn_Forward_Ms,
+            Nav_Post_Turn_Forward_Speed,
+            TICK_PERIOD_MS,
+            DEBUG_DIV,
+            Nav_Low_Speed_Th,
+            1 if ENABLE_COOP_MOTION_TX else 0,
+        )
+    )
+
 # 停止所有电机
 def stop_all():
     motor_fl.duty(0)
@@ -1141,7 +1236,10 @@ def check_upper_exit():
 
 # ---------------------- CH7 exit calibration ----------------------
 ch7_init_value = 0.0
-log("CH7 wireless exit disabled: wireless UART sends master motion")
+if ENABLE_COOP_MOTION_TX:
+    log("CH7 wireless exit disabled: wireless UART sends master motion")
+else:
+    log("CH7 wireless exit disabled: coop tx off, serial logs only")
 
 motion_seq = 0
 motion_last_tx_ms = 0
@@ -1174,6 +1272,8 @@ def wireless_send_frame(frame):
 def send_master_motion(now):
     global motion_last_tx_ms
 
+    if not ENABLE_COOP_MOTION_TX:
+        return
     if utime.ticks_diff(now, motion_last_tx_ms) < MASTER_MOTION_TX_PERIOD_MS:
         return
     flags = 0
@@ -1204,6 +1304,7 @@ if ENABLE_IMU:
     log("IMU 偏移预设：%.2f" % GYRO_OFFSET_Z)
 else:
     log("IMU 未启用，仅运行速度环")
+log_control_params()
 
 # ---------------------- Ticker ----------------------
 pit_flag = False

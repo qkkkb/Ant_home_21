@@ -1095,88 +1095,29 @@ def log(msg):
 
 def log_control_params():
     log(
-        "[PARAM] gyro s=%.1f off=%.2f sc=%.8f db=%.2f kp=%.3f ki=%.3f lim=%.1f ac=%d"
+        "[P] orbit ok=%.1f vy=%.1f rate=%.1f/%.1f r=%.2f"
         % (
-            GYRO_SIGN,
-            GYRO_OFFSET_Z,
-            GYRO_SCALE,
-            GYRO_DEADBAND_DPS,
+            Nav_Push_Orient_Ok_Yaw,
+            Nav_Push_Orbit_Fast_Vy,
+            Nav_Push_Orbit_Fast_Rate,
+            Nav_Push_Orbit_Slow_Rate,
+            Nav_Push_Orbit_Radius_Base,
+        )
+    )
+    log(
+        "[P] push fwd=%.1f back=%.1f turn=%.1f"
+        % (
+            Nav_Push_Execute_Forward_Speed,
+            Nav_Push_Back_Speed,
+            Nav_Push_Turn_Fast_Rate,
+        )
+    )
+    log(
+        "[P] gyro kp=%.2f ki=%.3f lim=%.1f coop=%d"
+        % (
             GYRO_KP,
             GYRO_KI,
             GYRO_OUTPUT_LIMIT,
-            1 if AUTO_CALIBRATE_GYRO_ON_LAUNCH else 0,
-        )
-    )
-    log(
-        "[PARAM] fine cg=(%.3f,%.3f) fg=(%.3f,%.3f) lim=(%.1f,%.1f) db=(%d,%d) ok=(%.1f,%d,%d)"
-        % (
-            Nav_Coarse_Forward_Gain,
-            Nav_Coarse_Lateral_Gain,
-            Nav_Fine_Forward_Gain,
-            Nav_Fine_Lateral_Gain,
-            Nav_Fine_Forward_Limit,
-            Nav_Fine_Lateral_Limit,
-            Nav_Forward_Deadband,
-            Nav_Lateral_Deadband,
-            Nav_Fine_Ok_X,
-            Nav_Fine_Ok_Y_Max,
-            Nav_Fine_Ok_Ms,
-        )
-    )
-    log(
-        "[PARAM] orbit ok=%.1f skip=%.1f slow=%.1f vy=(%.1f,%.1f) rate=(%.1f,%.1f) glim=%.1f r=(%.2f,%.3f) stop=%.1f"
-        % (
-            Nav_Push_Orient_Ok_Yaw,
-            Nav_Push_Orbit_Skip_Yaw,
-            Nav_Push_Orbit_Slow_Yaw,
-            Nav_Push_Orbit_Fast_Vy,
-            Nav_Push_Orbit_Slow_Vy,
-            Nav_Push_Orbit_Fast_Rate,
-            Nav_Push_Orbit_Slow_Rate,
-            Nav_Push_Orbit_Gyro_Limit,
-            Nav_Push_Orbit_Radius_Base,
-            Nav_Push_Orbit_Radius_Gain,
-            Nav_Push_Orbit_Stop_Gyro_Th,
-        )
-    )
-    log(
-        "[PARAM] prep re=%.1f gain=(%.3f,%.3f) lim=(%.1f,%.1f) ok=(%d,%d,%.1f,%d)"
-        % (
-            Nav_Push_Prepare_Reorient_Yaw,
-            Nav_Push_Prepare_Forward_Gain,
-            Nav_Push_Prepare_Lateral_Gain,
-            Nav_Push_Prepare_Forward_Limit,
-            Nav_Push_Prepare_Lateral_Limit,
-            Nav_Push_Prepare_Ok_X,
-            Nav_Push_Prepare_Ok_Y_Max,
-            Nav_Push_Prepare_Ok_Yaw,
-            Nav_Push_Prepare_Ok_Ms,
-        )
-    )
-    log(
-        "[PARAM] push fwd=%.1f line=(%d,%d) back=(%.1f,%d) turn=(%.1f,%.1f,%.1f,%.1f,%d)"
-        % (
-            Nav_Push_Execute_Forward_Speed,
-            Nav_Push_Line_Lost_Ms,
-            Nav_Push_Line_Extra_Ms,
-            Nav_Push_Back_Speed,
-            Nav_Push_Back_Ms,
-            Nav_Push_Turn_Slow_Yaw,
-            Nav_Push_Turn_Fast_Rate,
-            Nav_Push_Turn_Slow_Rate,
-            Nav_Push_Turn_Gyro_Limit,
-            Nav_Push_Turn_Ok_Ms,
-        )
-    )
-    log(
-        "[PARAM] post=(%d,%d,%.1f) loop tick=%d dbg=%d low=%d coop_tx=%d"
-        % (
-            Nav_Post_Turn_No_Target_Ms,
-            Nav_Post_Turn_Forward_Ms,
-            Nav_Post_Turn_Forward_Speed,
-            TICK_PERIOD_MS,
-            DEBUG_DIV,
-            Nav_Low_Speed_Th,
             1 if ENABLE_COOP_MOTION_TX else 0,
         )
     )

@@ -97,9 +97,9 @@ IPM_MATRIX_DST_H = WORK_H
 
 # Calibrated after camera angle update at 192x192 work size.
 IPM_MATRIX = [
-    [9.70665812, 12.85617637, -911.06372748],
-    [-0.88537331, 32.75881229, -1174.00500262],
-    [-0.00463546, 0.13369929, 1.00000000],
+    [-7.67101775, -10.40253246, 866.37487917],
+    [0.00000000, -25.70383070, 1156.67238166],
+    [0.00015928, -0.10797605, 1.00000000],
 ]
 
 # BEV 像素 -> 物理距离换算 (mm)
@@ -108,7 +108,7 @@ MM_PER_PIX_X = 3.134328
 MM_PER_PIX_Y = 3.093750
 BEV_CENTER_X = IPM_MATRIX_DST_W // 2   # 96
 BEV_CENTER_Y = IPM_MATRIX_DST_H // 2   # 96
-BEV_TARGET_Y = 179    # pre-push target line in BEV
+BEV_TARGET_Y = 176    # pre-push target line in BEV
 BEV_FLIP_X = True
 BEV_FLIP_Y = False
 

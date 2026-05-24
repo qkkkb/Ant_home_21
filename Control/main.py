@@ -118,11 +118,11 @@ Nav_Coarse_Lateral_Gain = 0.035		#COARSE 横移系数
 Nav_Coarse_Forward_Limit = 3.2
 Nav_Coarse_Lateral_Limit = 2.0
 Nav_Fine_Forward_Gain = 0.02
-Nav_Fine_Lateral_Gain = 0.035
+Nav_Fine_Lateral_Gain = 0.020
 Nav_Fine_Forward_Limit = 2.2
-Nav_Fine_Lateral_Limit = 2.4
+Nav_Fine_Lateral_Limit = 1.2
 Nav_Forward_Deadband = 4
-Nav_Lateral_Deadband = 3
+Nav_Lateral_Deadband = 6
 Nav_Classify_Timeout_Ms = 1500
 Nav_Push_Orient_Ok_Yaw = 5.0
 Nav_Push_Orbit_Skip_Yaw = 15.0
@@ -1059,7 +1059,7 @@ def check_c9_start():
         utime.sleep_ms(10)
         if key_start.value() == 0:
             if not car_started:
-                log("[C9] 0.5 秒后发车...")
+                log("[C9] launch in 0.5s...")
                 utime.sleep_ms(500)
                 calibrate_gyro_before_launch()
                 if ENABLE_IMU and imu_runtime is not None:
@@ -1071,7 +1071,7 @@ def check_c9_start():
                 auto_start_done = True
                 start_time = utime.ticks_ms()
                 nav_set_state(NAV_STATE_SEARCH_TURN, "launch_search_turn", force=True)
-                log("[C9] 已发车，视觉闭环启动")
+                log("[C9] started, vision loop on")
     last_c9_state = current_c9
 
 
@@ -1083,7 +1083,7 @@ def check_c8_exit():
     if current_c8 == 0 and last_c8_state == 1:
         utime.sleep_ms(10)
         if key_exit.value() == 0:
-            log("[C8] 请求退出")
+            log("[C8] exit requested")
             raise KeyboardInterrupt
     last_c8_state = current_c8
 
@@ -1143,7 +1143,7 @@ def stop_all():
     motor_fl.duty(0)
     motor_fr.duty(0)
     motor_b.duty(0)
-    log("[停止] 所有电机占空比已清零")
+    log("[STOP] all motor duty cleared")
 
 # 占空比限幅
 def clamp_duty(value):
@@ -1253,14 +1253,14 @@ def send_master_motion(now):
 
 # ====================== 初始化 LED 显示 ======================
 update_nav_led_display()
-log("[初始化] 程序启动，视觉闭环待发车")
-log("[说明] C9=发车 | C8=退出")
+log("[INIT] program started, vision loop waiting")
+log("[INFO] C9=start | C8=exit")
 
 # 陀螺仪偏移设置
 if ENABLE_IMU:
-    log("IMU 偏移预设：%.2f" % GYRO_OFFSET_Z)
+    log("IMU preset offset_z=%.2f" % GYRO_OFFSET_Z)
 else:
-    log("IMU 未启用，仅运行速度环")
+    log("IMU disabled, speed loop only")
 
 # ---------------------- Ticker ----------------------
 pit_flag = False
@@ -1633,7 +1633,7 @@ def calc_speed_closed_loop():
         "push_yaw_target": push_yaw_target,
     }
 
-log("=== 速度闭环启动 ===")
+log("=== speed closed loop start ===")
 log(
     "tick=%dms speed_loop=on gyro_loop=%s yaw_loop=on cam_uart=%d@%d"
     % (
@@ -1644,15 +1644,15 @@ log(
     )
 )
 if FORCE_MOTOR_OFF:
-    log("[调试] FORCE_MOTOR_OFF=1，电机输出已强制关闭，可手动转动车身观察 yaw")
+    log("[DEBUG] FORCE_MOTOR_OFF=1, motor output disabled")
 log(
-    "电机映射：fl=%s/%s inv=%s, fr=%s/%s inv=%s, b=%s/%s inv=%s"
+    "motor map: fl=%s/%s inv=%s, fr=%s/%s inv=%s, b=%s/%s inv=%s"
     % (cfg.MOTOR_FL_PH, cfg.MOTOR_FL_PWM, cfg.MOTOR_FL_INVERT,
        cfg.MOTOR_FR_PH, cfg.MOTOR_FR_PWM, cfg.MOTOR_FR_INVERT,
        cfg.MOTOR_B_PH,  cfg.MOTOR_B_PWM,  cfg.MOTOR_B_INVERT)
 )
 log(
-    "编码器映射：fl=%s/%s inv=%s, fr=%s/%s inv=%s, b=%s/%s inv=%s"
+    "encoder map: fl=%s/%s inv=%s, fr=%s/%s inv=%s, b=%s/%s inv=%s"
     % (cfg.ENC_FL_A, cfg.ENC_FL_B, cfg.ENC_FL_INVERT,
        cfg.ENC_FR_A, cfg.ENC_FR_B, cfg.ENC_FR_INVERT,
        cfg.ENC_B_A,  cfg.ENC_B_B,  cfg.ENC_B_INVERT)
@@ -1688,7 +1688,7 @@ try:
                 auto_start_done = True
                 start_time = now
                 nav_set_state(NAV_STATE_SEARCH_TURN, "launch_search_turn", force=True)
-                log("[自动发车] 到达开机延时，car_started=1")
+                log("[AUTO_START] boot delay reached, car_started=1")
         poll_art_uart()
         vision_ready = (
             (not car_started)
@@ -1706,7 +1706,7 @@ try:
             auto_start_done = True
             start_time = now
             nav_set_state(NAV_STATE_SEARCH_TURN, "vision_launch_search_turn", force=True)
-            log("[视觉发车] 首次收到有效目标，car_started=1")
+            log("[VISION_START] first valid target received, car_started=1")
 
         if pit_flag:
             pit_flag = False
@@ -1716,7 +1716,7 @@ try:
                 if ENABLE_IMU:
                     if TUNE_LOG_VERBOSE:
                         log(
-                            "[速度环] t=%.2fs nav=%s ready=%d err_xy=(%d,%d)|abs=(%d,%d) cmd_xy=(%.1f,%.1f) turn=%.2f enc=(%d,%d,%d) tar=(%.1f,%.1f,%.1f) pwm=(%d,%d,%d) gyro=%.2f yaw=%.2f yaw_err=%.2f vz=%.2f"
+                            "[SPEED] t=%.2fs nav=%s ready=%d err_xy=(%d,%d)|abs=(%d,%d) cmd_xy=(%.1f,%.1f) turn=%.2f enc=(%d,%d,%d) tar=(%.1f,%.1f,%.1f) pwm=(%d,%d,%d) gyro=%.2f yaw=%.2f yaw_err=%.2f vz=%.2f"
                             % (
                                 elapsed_s,
                                 snap["nav_state"],
@@ -1745,7 +1745,7 @@ try:
                         )
                     else:
                         log(
-                            "[速度环] t=%.2fs err_xy=(%d,%d) cmd_xy=(%.1f,%.1f) turn=%.2f enc=(%d,%d,%d) tar=(%.1f,%.1f,%.1f) out=(%.1f,%.1f,%.1f) pwm=(%d,%d,%d) raw_gz=%.1f gyro=%.2f yaw=%.2f yaw_err=%.2f vz=%.2f"
+                            "[SPEED] t=%.2fs err_xy=(%d,%d) cmd_xy=(%.1f,%.1f) turn=%.2f enc=(%d,%d,%d) tar=(%.1f,%.1f,%.1f) out=(%.1f,%.1f,%.1f) pwm=(%d,%d,%d) raw_gz=%.1f gyro=%.2f yaw=%.2f yaw_err=%.2f vz=%.2f"
                             % (
                                 elapsed_s,
                                 int(snap["cam_x"]),
@@ -1774,7 +1774,7 @@ try:
                         )
                 else:
                     log(
-                        "[速度环] t=%.2fs err_xy=(%d,%d) cmd_xy=(%.1f,%.1f) enc=(%d,%d,%d) tar=(%.1f,%.1f,%.1f) out=(%.1f,%.1f,%.1f) pwm=(%d,%d,%d)"
+                        "[SPEED] t=%.2fs err_xy=(%d,%d) cmd_xy=(%.1f,%.1f) enc=(%d,%d,%d) tar=(%.1f,%.1f,%.1f) out=(%.1f,%.1f,%.1f) pwm=(%d,%d,%d)"
                         % (
                             elapsed_s,
                             int(snap["cam_x"]),
@@ -1813,7 +1813,7 @@ try:
                 if ENABLE_IMU:
                     if TUNE_LOG_VERBOSE:
                         log(
-                            "[状态] t=%.1fs started=%d ch7=%.1f nav=%s ready=%d err_xy=(%d,%d)|abs=(%d,%d) cmd_xy=(%.1f,%.1f) gyro=%.2f yaw=%.2f yaw_ref_err=%.2f turn=%.2f vz=%.2f"
+                            "[STATUS] t=%.1fs started=%d ch7=%.1f nav=%s ready=%d err_xy=(%d,%d)|abs=(%d,%d) cmd_xy=(%.1f,%.1f) gyro=%.2f yaw=%.2f yaw_ref_err=%.2f turn=%.2f vz=%.2f"
                             % (
                                 elapsed_s,
                                 1 if car_started else 0,
@@ -1835,7 +1835,7 @@ try:
                         )
                     else:
                         log(
-                            "[状态] t=%.1fs started=%d ch7=%.1f err_xy=(%d,%d) cmd_xy=(%.1f,%.1f) raw_gz=%.1f gyro=%.2f yaw=%.2f yaw_ref_err=%.2f turn=%.2f vz=%.2f"
+                            "[STATUS] t=%.1fs started=%d ch7=%.1f err_xy=(%d,%d) cmd_xy=(%.1f,%.1f) raw_gz=%.1f gyro=%.2f yaw=%.2f yaw_ref_err=%.2f turn=%.2f vz=%.2f"
                             % (
                                 elapsed_s,
                                 1 if car_started else 0,
@@ -1854,7 +1854,7 @@ try:
                         )
                 else:
                     log(
-                        "[状态] t=%.1fs started=%d ch7=%.1f err_xy=(%d,%d) cmd_xy=(%.1f, %.1f, %.1f)"
+                        "[STATUS] t=%.1fs started=%d ch7=%.1f err_xy=(%d,%d) cmd_xy=(%.1f, %.1f, %.1f)"
                         % (
                             elapsed_s,
                             1 if car_started else 0,
@@ -1875,7 +1875,7 @@ try:
                     )
 
         if loop_count % EXIT_CHECK_DIV == 0 and check_upper_exit():
-            log("=== CH7 触发退出，程序停止 ===")
+            log("=== CH7 exit triggered, stopping ===")
             break
 
         if loop_count % GC_DIV == 0:
@@ -1891,4 +1891,4 @@ finally:
     led_straight.value(0)
     led_translate.value(0)
     led_rotate.value(0)
-    log("=== 程序已完全停止 ===")
+    log("=== program stopped ===")

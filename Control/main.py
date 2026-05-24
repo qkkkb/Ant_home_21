@@ -10,6 +10,11 @@ import pid as _pid_mod
 import config as cfg
 from hardware import Motor
 
+DEBUG_WIRELESS_LOG_ENABLE = True
+
+if getattr(cfg, "COOP_ENABLE", False) or DEBUG_WIRELESS_LOG_ENABLE:
+    from seekfree import WIRELESS_UART
+
 if getattr(cfg, "COOP_ENABLE", False):
     from coop_protocol import (
         ACK_TARGET_LOCK,
@@ -1237,8 +1242,6 @@ enc_b  = encoder(cfg.ENC_B_A,  cfg.ENC_B_B,  cfg.ENC_B_INVERT)
 
 # 双车协同通信默认停用；保留初始化分支，后续需要协同时只改配置即可恢复。
 if COOP_ENABLE:
-    from seekfree import WIRELESS_UART
-
     wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
     coop_rx_buf = array('b', [0] * 32)
     coop_tx_buf = array('b', [0] * 32)
@@ -1246,6 +1249,15 @@ else:
     wireless = None
     coop_rx_buf = None
     coop_tx_buf = None
+debug_wireless = None
+if DEBUG_WIRELESS_LOG_ENABLE:
+    try:
+        if COOP_ENABLE:
+            debug_wireless = wireless
+        else:
+            debug_wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
+    except Exception:
+        debug_wireless = None
 cam_uart = UART(cfg.CAM_UART_ID, cfg.CAM_UART_BAUD)
 cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
 
@@ -1369,6 +1381,12 @@ def check_c8_exit():
 # 日志输出
 def log(msg):
     print(msg)
+    if debug_wireless is not None:
+        try:
+            debug_wireless.send_str(msg)
+            debug_wireless.send_str("\r\n")
+        except Exception:
+            pass
 
 
 # 停止所有电机

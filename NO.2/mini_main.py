@@ -64,10 +64,11 @@ ROI_MISS_RESET = 2
 EMA_ALPHA_NUM = 3
 EMA_ALPHA_DEN = 4
 SEND_NO_TARGET_WHEN_EMPTY = True
-PRINT_DEBUG = True
 DRAW_DEBUG = True
 DRAW_ROI_DEBUG = False
-DEBUG_PRINT_INTERVAL = 5
+CALIB_LOG_ENABLE = True
+CALIB_LOG_INTERVAL = 5
+CALIB_LOG_BLOBS = True
 GC_FRAME_MASK = 0x3F
 
 
@@ -264,15 +265,15 @@ def update_ema(err_x, err_y):
     return ema_err_x, ema_err_y
 
 
-def should_print_debug():
-    if not PRINT_DEBUG:
+def should_calib_log():
+    if not CALIB_LOG_ENABLE:
         return False
-    return (frame_count % DEBUG_PRINT_INTERVAL) == 0
+    return (frame_count % CALIB_LOG_INTERVAL) == 0
 
 
-def print_blob_debug(name, blob):
+def print_calib_blob(name, blob):
     print(
-        "%s x=%d y=%d w=%d h=%d cx=%d cy=%d pixels=%d"
+        "IR CALIB %s x=%d y=%d w=%d h=%d cx=%d cy=%d pixels=%d"
         % (
             name,
             blob.x(),
@@ -296,13 +297,16 @@ def process_frame(img):
             track_roi = None
         if SEND_NO_TARGET_WHEN_EMPTY:
             send_no_target()
-        if should_print_debug():
-            print("IR MISS roi=%s threshold=%s exposure_us=%d target_dx=%d" % (
-                track_roi,
-                IR_THRESHOLDS,
-                EXPOSURE_US,
-                TARGET_PAIR_DX,
-            ))
+        if should_calib_log():
+            print(
+                "IR CALIB MISS roi=%s threshold=%s exposure_us=%d target_dx=%d"
+                % (
+                    track_roi,
+                    IR_THRESHOLDS,
+                    EXPOSURE_US,
+                    TARGET_PAIR_DX,
+                )
+            )
         return
 
     b0, b1, span_x = pair
@@ -322,24 +326,26 @@ def process_frame(img):
         img.draw_cross(center_x, center_y, color=255)
         if DRAW_ROI_DEBUG and track_roi is not None:
             img.draw_rectangle(track_roi, color=255)
-    if should_print_debug():
+    if should_calib_log():
         print(
-            "IR center=(%d,%d) span_x=%d err=(%d,%d) roi=%s "
-            "threshold=%s exposure_us=%d target_dx=%d"
+            "IR CALIB HIT center=(%d,%d) span_x=%d err=(%d,%d) "
+            "target_center_x=%d roi=%s threshold=%s exposure_us=%d target_dx=%d"
             % (
                 center_x,
                 center_y,
                 span_x,
                 err_x,
                 err_y,
+                IMG_CENTER_X + TARGET_CENTER_X_OFFSET,
                 track_roi,
                 IR_THRESHOLDS,
                 EXPOSURE_US,
                 TARGET_PAIR_DX,
             )
         )
-        print_blob_debug("L0", b0)
-        print_blob_debug("L1", b1)
+        if CALIB_LOG_BLOBS:
+            print_calib_blob("L0", b0)
+            print_calib_blob("L1", b1)
 
 
 while True:

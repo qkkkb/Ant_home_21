@@ -66,17 +66,19 @@ ART_MODE_IDLE_CMD = b"IDLE\n"
 # ====================== Follow control ======================
 Follow_Forward_Gain = 0.060
 Follow_Lateral_Gain = 0.045
-Follow_Forward_Limit = 7.0
-Follow_Lateral_Limit = 5.0
+Follow_Forward_Limit = 12.0
+Follow_Lateral_Limit = 7.0
 Follow_Forward_Deadband = 4
 Follow_Lateral_Deadband = 4
 Follow_Feedforward_Gain = 1.0
-Follow_Hold_Feedforward_Gain = 0.55
+Follow_Hold_Feedforward_Gain = 0.80
 Follow_Wz_Feedforward_Gain = 1.0
 Follow_Yaw_Gain = 0.08
 Follow_Yaw_Limit = 15.0
 Follow_Target_Lost_Hold_Ms = 250
 Master_Motion_Timeout_Ms = 250
+Follow_Master_Extra_Vx = 2.0
+Follow_Master_Extra_Vy = 1.5
 Camera_Right_Yaw_Cos = 0.7071068
 Camera_Right_Yaw_Sin = 0.7071068
 
@@ -186,6 +188,14 @@ def rotate_camera_velocity_to_body(cam_vx, cam_vy):
     return body_vx, body_vy
 
 
+def follow_limit(base_limit, master_value, extra):
+    limit = base_limit
+    master_abs = abs(master_value) + extra
+    if master_abs > limit:
+        limit = master_abs
+    return limit
+
+
 def poll_art_uart():
     global cam_rx_buf, cam_has_target, cam_rx_started, cam_valid_target_since_ms
     global cam_last_rx_ms, target_lost_since_ms
@@ -283,8 +293,13 @@ def update_follow_targets(yaw_deg, gyro_z):
             vx = 0.0
             vy = 0.0
 
-    vx = clamp(vx, -Follow_Forward_Limit, Follow_Forward_Limit)
-    vy = clamp(vy, -Follow_Lateral_Limit, Follow_Lateral_Limit)
+    vx_limit = Follow_Forward_Limit
+    vy_limit = Follow_Lateral_Limit
+    if fresh_motion:
+        vx_limit = follow_limit(vx_limit, ff_vx, Follow_Master_Extra_Vx)
+        vy_limit = follow_limit(vy_limit, ff_vy, Follow_Master_Extra_Vy)
+    vx = clamp(vx, -vx_limit, vx_limit)
+    vy = clamp(vy, -vy_limit, vy_limit)
     cam_target_vx = vx
     cam_target_vy = vy
 

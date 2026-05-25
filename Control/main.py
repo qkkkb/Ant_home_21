@@ -1,19 +1,26 @@
 from machine import Pin, UART
+from array import array
 import gc
 import utime
 from smartcar import ticker, encoder
 from imu_runtime import IMUYawRuntime
 from models import AnglePID, MoveBase, SpeedPID
-from move_base import calc_wheel_spd
+from move_base import calc_wheel_spd, get_car_spd
 import pid as _pid_mod
 import config as cfg
 from hardware import Motor
+from seekfree import WIRELESS_UART
+from coop_protocol import (
+    H1,
+    H2,
+    MASTER_MOTION_FLAG_CLOSED_LOOP,
+    MASTER_MOTION_FLAG_STARTED,
+    MASTER_MOTION_FLAG_TARGET,
+    MSG_MASTER_MOTION,
+)
 
-DEBUG_WIRELESS_LOG_ENABLE = True
+DEBUG_WIRELESS_LOG_ENABLE = False
 DEBUG_WIRELESS_BAUD = 460800
-
-if DEBUG_WIRELESS_LOG_ENABLE:
-    from seekfree import WIRELESS_UART
 
 # 设置 PID 最大 PWM 值
 _pid_mod.PWM_MAX = cfg.PWM_MAX
@@ -59,6 +66,8 @@ AUTO_START_ON_BOOT = False
 AUTO_START_DELAY_MS = 2000
 DEBUG_LOG_ENABLE = True
 DEBUG_LOG_PERIOD_MS = 500
+MASTER_MOTION_TX_PERIOD_MS = cfg.MASTER_MOTION_TX_PERIOD_MS
+MASTER_MOTION_FRAME_LEN = 15
 
 # 无线遥控器 7 通道作为退出触发
 EXIT_TRIGGER_CHANNEL = 7
@@ -976,6 +985,8 @@ if DEBUG_WIRELESS_LOG_ENABLE:
         debug_wireless = WIRELESS_UART(DEBUG_WIRELESS_BAUD)
     except Exception:
         debug_wireless = None
+wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
+motion_tx_buf = array('b', [0] * 16)
 cam_uart = UART(cfg.CAM_UART_ID, cfg.CAM_UART_BAUD)
 cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
 
@@ -1131,7 +1142,87 @@ def check_upper_exit():
 
 # ---------------------- CH7 exit calibration ----------------------
 ch7_init_value = 0.0
-log("Wireless debug log enabled; CH7 exit disabled")
+log("Wireless debug log disabled; master motion broadcast enabled")
+
+motion_seq = 0
+motion_last_tx_ms = 0
+master_actual_vx = 0.0
+master_actual_vy = 0.0
+master_actual_wz = 0.0
+
+
+def motion_next_seq():
+    global motion_seq
+    motion_seq = (motion_seq + 1) & 0xFF
+    if motion_seq == 0:
+        motion_seq = 1
+    return motion_seq
+
+
+def put_u8(buf, idx, value):
+    value = int(value) & 0xFF
+    if value >= 128:
+        value -= 256
+    buf[idx] = value
+
+
+def put_i16(buf, idx, value):
+    value = int(value)
+    if value > 32767:
+        value = 32767
+    elif value < -32768:
+        value = -32768
+    if value < 0:
+        value += 65536
+    put_u8(buf, idx, value)
+    put_u8(buf, idx + 1, value >> 8)
+
+
+def send_motion_frame(seq, vx, vy, wz, yaw_deg, flags):
+    put_u8(motion_tx_buf, 0, H1)
+    put_u8(motion_tx_buf, 1, H2)
+    put_u8(motion_tx_buf, 2, 11)
+    put_u8(motion_tx_buf, 3, MSG_MASTER_MOTION)
+    put_u8(motion_tx_buf, 4, seq)
+    put_i16(motion_tx_buf, 5, vx * 10)
+    put_i16(motion_tx_buf, 7, vy * 10)
+    put_i16(motion_tx_buf, 9, wz * 10)
+    put_i16(motion_tx_buf, 11, yaw_deg * 10)
+    put_u8(motion_tx_buf, 13, flags)
+    checksum = 0
+    i = 2
+    while i < 14:
+        checksum = (checksum + (motion_tx_buf[i] & 0xFF)) & 0xFF
+        i += 1
+    put_u8(motion_tx_buf, 14, checksum)
+    try:
+        wireless.send_bytearray(motion_tx_buf, MASTER_MOTION_FRAME_LEN)
+        return True
+    except Exception:
+        return False
+
+
+def send_master_motion(now):
+    global motion_last_tx_ms
+
+    if utime.ticks_diff(now, motion_last_tx_ms) < MASTER_MOTION_TX_PERIOD_MS:
+        return
+    flags = 0
+    vx = 0.0
+    vy = 0.0
+    wz = 0.0
+    yaw_deg = 0.0
+    if car_started:
+        flags |= MASTER_MOTION_FLAG_STARTED | MASTER_MOTION_FLAG_CLOSED_LOOP
+        vx = master_actual_vx
+        vy = master_actual_vy
+        wz = master_actual_wz
+    if cam_target_seen():
+        flags |= MASTER_MOTION_FLAG_TARGET
+    if ENABLE_IMU and imu_runtime is not None:
+        yaw_deg = imu_runtime.read_yaw()
+    if send_motion_frame(motion_next_seq(), vx, vy, wz, yaw_deg, flags):
+        motion_last_tx_ms = now
 
 # ====================== 初始化 LED 显示 ======================
 update_nav_led_display()
@@ -1164,6 +1255,7 @@ pit1.start(TICK_PERIOD_MS)
 
 # ---------------------- Controller state ----------------------
 move_cmd = MoveBase()
+motion_feedback = MoveBase()
 
 pid_fl = SpeedPID()
 pid_fr = SpeedPID()
@@ -1199,6 +1291,23 @@ last_turn_rate_cmd = 0.0
 yaw_ref_deg = 0.0
 debug_log_last_ms = start_time
 
+
+def update_master_actual_motion(e_fl, e_fr, e_b, gyro_z):
+    global master_actual_vx, master_actual_vy, master_actual_wz
+
+    get_car_spd(motion_feedback, e_fr, e_fl, e_b)
+    master_actual_vx = motion_feedback.speed_x
+    master_actual_vy = motion_feedback.speed_y
+    master_actual_wz = gyro_z
+
+
+def clear_master_actual_motion():
+    global master_actual_vx, master_actual_vy, master_actual_wz
+
+    master_actual_vx = 0.0
+    master_actual_vy = 0.0
+    master_actual_wz = 0.0
+
 # ====================== 速度闭环主函数（含发车判断） ======================
 def calc_speed_closed_loop():
     global last_vz_cmd, last_turn_rate_cmd
@@ -1209,6 +1318,7 @@ def calc_speed_closed_loop():
     # 未发车：直接输出 0，占空比清零
     if not car_started:
         set_three_pwm_smooth(0, 0, 0)
+        clear_master_actual_motion()
         return None
 
     # 已发车：执行闭环逻辑
@@ -1271,6 +1381,7 @@ def calc_speed_closed_loop():
         motor_fl.duty(0)
         motor_fr.duty(0)
         motor_b.duty(0)
+        update_master_actual_motion(e_fl, e_fr, e_b, gyro_z)
         return None
 
     yaw_err_deg = -wrapped_yaw_error(yaw_ref_deg, yaw_deg) if ENABLE_IMU else 0.0
@@ -1307,6 +1418,7 @@ def calc_speed_closed_loop():
             s_b = 0
         else:
             s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
+        update_master_actual_motion(e_fl, e_fr, e_b, gyro_z)
         now_log = utime.ticks_ms()
         if DEBUG_LOG_ENABLE and utime.ticks_diff(now_log, debug_log_last_ms) >= DEBUG_LOG_PERIOD_MS:
             debug_log_last_ms = now_log
@@ -1421,6 +1533,7 @@ def calc_speed_closed_loop():
         s_b = 0
     else:
         s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
+    update_master_actual_motion(e_fl, e_fr, e_b, gyro_z)
     now_log = utime.ticks_ms()
     if DEBUG_LOG_ENABLE and utime.ticks_diff(now_log, debug_log_last_ms) >= DEBUG_LOG_PERIOD_MS:
         debug_log_last_ms = now_log
@@ -1492,6 +1605,7 @@ try:
         if pit_flag:
             pit_flag = False
             calc_speed_closed_loop()
+        send_master_motion(now)
 
         if utime.ticks_diff(now, last_status_ms) >= 1000:
             led.toggle()

@@ -11,8 +11,12 @@ MSG_PUSH_START = 0x15
 MSG_PUSH_STOP = 0x16
 MSG_DONE = 0x17
 MSG_ERROR = 0x18
+MSG_MASTER_MOTION = 0x19
 
 ACK_TARGET_LOCK = MSG_TARGET_LOCK
+MASTER_MOTION_FLAG_STARTED = 0x01
+MASTER_MOTION_FLAG_TARGET = 0x02
+MASTER_MOTION_FLAG_CLOSED_LOOP = 0x04
 
 
 class CoopFrameParser:
@@ -78,6 +82,11 @@ def _p16(v):
     return v & 0xFF, (v >> 8) & 0xFF
 
 
+def _u16(data, off):
+    v = data[off] | (data[off + 1] << 8)
+    return v - 65536 if v >= 32768 else v
+
+
 def encode_frame(msg, seq, payload=b""):
     n = 2 + len(payload)
     frame = bytearray([H1, H2, n, msg & 0xFF, seq & 0xFF])
@@ -96,3 +105,25 @@ def encode_target_lock(seq, master_dir, slave_dir, yaw_deg, err_x, err_y, push_s
         payload.append(lo)
         payload.append(hi)
     return encode_frame(MSG_TARGET_LOCK, seq, payload)
+
+
+def encode_master_motion(seq, vx, vy, wz, yaw_deg, flags):
+    payload = bytearray()
+    for v in (int(vx * 10), int(vy * 10), int(wz * 10), int(yaw_deg * 10)):
+        lo, hi = _p16(v)
+        payload.append(lo)
+        payload.append(hi)
+    payload.append(flags & 0xFF)
+    return encode_frame(MSG_MASTER_MOTION, seq, payload)
+
+
+def decode_master_motion(payload, payload_len):
+    if payload_len < 9:
+        return None
+    return (
+        _u16(payload, 0) / 10.0,
+        _u16(payload, 2) / 10.0,
+        _u16(payload, 4) / 10.0,
+        _u16(payload, 6) / 10.0,
+        payload[8],
+    )

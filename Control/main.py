@@ -59,8 +59,6 @@ AUTO_START_ON_BOOT = False
 AUTO_START_DELAY_MS = 2000
 DEBUG_LOG_ENABLE = True
 DEBUG_LOG_PERIOD_MS = 500
-Speed_Target_Deadband = 0.35
-Speed_Output_Release_PWM = 3000
 
 # 无线遥控器 7 通道作为退出触发
 EXIT_TRIGGER_CHANNEL = 7
@@ -217,7 +215,6 @@ line_crossed = False
 push_line_seen_once = False
 push_line_lost_since_ms = 0
 push_line_extra_since_ms = 0
-speed_loop_ready = False
 
 def wrapped_yaw_error(ref_deg, now_deg):
     err = now_deg - ref_deg
@@ -422,61 +419,6 @@ def nav_state_code(state):
     return -1
 
 
-def reset_speed_pid_state(pid):
-    pid.output = 0.0
-    pid.err = 0.0
-    pid.err_last = 0.0
-    pid.tar_spd_last = 0.0
-    pid.delta_tar = 0.0
-    pid.delta_tar_last = 0.0
-    pid.delta_ud = 0.0
-
-
-def release_speed_loop_output():
-    global last_pwm_fl, last_pwm_fr, last_pwm_b
-
-    if not speed_loop_ready:
-        return
-    reset_speed_pid_state(pid_fl)
-    reset_speed_pid_state(pid_fr)
-    reset_speed_pid_state(pid_b)
-    last_pwm_fl = 0
-    last_pwm_fr = 0
-    last_pwm_b = 0
-    motor_fl.duty(0)
-    motor_fr.duty(0)
-    motor_b.duty(0)
-
-
-def release_wheel_output(pid, wheel_id):
-    global last_pwm_fl, last_pwm_fr, last_pwm_b
-
-    reset_speed_pid_state(pid)
-    if wheel_id == 0:
-        last_pwm_fl = 0
-        motor_fl.duty(0)
-    elif wheel_id == 1:
-        last_pwm_fr = 0
-        motor_fr.duty(0)
-    else:
-        last_pwm_b = 0
-        motor_b.duty(0)
-
-
-def speed_ctrl_guarded(pid, actual_speed, target_speed, wheel_id):
-    if -Speed_Target_Deadband <= target_speed <= Speed_Target_Deadband:
-        if -Nav_Low_Speed_Th <= actual_speed <= Nav_Low_Speed_Th:
-            release_wheel_output(pid, wheel_id)
-            return 0.0
-    elif target_speed > 0.0:
-        if pid.output < -Speed_Output_Release_PWM or pid.tar_spd_last < -Speed_Target_Deadband:
-            release_wheel_output(pid, wheel_id)
-    else:
-        if pid.output > Speed_Output_Release_PWM or pid.tar_spd_last > Speed_Target_Deadband:
-            release_wheel_output(pid, wheel_id)
-    return speed_ctrl(pid, actual_speed, target_speed)
-
-
 def nav_set_state(new_state, reason="", force=False):
     global nav_state, nav_detect_since_ms, nav_target_lost_since_ms, nav_search_turn_ok_since_ms
     global nav_coarse_ok_since_ms, nav_fine_ok_since_ms, nav_transition_ms
@@ -505,7 +447,6 @@ def nav_set_state(new_state, reason="", force=False):
     nav_ready_for_push = False
     cam_target_vx = 0.0
     cam_target_vy = 0.0
-    release_speed_loop_output()
 
     if new_state in (
         NAV_STATE_SEARCH,
@@ -1257,11 +1198,11 @@ last_vz_cmd = 0.0
 last_turn_rate_cmd = 0.0
 yaw_ref_deg = 0.0
 debug_log_last_ms = start_time
-speed_loop_ready = True
 
 # ====================== 速度闭环主函数（含发车判断） ======================
 def calc_speed_closed_loop():
     global last_vz_cmd, last_turn_rate_cmd
+    global last_pwm_fl, last_pwm_fr, last_pwm_b
     global debug_log_last_ms
     global cam_target_vx, cam_target_vy
 
@@ -1298,12 +1239,38 @@ def calc_speed_closed_loop():
         turn_pid.output = 0.0
         turn_pid.err = 0.0
         turn_pid.err_last = 0.0
-        release_speed_loop_output()
+        pid_fl.output = 0.0
+        pid_fl.err = 0.0
+        pid_fl.err_last = 0.0
+        pid_fl.tar_spd_last = 0.0
+        pid_fl.delta_tar = 0.0
+        pid_fl.delta_tar_last = 0.0
+        pid_fl.delta_ud = 0.0
+        pid_fr.output = 0.0
+        pid_fr.err = 0.0
+        pid_fr.err_last = 0.0
+        pid_fr.tar_spd_last = 0.0
+        pid_fr.delta_tar = 0.0
+        pid_fr.delta_tar_last = 0.0
+        pid_fr.delta_ud = 0.0
+        pid_b.output = 0.0
+        pid_b.err = 0.0
+        pid_b.err_last = 0.0
+        pid_b.tar_spd_last = 0.0
+        pid_b.delta_tar = 0.0
+        pid_b.delta_tar_last = 0.0
+        pid_b.delta_ud = 0.0
         if gyro_pid is not None:
             gyro_pid.output = 0.0
             gyro_pid.err = 0.0
             gyro_pid.err_last = 0.0
             gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
+        last_pwm_fl = 0
+        last_pwm_fr = 0
+        last_pwm_b = 0
+        motor_fl.duty(0)
+        motor_fr.duty(0)
+        motor_b.duty(0)
         return None
 
     yaw_err_deg = -wrapped_yaw_error(yaw_ref_deg, yaw_deg) if ENABLE_IMU else 0.0
@@ -1330,9 +1297,9 @@ def calc_speed_closed_loop():
         t_fl = move_cmd.speed_fl
         t_fr = move_cmd.speed_fr
         t_b = move_cmd.speed_b
-        u_fl = speed_ctrl_guarded(pid_fl, e_fl, t_fl, 0)
-        u_fr = speed_ctrl_guarded(pid_fr, e_fr, t_fr, 1)
-        u_b = speed_ctrl_guarded(pid_b, e_b, t_b, 2)
+        u_fl = speed_ctrl(pid_fl, e_fl, t_fl)
+        u_fr = speed_ctrl(pid_fr, e_fr, t_fr)
+        u_b = speed_ctrl(pid_b, e_b, t_b)
         if FORCE_MOTOR_OFF:
             set_three_pwm_smooth(0, 0, 0)
             s_fl = 0
@@ -1442,9 +1409,9 @@ def calc_speed_closed_loop():
     t_b = move_cmd.speed_b
 
     # 速度 PID 输出
-    u_fl = speed_ctrl_guarded(pid_fl, e_fl, t_fl, 0)
-    u_fr = speed_ctrl_guarded(pid_fr, e_fr, t_fr, 1)
-    u_b = speed_ctrl_guarded(pid_b, e_b, t_b, 2)
+    u_fl = speed_ctrl(pid_fl, e_fl, t_fl)
+    u_fr = speed_ctrl(pid_fr, e_fr, t_fr)
+    u_b = speed_ctrl(pid_b, e_b, t_b)
 
     # PWM 平滑输出
     if FORCE_MOTOR_OFF:

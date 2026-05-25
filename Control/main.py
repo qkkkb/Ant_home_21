@@ -138,7 +138,7 @@ Nav_Push_Orbit_Slow_Vy = 2.5
 Nav_Push_Orbit_Fast_Rate = 75.0
 Nav_Push_Orbit_Slow_Rate = 35.0
 Nav_Push_Orbit_Gyro_Limit = 10.0
-Nav_Push_Orbit_Radius_Base = 1.3   #orbit 基础半径系数，实际轨迹半径=该系数 * 车轮轴距；如果轨迹过大或过小可以调整该值
+Nav_Push_Orbit_Radius_Base = 1.45   #orbit 基础半径系数，实际轨迹半径=该系数 * 车轮轴距；如果轨迹过大或过小可以调整该值
 Nav_Push_Orbit_Radius_Gain = 0.01
 Nav_Push_Orbit_Stop_Gyro_Th = 3.0   #orbit 过程中如果陀螺仪读数小于该值则认为已经接近目标角度，可以停止转向加速前进
 Nav_Push_Orbit_Brake_Max_Ms = 1000

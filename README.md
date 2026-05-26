@@ -1,13 +1,13 @@
 # Ant_Home
 
-`Ant_Home` 是一个面向智能车、视觉识别和目标推送任务的 MicroPython 项目。仓库按运行设备拆分为主车控制、从车控制和视觉端程序；当前主车按单车任务运行，并保留给从车红外视觉跟随使用的主车运动反馈广播。核心目标是在内存受限的嵌入式环境中完成目标搜索、视觉对准、方向判断和主车推送动作。
+`Ant_Home` 是一个面向智能车、视觉识别和目标推送任务的 MicroPython 项目。仓库按运行设备拆分为主车控制、从车控制和视觉端程序；当前主车按单车任务运行，并暂时关闭给从车红外视觉跟随使用的主车运动反馈广播，无线串口用于调试日志。核心目标是在内存受限的嵌入式环境中完成目标搜索、视觉对准、方向判断和主车推送动作。
 
 ## 目录结构
 
 ```txt
 Ant_Home/
-  Control/    主车控制程序，包含运动闭环、视觉串口、IMU、单车目标推送状态机、主车运动反馈广播和测试脚本
-  NO.2/       第二辆车/从车控制程序，接收主车运动反馈供红外视觉跟随使用
+  Control/    主车控制程序，包含运动闭环、视觉串口、IMU、单车目标推送状态机、无线调试日志和测试脚本
+  NO.2/       第二辆车/从车控制程序，可接收主车运动反馈供红外视觉跟随使用
   Vision/     视觉端程序，包含 OpenMV/ART 目标检测、分类、黄线检测和 IPM 标定脚本
   AGENTS.md   协作、Git、README 和 MicroPython 内存优化约束
   README.md   项目总览
@@ -15,7 +15,7 @@ Ant_Home/
 
 ## 模块概览
 
-`Control/` 是主车控制模块。当前真实运行入口主要是 `Control/main.py`，它负责三轮底盘速度闭环、陀螺仪 yaw/gyro rate 控制、ART 视觉串口解析、目标推送状态机、按键启停，以及给从车红外视觉跟随使用的 `MSG_MASTER_MOTION` 运动反馈广播。当前 `COOP_ENABLE = False`，主车不恢复完整双车协同状态机，也不等待从车协同；无线调参日志已关闭。详细说明见 `Control/README.md`。
+`Control/` 是主车控制模块。当前真实运行入口主要是 `Control/main.py`，它负责三轮底盘速度闭环、陀螺仪 yaw/gyro rate 控制、ART 视觉串口解析、目标推送状态机、按键启停和无线调试日志。当前 `COOP_ENABLE = False`，主车不恢复完整双车协同状态机，也不等待从车协同；`MSG_MASTER_MOTION` 运动反馈广播暂时关闭。详细说明见 `Control/README.md`。
 
 `NO.2/` 保存第二辆车相关程序。其中 `NO.2/main.py` 保留从主车接收运动反馈的链路，便于从车红外视觉按主车实际运动量做跟随控制。
 
@@ -31,7 +31,7 @@ Ant_Home/
 2. 控制端启动文件是否指向预期入口。当前 `Control/boot.py` 中仍有执行 `/flash/JINGZHI.py` 的逻辑，部署前要按实际文件名确认。
 3. 主车视觉端模型路径是否存在，例如 `/sd/detect.tflite` 和 `/sd/classify.tflite`；从车红外视觉不依赖 TFLite 模型。
 4. 主车、从车与对应视觉端 UART 波特率是否一致，当前控制端相机 UART 默认是 `9600`。
-5. 当前主车 `Control/config.py` 中 `COOP_ENABLE = False`，完整双车协同链路停用；若启用从车红外视觉跟随，需要确认主从车 `COOP_WIRELESS_BAUD` 与 `MSG_MASTER_MOTION` 协议一致。
+5. 当前主车 `Control/config.py` 中 `COOP_ENABLE = False`，完整双车协同链路停用；`Control/main.py` 暂时关闭 `MSG_MASTER_MOTION` 运动反馈广播并打开无线调试日志。若启用从车红外视觉跟随，需要先恢复主车运动反馈广播，并确认主从车 `COOP_WIRELESS_BAUD` 与 `MSG_MASTER_MOTION` 协议一致。
 
 ## 开发与文档约束
 

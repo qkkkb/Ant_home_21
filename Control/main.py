@@ -19,8 +19,9 @@ from coop_protocol import (
     MSG_MASTER_MOTION,
 )
 
-DEBUG_WIRELESS_LOG_ENABLE = False
+DEBUG_WIRELESS_LOG_ENABLE = True
 DEBUG_WIRELESS_BAUD = 460800
+MASTER_MOTION_BROADCAST_ENABLE = False
 
 # 设置 PID 最大 PWM 值
 _pid_mod.PWM_MAX = cfg.PWM_MAX
@@ -986,7 +987,12 @@ if DEBUG_WIRELESS_LOG_ENABLE:
         debug_wireless = WIRELESS_UART(DEBUG_WIRELESS_BAUD)
     except Exception:
         debug_wireless = None
-wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
+wireless = None
+if MASTER_MOTION_BROADCAST_ENABLE:
+    try:
+        wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
+    except Exception:
+        wireless = None
 motion_tx_buf = array('b', [0] * 16)
 cam_uart = UART(cfg.CAM_UART_ID, cfg.CAM_UART_BAUD)
 cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
@@ -1143,7 +1149,7 @@ def check_upper_exit():
 
 # ---------------------- CH7 exit calibration ----------------------
 ch7_init_value = 0.0
-log("Wireless debug log disabled; master motion broadcast enabled")
+log("Wireless debug log enabled; master motion broadcast disabled")
 
 motion_seq = 0
 motion_last_tx_ms = 0
@@ -1206,6 +1212,8 @@ def send_motion_frame(seq, vx, vy, wz, yaw_deg, flags):
 def send_master_motion(now):
     global motion_last_tx_ms
 
+    if wireless is None:
+        return
     if utime.ticks_diff(now, motion_last_tx_ms) < MASTER_MOTION_TX_PERIOD_MS:
         return
     flags = 0

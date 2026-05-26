@@ -155,10 +155,11 @@ Nav_Push_Prepare_Ok_Y_Max = 8  #准备阶段横移误差小于该值即认为前
 Nav_Push_Prepare_Ok_Yaw = 5.0   #准备阶段定向误差小于该值即认为定向准备就绪
 Nav_Push_Prepare_Ok_Ms = 150
 Nav_Push_Execute_Forward_Speed = 5.5
+Nav_Push_Execute_Gyro_Limit = 8.0
 Nav_Push_Line_Lost_Ms = 150
 Nav_Push_Line_Extra_Ms = 300
 Nav_Push_Back_Speed = 3.5
-Nav_Push_Back_Ms = 800
+Nav_Push_Back_Ms = 2000
 Nav_Push_Turn_Slow_Yaw = 35.0
 Nav_Push_Turn_Fast_Rate = 170.0
 Nav_Push_Turn_Slow_Rate = 55.0
@@ -1490,6 +1491,8 @@ def calc_speed_closed_loop():
             gyro_pid.gyro_output_limit = Nav_Search_Turn_Gyro_Limit
         elif nav_state == NAV_STATE_PUSH_ORIENT:
             gyro_pid.gyro_output_limit = Nav_Push_Orbit_Gyro_Limit
+        elif nav_state == NAV_STATE_PUSH:
+            gyro_pid.gyro_output_limit = Nav_Push_Execute_Gyro_Limit
         elif nav_state == NAV_STATE_PUSH_TURN:
             gyro_pid.gyro_output_limit = Nav_Push_Turn_Gyro_Limit
         else:

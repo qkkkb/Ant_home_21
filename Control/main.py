@@ -1,4 +1,4 @@
-from machine import Pin, UART
+﻿from machine import Pin, UART
 from array import array
 import gc
 import utime
@@ -151,7 +151,7 @@ Nav_Push_Prepare_Forward_Gain = 0.012
 Nav_Push_Prepare_Lateral_Gain = 0.030
 Nav_Push_Prepare_Forward_Limit = 1.2
 Nav_Push_Prepare_Lateral_Limit = 1.6
-Nav_Push_Prepare_Ok_X = 4    #准备阶段前进误差小于该值即认为横移准备就绪
+Nav_Push_Prepare_Ok_X = 7    #准备阶段前进误差小于该值即认为横移准备就绪
 Nav_Push_Prepare_Ok_Y_Max = 8  #准备阶段横移误差小于该值即认为前进准备就绪
 Nav_Push_Prepare_Ok_Yaw = 5.0   #准备阶段定向误差小于该值即认为定向准备就绪
 Nav_Push_Prepare_Ok_Ms = 150

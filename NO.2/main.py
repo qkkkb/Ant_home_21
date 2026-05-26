@@ -45,6 +45,7 @@ GYRO_CALIBRATE_DELAY_MS = 2
 
 EXIT_CHECK_DIV = 5
 GC_DIV = 50
+FOLLOW_LOG_ENABLE = False
 DEBUG_DIV = 50
 FORCE_MOTOR_OFF = False
 AUTO_START_ON_BOOT = False
@@ -125,7 +126,8 @@ yaw_ref_deg = 0.0
 
 
 def log(msg):
-    print(msg)
+    if FOLLOW_LOG_ENABLE:
+        print(msg)
 
 
 def clamp(value, low, high):
@@ -592,25 +594,26 @@ try:
         if utime.ticks_diff(now, last_status_ms) >= 1000:
             led.toggle()
             last_status_ms = now
-            log(
-                "[FOLLOW] t=%.1f started=%d seen=%d err=(%d,%d) cmd=(%.1f,%.1f,%.1f) master=(%.1f,%.1f,%.1f) fresh=%d"
-                % (
-                    elapsed_s,
-                    1 if car_started else 0,
-                    1 if cam_target_seen() else 0,
-                    cam_error_x,
-                    cam_error_y,
-                    cam_target_vx,
-                    cam_target_vy,
-                    last_turn_rate_cmd,
-                    master_vx,
-                    master_vy,
-                    master_wz,
-                    1 if master_motion_fresh() else 0,
+            if FOLLOW_LOG_ENABLE:
+                log(
+                    "[FOLLOW] t=%.1f started=%d seen=%d err=(%d,%d) cmd=(%.1f,%.1f,%.1f) master=(%.1f,%.1f,%.1f) fresh=%d"
+                    % (
+                        elapsed_s,
+                        1 if car_started else 0,
+                        1 if cam_target_seen() else 0,
+                        cam_error_x,
+                        cam_error_y,
+                        cam_target_vx,
+                        cam_target_vy,
+                        last_turn_rate_cmd,
+                        master_vx,
+                        master_vy,
+                        master_wz,
+                        1 if master_motion_fresh() else 0,
+                    )
                 )
-            )
 
-        if snap is not None and (pit_count % DEBUG_DIV) == 0:
+        if FOLLOW_LOG_ENABLE and snap is not None and (pit_count % DEBUG_DIV) == 0:
             log(
                 "[LOOP] enc=(%d,%d,%d) tar=(%.1f,%.1f,%.1f) pwm=(%d,%d,%d) gyro=%.2f yaw=%.2f vz=%.2f"
                 % (

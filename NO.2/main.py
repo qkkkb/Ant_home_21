@@ -79,8 +79,8 @@ Follow_Target_Lost_Hold_Ms = 250
 Master_Motion_Timeout_Ms = 250
 Follow_Master_Extra_Vx = 2.0
 Follow_Master_Extra_Vy = 1.5
-Camera_Right_Yaw_Cos = 0.7071068
-Camera_Right_Yaw_Sin = 0.7071068
+Camera_Right_Yaw_Cos = 0.5
+Camera_Right_Yaw_Sin = 0.8660254
 
 
 # ====================== Runtime state ======================

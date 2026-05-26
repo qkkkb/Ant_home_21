@@ -46,6 +46,8 @@ GYRO_CALIBRATE_DELAY_MS = 2
 EXIT_CHECK_DIV = 5
 GC_DIV = 50
 FOLLOW_LOG_ENABLE = False
+TURN_DEBUG_LOG_ENABLE = True
+TURN_DEBUG_LOG_INTERVAL_MS = 100
 DEBUG_DIV = 50
 FORCE_MOTOR_OFF = False
 AUTO_START_ON_BOOT = False
@@ -73,7 +75,8 @@ Follow_Forward_Deadband = 4
 Follow_Lateral_Deadband = 4
 Follow_Feedforward_Gain = 1.0
 Follow_Hold_Feedforward_Gain = 0.80
-Follow_Wz_Feedforward_Gain = 1.0
+Follow_Wz_Feedforward_Gain = 0.4
+Follow_Yaw_Enable = False
 Follow_Yaw_Gain = 0.08
 Follow_Yaw_Limit = 15.0
 Follow_Target_Lost_Hold_Ms = 250
@@ -120,6 +123,7 @@ loop_count = 0
 last_pwm_fl = 0
 last_pwm_fr = 0
 last_pwm_b = 0
+turn_debug_last_ms = 0
 last_turn_rate_cmd = 0.0
 last_vz_cmd = 0.0
 yaw_ref_deg = 0.0
@@ -266,6 +270,7 @@ def poll_coop_uart():
 def update_follow_targets(yaw_deg, gyro_z):
     global cam_target_vx, cam_target_vy, target_lost_since_ms
     global yaw_ref_deg, last_turn_rate_cmd, last_vz_cmd
+    global turn_debug_last_ms
 
     now = utime.ticks_ms()
     seen = cam_target_seen()
@@ -306,7 +311,9 @@ def update_follow_targets(yaw_deg, gyro_z):
     cam_target_vy = vy
 
     turn_rate_cmd = ff_wz * Follow_Wz_Feedforward_Gain
-    if fresh_motion and ENABLE_IMU:
+    yaw_err = 0.0
+    yaw_correction = 0.0
+    if Follow_Yaw_Enable and fresh_motion and ENABLE_IMU:
         yaw_ref_deg = master_yaw
         yaw_err = -wrapped_yaw_error(yaw_ref_deg, yaw_deg)
         yaw_correction = clamp(yaw_err * Follow_Yaw_Gain, -Follow_Yaw_Limit, Follow_Yaw_Limit)
@@ -316,6 +323,23 @@ def update_follow_targets(yaw_deg, gyro_z):
         vz_cmd = gyro_ctrl(gyro_pid, turn_rate_cmd - gyro_z)
     else:
         vz_cmd = turn_rate_cmd
+
+    if TURN_DEBUG_LOG_ENABLE:
+        if utime.ticks_diff(now, turn_debug_last_ms) >= TURN_DEBUG_LOG_INTERVAL_MS:
+            turn_debug_last_ms = now
+            log(
+                "[TURN] fwz=%.2f gain=%.2f yaw_en=%d yaw_err=%.2f yaw_fix=%.2f cmd=%.2f gyro=%.2f vz=%.2f"
+                % (
+                    ff_wz,
+                    Follow_Wz_Feedforward_Gain,
+                    1 if Follow_Yaw_Enable else 0,
+                    yaw_err,
+                    yaw_correction,
+                    turn_rate_cmd,
+                    gyro_z,
+                    vz_cmd,
+                )
+            )
 
     last_turn_rate_cmd = turn_rate_cmd
     last_vz_cmd = vz_cmd

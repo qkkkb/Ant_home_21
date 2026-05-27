@@ -161,24 +161,19 @@ Nav_Push_Orbit_Vy_Sign_Right = -1
 Nav_Push_Orbit_Vy_Sign_Up = 0
 Nav_Push_Orbit_Vy_Sign_Left = 1
 Nav_Push_Prepare_Reorient_Yaw = 10.0
-Nav_Push_Prepare_Forward_Gain = 0.030
-Nav_Push_Prepare_Lateral_Gain = 0.070
-Nav_Push_Prepare_Forward_Limit = 3.0
-Nav_Push_Prepare_Lateral_Limit = 3.0
+Nav_Push_Prepare_Forward_Gain = 0.026
+Nav_Push_Prepare_Lateral_Gain = 0.060
+Nav_Push_Prepare_Forward_Limit = 2.6
+Nav_Push_Prepare_Lateral_Limit = 2.6
 Nav_Push_Prepare_Min_Vx = 0.8
 Nav_Push_Prepare_Min_Vy = 0.8
-Nav_Push_Prepare_Forward_Brake_Enable = True
-Nav_Push_Prepare_Forward_Brake_Ms = 100
-Nav_Push_Prepare_Forward_Brake_Speed = 3.0
-Nav_Push_Prepare_Lateral_Brake_Enable = True
-Nav_Push_Prepare_Lateral_Brake_Window_X = 30
-Nav_Push_Prepare_Lateral_Brake_Ms = 80
-Nav_Push_Prepare_Lateral_Brake_Speed = 3.0
+Nav_Push_Prepare_Back_Ms = 80
+Nav_Push_Prepare_Back_Speed = 2.2
 Nav_Push_Prepare_Ok_X = 7    #准备阶段前进误差小于该值即认为横移准备就绪
 Nav_Push_Prepare_Ok_Y_Min = -8
 Nav_Push_Prepare_Ok_Y_Max = 8  #准备阶段横移误差小于该值即认为前进准备就绪
 Nav_Push_Prepare_Ok_Yaw = 5.5   #准备阶段定向误差小于该值即认为定向准备就绪
-Nav_Push_Prepare_Ok_Ms = 40
+Nav_Push_Prepare_Ok_Ms = 45
 Nav_Push_Execute_Forward_Speed = 5.5
 Nav_Push_Execute_Gyro_Limit = 8.0
 Nav_Push_Line_Lost_Ms = 150
@@ -228,12 +223,7 @@ nav_fine_forward_brake_since_ms = 0
 nav_fine_forward_brake_armed = True
 nav_transition_ms = 0
 nav_push_prepare_ok_since_ms = 0
-nav_push_prepare_last_x_sign = 0
-nav_push_prepare_last_y_sign = 0
-nav_push_prepare_lateral_brake_since_ms = 0
-nav_push_prepare_lateral_brake_vy = 0.0
-nav_push_prepare_forward_brake_since_ms = 0
-nav_push_prepare_forward_brake_armed = True
+nav_push_prepare_back_since_ms = 0
 nav_push_turn_ok_since_ms = 0
 nav_ready_for_push = False
 field_up_yaw = 0.0
@@ -472,10 +462,7 @@ def nav_set_state(new_state, reason="", force=False):
     global nav_fine_last_x_sign, nav_fine_last_y_sign
     global nav_fine_brake_since_ms, nav_fine_brake_vy, nav_fine_forward_brake_since_ms
     global nav_fine_forward_brake_armed
-    global nav_push_prepare_last_x_sign, nav_push_prepare_last_y_sign
-    global nav_push_prepare_lateral_brake_since_ms, nav_push_prepare_lateral_brake_vy
-    global nav_push_prepare_forward_brake_since_ms, nav_push_prepare_forward_brake_armed
-    global nav_push_prepare_ok_since_ms, nav_push_turn_ok_since_ms
+    global nav_push_prepare_ok_since_ms, nav_push_prepare_back_since_ms, nav_push_turn_ok_since_ms
     global nav_ready_for_push, cam_target_vx, cam_target_vy
     global yaw_ref_deg, cam_rx_started, push_dir_code, push_dir_name
     global line_crossed, push_line_seen_once, push_line_lost_since_ms, push_line_extra_since_ms
@@ -501,12 +488,7 @@ def nav_set_state(new_state, reason="", force=False):
     nav_fine_forward_brake_since_ms = 0
     nav_fine_forward_brake_armed = True
     nav_push_prepare_ok_since_ms = 0
-    nav_push_prepare_last_x_sign = 0
-    nav_push_prepare_last_y_sign = 0
-    nav_push_prepare_lateral_brake_since_ms = 0
-    nav_push_prepare_lateral_brake_vy = 0.0
-    nav_push_prepare_forward_brake_since_ms = 0
-    nav_push_prepare_forward_brake_armed = True
+    nav_push_prepare_back_since_ms = 0
     nav_push_turn_ok_since_ms = 0
     nav_transition_ms = now
     nav_ready_for_push = False
@@ -606,36 +588,13 @@ def apply_nav_targets(vx, vy, vx_limit, vy_limit):
     cam_target_vy = vy
 
 
-def apply_min_abs(value, min_abs):
-    if value > 0.0 and value < min_abs:
-        return min_abs
-    if value < 0.0 and value > -min_abs:
-        return -min_abs
-    return value
-
-
-def apply_push_prepare_targets():
-    if Nav_Push_Prepare_Ok_Y_Min <= cam_error_y <= Nav_Push_Prepare_Ok_Y_Max:
-        vx_cmd = 0.0
-    else:
-        vx_cmd = apply_min_abs(cam_error_y * Nav_Push_Prepare_Forward_Gain, Nav_Push_Prepare_Min_Vx)
-    if -Nav_Push_Prepare_Ok_X <= cam_error_x <= Nav_Push_Prepare_Ok_X:
-        vy_cmd = 0.0
-    else:
-        vy_cmd = apply_min_abs(-cam_error_x * Nav_Push_Prepare_Lateral_Gain, Nav_Push_Prepare_Min_Vy)
-    apply_nav_targets(vx_cmd, vy_cmd, Nav_Push_Prepare_Forward_Limit, Nav_Push_Prepare_Lateral_Limit)
-
-
 def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
     global nav_detect_since_ms, nav_target_lost_since_ms, nav_search_turn_ok_since_ms
     global nav_coarse_ok_since_ms, nav_fine_ok_since_ms
     global nav_fine_last_x_sign, nav_fine_last_y_sign
     global nav_fine_brake_since_ms, nav_fine_brake_vy, nav_fine_forward_brake_since_ms
     global nav_fine_forward_brake_armed
-    global nav_push_prepare_last_x_sign, nav_push_prepare_last_y_sign
-    global nav_push_prepare_lateral_brake_since_ms, nav_push_prepare_lateral_brake_vy
-    global nav_push_prepare_forward_brake_since_ms, nav_push_prepare_forward_brake_armed
-    global nav_push_prepare_ok_since_ms, nav_push_turn_ok_since_ms
+    global nav_push_prepare_ok_since_ms, nav_push_prepare_back_since_ms, nav_push_turn_ok_since_ms
     global nav_ready_for_push
     global cam_target_vx, cam_target_vy, yaw_ref_deg, push_yaw_target
     global line_crossed, push_line_seen_once, push_line_lost_since_ms, push_line_extra_since_ms
@@ -1014,83 +973,42 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             cam_target_vx = 0.0
             cam_target_vy = 0.0
             nav_push_prepare_ok_since_ms = 0
-            nav_push_prepare_last_x_sign = 0
-            nav_push_prepare_last_y_sign = 0
-            nav_push_prepare_lateral_brake_since_ms = 0
-            nav_push_prepare_lateral_brake_vy = 0.0
-            nav_push_prepare_forward_brake_since_ms = 0
-            nav_push_prepare_forward_brake_armed = True
+            nav_push_prepare_back_since_ms = 0
             return
         if not seen:
             cam_target_vx = 0.0
             cam_target_vy = 0.0
             nav_push_prepare_ok_since_ms = 0
-            nav_push_prepare_last_x_sign = 0
-            nav_push_prepare_last_y_sign = 0
-            nav_push_prepare_lateral_brake_since_ms = 0
-            nav_push_prepare_lateral_brake_vy = 0.0
-            nav_push_prepare_forward_brake_since_ms = 0
-            nav_push_prepare_forward_brake_armed = True
+            nav_push_prepare_back_since_ms = 0
             return
-        current_x_sign = 0
-        if cam_error_x > Nav_Lateral_Deadband:
-            current_x_sign = 1
-        elif cam_error_x < -Nav_Lateral_Deadband:
-            current_x_sign = -1
-        current_y_sign = 0
-        if cam_error_y > Nav_Forward_Deadband:
-            current_y_sign = 1
-        elif cam_error_y < -Nav_Forward_Deadband:
-            current_y_sign = -1
         prepare_braking = False
-        if current_y_sign > 0:
-            nav_push_prepare_forward_brake_armed = True
-        if Nav_Push_Prepare_Forward_Brake_Enable and current_y_sign != 0:
-            if (
-                nav_push_prepare_forward_brake_armed
-                and nav_push_prepare_last_y_sign > 0
-                and current_y_sign < 0
-            ):
-                nav_push_prepare_forward_brake_since_ms = now
-                nav_push_prepare_forward_brake_armed = False
-            nav_push_prepare_last_y_sign = current_y_sign
-        if Nav_Push_Prepare_Lateral_Brake_Enable and current_x_sign != 0:
-            if (
-                nav_push_prepare_last_x_sign != 0
-                and current_x_sign != nav_push_prepare_last_x_sign
-                and abs(cam_error_x) <= Nav_Push_Prepare_Lateral_Brake_Window_X
-            ):
-                nav_push_prepare_lateral_brake_since_ms = now
-                nav_push_prepare_lateral_brake_vy = -current_x_sign * Nav_Push_Prepare_Lateral_Brake_Speed
-            nav_push_prepare_last_x_sign = current_x_sign
-        if (
-            Nav_Push_Prepare_Forward_Brake_Enable
-            and nav_push_prepare_forward_brake_since_ms != 0
-            and utime.ticks_diff(now, nav_push_prepare_forward_brake_since_ms) < Nav_Push_Prepare_Forward_Brake_Ms
-        ):
-            prepare_braking = True
-            cam_target_vx = -Nav_Push_Prepare_Forward_Brake_Speed
-            cam_target_vy = 0.0
-        elif Nav_Push_Prepare_Forward_Brake_Enable and nav_push_prepare_forward_brake_since_ms != 0:
-            nav_push_prepare_forward_brake_since_ms = 0
-            apply_push_prepare_targets()
-        elif (
-            Nav_Push_Prepare_Lateral_Brake_Enable
-            and nav_push_prepare_lateral_brake_since_ms != 0
-            and utime.ticks_diff(now, nav_push_prepare_lateral_brake_since_ms) < Nav_Push_Prepare_Lateral_Brake_Ms
-        ):
-            prepare_braking = True
-            cam_target_vx = 0.0
-            if nav_push_prepare_lateral_brake_vy > Nav_Push_Prepare_Lateral_Limit:
-                cam_target_vy = Nav_Push_Prepare_Lateral_Limit
-            elif nav_push_prepare_lateral_brake_vy < -Nav_Push_Prepare_Lateral_Limit:
-                cam_target_vy = -Nav_Push_Prepare_Lateral_Limit
-            else:
-                cam_target_vy = nav_push_prepare_lateral_brake_vy
+        if cam_error_y < Nav_Push_Prepare_Ok_Y_Min:
+            if nav_push_prepare_back_since_ms == 0:
+                nav_push_prepare_back_since_ms = now
         else:
-            nav_push_prepare_lateral_brake_since_ms = 0
-            nav_push_prepare_lateral_brake_vy = 0.0
-            apply_push_prepare_targets()
+            nav_push_prepare_back_since_ms = 0
+        if nav_push_prepare_back_since_ms != 0 and utime.ticks_diff(now, nav_push_prepare_back_since_ms) < Nav_Push_Prepare_Back_Ms:
+            prepare_braking = True
+            cam_target_vx = -Nav_Push_Prepare_Back_Speed
+            cam_target_vy = 0.0
+        else:
+            if Nav_Push_Prepare_Ok_Y_Min <= cam_error_y <= Nav_Push_Prepare_Ok_Y_Max:
+                vx_cmd = 0.0
+            else:
+                vx_cmd = cam_error_y * Nav_Push_Prepare_Forward_Gain
+                if 0.0 < vx_cmd < Nav_Push_Prepare_Min_Vx:
+                    vx_cmd = Nav_Push_Prepare_Min_Vx
+                elif -Nav_Push_Prepare_Min_Vx < vx_cmd < 0.0:
+                    vx_cmd = -Nav_Push_Prepare_Min_Vx
+            if -Nav_Push_Prepare_Ok_X <= cam_error_x <= Nav_Push_Prepare_Ok_X:
+                vy_cmd = 0.0
+            else:
+                vy_cmd = -cam_error_x * Nav_Push_Prepare_Lateral_Gain
+                if 0.0 < vy_cmd < Nav_Push_Prepare_Min_Vy:
+                    vy_cmd = Nav_Push_Prepare_Min_Vy
+                elif -Nav_Push_Prepare_Min_Vy < vy_cmd < 0.0:
+                    vy_cmd = -Nav_Push_Prepare_Min_Vy
+            apply_nav_targets(vx_cmd, vy_cmd, Nav_Push_Prepare_Forward_Limit, Nav_Push_Prepare_Lateral_Limit)
         if (
             abs(cam_error_x) <= Nav_Push_Prepare_Ok_X
             and cam_error_y >= Nav_Push_Prepare_Ok_Y_Min

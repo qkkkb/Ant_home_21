@@ -69,6 +69,7 @@ ART_MODE_IDLE_CMD = b"IDLE\n"
 # ====================== Follow control ======================
 Follow_Forward_Gain = 0.060
 Follow_Lateral_Gain = 0.045
+Follow_Forward_Error_Sign = -1.0
 Follow_Forward_Limit = 12.0
 Follow_Lateral_Limit = 7.0
 Follow_Forward_Deadband = 4
@@ -281,7 +282,7 @@ def update_follow_targets(yaw_deg, gyro_z):
 
     if seen:
         target_lost_since_ms = 0
-        cam_vx = cam_error_y * Follow_Forward_Gain
+        cam_vx = cam_error_y * Follow_Forward_Gain * Follow_Forward_Error_Sign
         cam_vy = -cam_error_x * Follow_Lateral_Gain
         if -Follow_Forward_Deadband <= cam_error_y <= Follow_Forward_Deadband:
             cam_vx = 0.0

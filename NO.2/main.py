@@ -328,7 +328,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     if TURN_DEBUG_LOG_ENABLE:
         if utime.ticks_diff(now, turn_debug_last_ms) >= TURN_DEBUG_LOG_INTERVAL_MS:
             turn_debug_last_ms = now
-            log(
+            print(
                 "[TURN] fwz=%.2f gain=%.2f yaw_en=%d yaw_err=%.2f yaw_fix=%.2f cmd=%.2f gyro=%.2f vz=%.2f"
                 % (
                     ff_wz,

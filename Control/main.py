@@ -113,7 +113,7 @@ Nav_Search_Turn_Gyro_Limit = 2.5
 Nav_Search_Turn_Open_Vz = 2.2
 Nav_Coarse_Exit_Y = 230
 Nav_Coarse_Ok_Ms = 10
-Nav_Fine_Classify_Ok_X = 36
+Nav_Fine_Classify_Ok_X = 30
 Nav_Fine_Classify_Ok_Y_Min = -35
 Nav_Fine_Classify_Ok_Y_Max = 30
 Nav_Fine_Classify_Ok_Ms = 40
@@ -134,12 +134,12 @@ Nav_Fine_Forward_Limit = 4.2
 Nav_Fine_Lateral_Limit = 4.0    
 Nav_Fine_Forward_Brake_Enable = True
 Nav_Fine_Forward_Brake_Y = -8
-Nav_Fine_Forward_Brake_Ms = 120
-Nav_Fine_Forward_Brake_Speed = 3.0
+Nav_Fine_Forward_Brake_Ms = 110
+Nav_Fine_Forward_Brake_Speed = 4.5
 Nav_Fine_Lateral_Brake_Enable = True
-Nav_Fine_Lateral_Brake_Window_X = 45    #当摄像头误差在这个范围内且车速较高时启用横移制动
-Nav_Fine_Lateral_Brake_Ms = 90
-Nav_Fine_Lateral_Brake_Speed = 5.5
+Nav_Fine_Lateral_Brake_Window_X = 55    #当摄像头误差在这个范围内且车速较高时启用横移制动
+Nav_Fine_Lateral_Brake_Ms = 110
+Nav_Fine_Lateral_Brake_Speed = 7.0
 Nav_Forward_Deadband = 4
 Nav_Lateral_Deadband = 3    #横移死区，单位像素；如果摄像头误差在这个范围内则认为不需要横移
 Nav_Classify_Timeout_Ms = 1500
@@ -161,21 +161,25 @@ Nav_Push_Orbit_Vy_Sign_Right = -1
 Nav_Push_Orbit_Vy_Sign_Up = 0
 Nav_Push_Orbit_Vy_Sign_Left = 1
 Nav_Push_Prepare_Reorient_Yaw = 10.0
-Nav_Push_Prepare_Forward_Gain = 0.032
-Nav_Push_Prepare_Lateral_Gain = 0.090
-Nav_Push_Prepare_Forward_Limit = 3.0
-Nav_Push_Prepare_Lateral_Limit = 3.5
-Nav_Push_Prepare_Min_Vx = 1.2
-Nav_Push_Prepare_Min_Vy = 2.4
-Nav_Push_Prepare_Back_Ms = 80
-Nav_Push_Prepare_Back_Speed = 2.2
-Nav_Push_Prepare_Ok_X = 7    #准备阶段前进误差小于该值即认为横移准备就绪
+Nav_Push_Prepare_Forward_Gain = 0.038
+Nav_Push_Prepare_Lateral_Gain = 0.115
+Nav_Push_Prepare_Forward_Limit = 3.6
+Nav_Push_Prepare_Lateral_Limit = 5.2
+Nav_Push_Prepare_Min_Vx = 1.5
+Nav_Push_Prepare_Min_Vy = 3.0
+Nav_Push_Prepare_Kick_X = 18
+Nav_Push_Prepare_Kick_Vy = 5.0
+Nav_Push_Prepare_Lateral_Brake_Ms = 70
+Nav_Push_Prepare_Lateral_Brake_Speed = 5.0
+Nav_Push_Prepare_Back_Ms = 90
+Nav_Push_Prepare_Back_Speed = 4.0
+Nav_Push_Prepare_Ok_X = 4    #准备阶段前进误差小于该值即认为横移准备就绪
 Nav_Push_Prepare_Ok_Y_Min = -8
 Nav_Push_Prepare_Ok_Y_Max = 8  #准备阶段横移误差小于该值即认为前进准备就绪
-Nav_Push_Prepare_Ok_Yaw = 5.5   #准备阶段定向误差小于该值即认为定向准备就绪
-Nav_Push_Prepare_Ok_Ms = 45
-Nav_Push_Execute_Forward_Speed = 5.5
-Nav_Push_Execute_Gyro_Limit = 8.0
+Nav_Push_Prepare_Ok_Yaw = 4   #准备阶段定向误差小于该值即认为定向准备就绪
+Nav_Push_Prepare_Ok_Ms = 70
+Nav_Push_Execute_Forward_Speed = 6.5    #执行阶段前进速度
+Nav_Push_Execute_Gyro_Limit = 12.0
 Nav_Push_Line_Lost_Ms = 150
 Nav_Push_Line_Extra_Ms = 180
 Nav_Push_Back_Speed = 20
@@ -232,6 +236,7 @@ field_left_yaw = 270.0
 field_down_yaw = 180.0
 launch_yaw = 0.0
 field_reference_valid = False
+gyro_pid = None
 search_turn_yaw_target = 45.0
 push_dir_code = Push_Dir_None
 push_dir_name = "NONE"
@@ -345,6 +350,14 @@ def orbit_vy_sign_from_dir(dir_code):
     if dir_code == Push_Dir_Left:
         return Nav_Push_Orbit_Vy_Sign_Left
     return 0
+
+
+def reset_gyro_pid_state():
+    pid = gyro_pid
+    if pid is not None:
+        pid.output = 0.0
+        pid.err = 0.0
+        pid.err_last = 0.0
 
 
 def get_push_orbit_motion(yaw_err_abs):
@@ -537,6 +550,9 @@ def nav_set_state(new_state, reason="", force=False):
             nav_fine_last_y_sign = 1
         elif cam_error_y < -Nav_Forward_Deadband:
             nav_fine_last_y_sign = -1
+
+    if new_state in (NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH):
+        reset_gyro_pid_state()
 
     if ENABLE_IMU and imu_runtime is not None:
         if new_state == NAV_STATE_SEARCH_TURN:
@@ -982,6 +998,20 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             nav_push_prepare_back_since_ms = 0
             return
         prepare_braking = False
+        current_prepare_x_sign = 0
+        if cam_error_x > Nav_Push_Prepare_Ok_X:
+            current_prepare_x_sign = 1
+        elif cam_error_x < -Nav_Push_Prepare_Ok_X:
+            current_prepare_x_sign = -1
+        if current_prepare_x_sign != 0:
+            if (
+                nav_fine_last_x_sign != 0
+                and current_prepare_x_sign != nav_fine_last_x_sign
+                and abs(cam_error_x) <= Nav_Push_Prepare_Kick_X
+            ):
+                nav_fine_brake_since_ms = now
+                nav_fine_brake_vy = -current_prepare_x_sign * Nav_Push_Prepare_Lateral_Brake_Speed
+            nav_fine_last_x_sign = current_prepare_x_sign
         if cam_error_y < Nav_Push_Prepare_Ok_Y_Min:
             if nav_push_prepare_back_since_ms == 0:
                 nav_push_prepare_back_since_ms = now
@@ -991,7 +1021,19 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             prepare_braking = True
             cam_target_vx = -Nav_Push_Prepare_Back_Speed
             cam_target_vy = 0.0
+        elif nav_fine_brake_since_ms != 0 and utime.ticks_diff(now, nav_fine_brake_since_ms) < Nav_Push_Prepare_Lateral_Brake_Ms:
+            prepare_braking = True
+            cam_target_vx = 0.0
+            if nav_fine_brake_vy > Nav_Push_Prepare_Lateral_Limit:
+                cam_target_vy = Nav_Push_Prepare_Lateral_Limit
+            elif nav_fine_brake_vy < -Nav_Push_Prepare_Lateral_Limit:
+                cam_target_vy = -Nav_Push_Prepare_Lateral_Limit
+            else:
+                cam_target_vy = nav_fine_brake_vy
         else:
+            if nav_fine_brake_since_ms != 0:
+                nav_fine_brake_since_ms = 0
+                nav_fine_brake_vy = 0.0
             if Nav_Push_Prepare_Ok_Y_Min <= cam_error_y <= Nav_Push_Prepare_Ok_Y_Max:
                 vx_cmd = 0.0
             else:
@@ -1004,10 +1046,13 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 vy_cmd = 0.0
             else:
                 vy_cmd = -cam_error_x * Nav_Push_Prepare_Lateral_Gain
-                if 0.0 < vy_cmd < Nav_Push_Prepare_Min_Vy:
-                    vy_cmd = Nav_Push_Prepare_Min_Vy
-                elif -Nav_Push_Prepare_Min_Vy < vy_cmd < 0.0:
-                    vy_cmd = -Nav_Push_Prepare_Min_Vy
+                min_vy = Nav_Push_Prepare_Min_Vy
+                if abs(cam_error_x) <= Nav_Push_Prepare_Kick_X:
+                    min_vy = Nav_Push_Prepare_Kick_Vy
+                if 0.0 < vy_cmd < min_vy:
+                    vy_cmd = min_vy
+                elif -min_vy < vy_cmd < 0.0:
+                    vy_cmd = -min_vy
             apply_nav_targets(vx_cmd, vy_cmd, Nav_Push_Prepare_Forward_Limit, Nav_Push_Prepare_Lateral_Limit)
         if (
             abs(cam_error_x) <= Nav_Push_Prepare_Ok_X
@@ -1441,7 +1486,6 @@ pid_fl.init_c()
 pid_fr.init_c()
 pid_b.init_c()
 
-gyro_pid = None
 if ENABLE_GYRO_LOOP:
     gyro_pid = AnglePID()
     gyro_pid.output = 0.0

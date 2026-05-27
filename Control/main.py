@@ -153,14 +153,14 @@ Nav_Push_Prepare_Forward_Limit = 1.2
 Nav_Push_Prepare_Lateral_Limit = 1.6
 Nav_Push_Prepare_Ok_X = 7    #准备阶段前进误差小于该值即认为横移准备就绪
 Nav_Push_Prepare_Ok_Y_Max = 8  #准备阶段横移误差小于该值即认为前进准备就绪
-Nav_Push_Prepare_Ok_Yaw = 5.0   #准备阶段定向误差小于该值即认为定向准备就绪
-Nav_Push_Prepare_Ok_Ms = 150
+Nav_Push_Prepare_Ok_Yaw = 5.5   #准备阶段定向误差小于该值即认为定向准备就绪
+Nav_Push_Prepare_Ok_Ms = 80
 Nav_Push_Execute_Forward_Speed = 5.5
 Nav_Push_Execute_Gyro_Limit = 8.0
 Nav_Push_Line_Lost_Ms = 150
-Nav_Push_Line_Extra_Ms = 300
-Nav_Push_Back_Speed = 6
-Nav_Push_Back_Ms = 6000
+Nav_Push_Line_Extra_Ms = 180
+Nav_Push_Back_Speed = 20
+Nav_Push_Back_Ms = 800
 Nav_Push_Turn_Slow_Yaw = 35.0
 Nav_Push_Turn_Fast_Rate = 170.0
 Nav_Push_Turn_Slow_Rate = 55.0
@@ -1640,3 +1640,4 @@ finally:
     led_translate.value(0)
     led_rotate.value(0)
     log("=== program stopped ===")
+

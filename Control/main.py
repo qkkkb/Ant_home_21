@@ -114,9 +114,12 @@ Nav_Search_Turn_Open_Vz = 2.2
 Nav_Coarse_Exit_Y = 230
 Nav_Coarse_Ok_Ms = 10
 Nav_Fine_Ok_X = 8.0
-Nav_Fine_Ok_Y_Min = -8
-Nav_Fine_Ok_Y_Max = 18  
-Nav_Fine_Ok_Ms = 120
+Nav_Fine_Classify_Ok_Y_Min = -35
+Nav_Fine_Classify_Ok_Y_Max = 18
+Nav_Fine_Classify_Ok_Ms = 60
+Nav_Fine_Push_Ok_Y_Min = -8
+Nav_Fine_Push_Ok_Y_Max = 18
+Nav_Fine_Push_Ok_Ms = 120
 Nav_Transition_Grace_Ms = 200
 Nav_Low_Speed_Th = 30
 Nav_Coarse_Forward_Gain = 0.075
@@ -813,17 +816,25 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             or (not ENABLE_IMU)
             or (abs(push_yaw_error_deg(yaw_deg)) <= Nav_Push_Prepare_Reorient_Yaw)
         )
+        if push_orbit_done:
+            fine_ok_y_min = Nav_Fine_Push_Ok_Y_Min
+            fine_ok_y_max = Nav_Fine_Push_Ok_Y_Max
+            fine_ok_ms = Nav_Fine_Push_Ok_Ms
+        else:
+            fine_ok_y_min = Nav_Fine_Classify_Ok_Y_Min
+            fine_ok_y_max = Nav_Fine_Classify_Ok_Y_Max
+            fine_ok_ms = Nav_Fine_Classify_Ok_Ms
         if (
             abs(cam_error_x) <= Nav_Fine_Ok_X
-            and cam_error_y >= Nav_Fine_Ok_Y_Min
-            and cam_error_y <= Nav_Fine_Ok_Y_Max
+            and cam_error_y >= fine_ok_y_min
+            and cam_error_y <= fine_ok_y_max
             and fine_yaw_ok
             and low_speed
             and (not fine_braking)
         ):
             if nav_fine_ok_since_ms == 0:
                 nav_fine_ok_since_ms = now
-            elif utime.ticks_diff(now, nav_fine_ok_since_ms) >= Nav_Fine_Ok_Ms:
+            elif utime.ticks_diff(now, nav_fine_ok_since_ms) >= fine_ok_ms:
                 cam_target_vx = 0.0
                 cam_target_vy = 0.0
                 if push_orbit_done:

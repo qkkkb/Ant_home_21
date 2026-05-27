@@ -193,8 +193,8 @@ def master_started():
 
 
 def rotate_camera_velocity_to_body(cam_vx, cam_vy):
-    body_vx = cam_vx * Camera_Right_Yaw_Cos + cam_vy * Camera_Right_Yaw_Sin
-    body_vy = -cam_vx * Camera_Right_Yaw_Sin + cam_vy * Camera_Right_Yaw_Cos
+    body_vx = cam_vx
+    body_vy = cam_vy
     return body_vx, body_vy
 
 

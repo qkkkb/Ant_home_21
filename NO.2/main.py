@@ -48,7 +48,7 @@ GC_DIV = 50
 FOLLOW_LOG_ENABLE = False
 TURN_DEBUG_LOG_ENABLE = False
 TURN_DEBUG_LOG_INTERVAL_MS = 100
-MAP_DEBUG_LOG_ENABLE = True
+MAP_DEBUG_LOG_ENABLE = False
 MAP_DEBUG_LOG_INTERVAL_MS = 100
 DEBUG_DIV = 50
 FORCE_MOTOR_OFF = False
@@ -69,17 +69,17 @@ ART_MODE_IDLE_CMD = b"IDLE\n"
 
 
 # ====================== Follow control ======================
-Follow_Forward_Gain = 0.060
-Follow_Lateral_Gain = 0.045
+Follow_Forward_Gain = 0.085
+Follow_Lateral_Gain = 0.060
 Follow_Forward_Error_Sign = 1.0
 Follow_Lateral_Error_Sign = -1.0
-Follow_Forward_Limit = 12.0
-Follow_Lateral_Limit = 7.0
+Follow_Forward_Limit = 15.0
+Follow_Lateral_Limit = 9.0
 Follow_Forward_Deadband = 4
 Follow_Lateral_Deadband = 4
 Follow_Feedforward_Gain = 1.0
-Follow_Hold_Feedforward_Gain = 0.80
-Follow_Wz_Feedforward_Gain = 0.4
+Follow_Hold_Feedforward_Gain = 0.95
+Follow_Wz_Feedforward_Gain = 0.65
 Follow_Yaw_Enable = False
 Follow_Yaw_Gain = 0.08
 Follow_Yaw_Limit = 15.0

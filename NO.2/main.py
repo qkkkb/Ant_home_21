@@ -46,8 +46,10 @@ GYRO_CALIBRATE_DELAY_MS = 2
 EXIT_CHECK_DIV = 5
 GC_DIV = 50
 FOLLOW_LOG_ENABLE = False
-TURN_DEBUG_LOG_ENABLE = True
+TURN_DEBUG_LOG_ENABLE = False
 TURN_DEBUG_LOG_INTERVAL_MS = 100
+MAP_DEBUG_LOG_ENABLE = True
+MAP_DEBUG_LOG_INTERVAL_MS = 100
 DEBUG_DIV = 50
 FORCE_MOTOR_OFF = False
 AUTO_START_ON_BOOT = False
@@ -125,6 +127,7 @@ last_pwm_fl = 0
 last_pwm_fr = 0
 last_pwm_b = 0
 turn_debug_last_ms = 0
+map_debug_last_ms = 0
 last_turn_rate_cmd = 0.0
 last_vz_cmd = 0.0
 yaw_ref_deg = 0.0
@@ -271,7 +274,7 @@ def poll_coop_uart():
 def update_follow_targets(yaw_deg, gyro_z):
     global cam_target_vx, cam_target_vy, target_lost_since_ms
     global yaw_ref_deg, last_turn_rate_cmd, last_vz_cmd
-    global turn_debug_last_ms
+    global turn_debug_last_ms, map_debug_last_ms
 
     now = utime.ticks_ms()
     seen = cam_target_seen()
@@ -279,6 +282,10 @@ def update_follow_targets(yaw_deg, gyro_z):
     ff_vx = master_vx if fresh_motion else 0.0
     ff_vy = master_vy if fresh_motion else 0.0
     ff_wz = master_wz if fresh_motion else 0.0
+    cam_vx = 0.0
+    cam_vy = 0.0
+    body_vx = 0.0
+    body_vy = 0.0
 
     if seen:
         target_lost_since_ms = 0
@@ -310,6 +317,26 @@ def update_follow_targets(yaw_deg, gyro_z):
     vy = clamp(vy, -vy_limit, vy_limit)
     cam_target_vx = vx
     cam_target_vy = vy
+
+    if MAP_DEBUG_LOG_ENABLE:
+        if utime.ticks_diff(now, map_debug_last_ms) >= MAP_DEBUG_LOG_INTERVAL_MS:
+            map_debug_last_ms = now
+            print(
+                "[MAP] seen=%d err=(%d,%d) cam=(%.2f,%.2f) body=(%.2f,%.2f) ff=(%.2f,%.2f) out=(%.2f,%.2f)"
+                % (
+                    1 if seen else 0,
+                    cam_error_x,
+                    cam_error_y,
+                    cam_vx,
+                    cam_vy,
+                    body_vx,
+                    body_vy,
+                    ff_vx,
+                    ff_vy,
+                    vx,
+                    vy,
+                )
+            )
 
     turn_rate_cmd = ff_wz * Follow_Wz_Feedforward_Gain
     yaw_err = 0.0

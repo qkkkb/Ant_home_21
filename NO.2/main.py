@@ -79,7 +79,8 @@ Follow_Forward_Deadband = 4
 Follow_Lateral_Deadband = 4
 Follow_Feedforward_Gain = 1.0
 Follow_Hold_Feedforward_Gain = 0.95
-Follow_Wz_Feedforward_Gain = 0.0
+Follow_Wz_Feedforward_Gain = 0.20
+Follow_Wz_Forward_Gain = 0.0
 Follow_Wz_Lateral_Gain = 0.035
 Follow_Yaw_Enable = False
 Follow_Yaw_Gain = 0.08
@@ -288,11 +289,11 @@ def update_follow_targets(yaw_deg, gyro_z):
     cam_vy = 0.0
     body_vx = 0.0
     body_vy = 0.0
-    use_wz_lateral = False
+    use_motion_feedforward = False
 
     if seen:
         target_lost_since_ms = 0
-        use_wz_lateral = True
+        use_motion_feedforward = fresh_motion
         cam_vx = cam_error_y * Follow_Forward_Gain * Follow_Forward_Error_Sign
         cam_vy = -cam_error_x * Follow_Lateral_Gain * Follow_Lateral_Error_Sign
         if -Follow_Forward_Deadband <= cam_error_y <= Follow_Forward_Deadband:
@@ -308,11 +309,12 @@ def update_follow_targets(yaw_deg, gyro_z):
         if fresh_motion and utime.ticks_diff(now, target_lost_since_ms) <= Follow_Target_Lost_Hold_Ms:
             vx = ff_vx * Follow_Hold_Feedforward_Gain
             vy = ff_vy * Follow_Hold_Feedforward_Gain
-            use_wz_lateral = True
+            use_motion_feedforward = True
         else:
             vx = 0.0
             vy = 0.0
-    if fresh_motion and use_wz_lateral:
+    if use_motion_feedforward:
+        vx += ff_wz * Follow_Wz_Forward_Gain
         vy += ff_wz * Follow_Wz_Lateral_Gain
 
     vx_limit = Follow_Forward_Limit
@@ -345,7 +347,7 @@ def update_follow_targets(yaw_deg, gyro_z):
                 )
             )
 
-    turn_rate_cmd = 0.0
+    turn_rate_cmd = ff_wz * Follow_Wz_Feedforward_Gain if use_motion_feedforward else 0.0
     yaw_err = 0.0
     yaw_correction = 0.0
     if Follow_Yaw_Enable and fresh_motion and ENABLE_IMU:

@@ -113,10 +113,11 @@ Nav_Search_Turn_Gyro_Limit = 2.5
 Nav_Search_Turn_Open_Vz = 2.2
 Nav_Coarse_Exit_Y = 230
 Nav_Coarse_Ok_Ms = 10
-Nav_Fine_Ok_X = 8.0
+Nav_Fine_Classify_Ok_X = 36
 Nav_Fine_Classify_Ok_Y_Min = -35
-Nav_Fine_Classify_Ok_Y_Max = 18
-Nav_Fine_Classify_Ok_Ms = 60
+Nav_Fine_Classify_Ok_Y_Max = 30
+Nav_Fine_Classify_Ok_Ms = 40
+Nav_Fine_Push_Ok_X = 8
 Nav_Fine_Push_Ok_Y_Min = -8
 Nav_Fine_Push_Ok_Y_Max = 18
 Nav_Fine_Push_Ok_Ms = 120
@@ -127,6 +128,7 @@ Nav_Coarse_Lateral_Gain = 0.035		#COARSE 横移系数
 Nav_Coarse_Forward_Limit = 8.0
 Nav_Coarse_Lateral_Limit = 5.0
 Nav_Fine_Forward_Gain = 0.035
+Nav_Fine_Classify_Lateral_Gain = 0.08
 Nav_Fine_Lateral_Gain = 0.12        #FINE 横移系数
 Nav_Fine_Forward_Limit = 4.2
 Nav_Fine_Lateral_Limit = 4.0    
@@ -723,6 +725,10 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
 
     if nav_state == NAV_STATE_FINE:
         nav_ready_for_push = False
+        if push_orbit_done:
+            fine_lateral_gain = Nav_Fine_Lateral_Gain
+        else:
+            fine_lateral_gain = Nav_Fine_Classify_Lateral_Gain
         if not seen:
             cam_target_vx = 0.0
             cam_target_vy = 0.0
@@ -782,14 +788,14 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             nav_fine_forward_brake_since_ms = 0
             apply_nav_targets(
                 cam_error_y * Nav_Fine_Forward_Gain,
-                -cam_error_x * Nav_Fine_Lateral_Gain,
+                -cam_error_x * fine_lateral_gain,
                 Nav_Fine_Forward_Limit,
                 Nav_Fine_Lateral_Limit,
             )
         elif (not Nav_Fine_Lateral_Brake_Enable) or nav_fine_brake_since_ms == 0:
             apply_nav_targets(
                 cam_error_y * Nav_Fine_Forward_Gain,
-                -cam_error_x * Nav_Fine_Lateral_Gain,
+                -cam_error_x * fine_lateral_gain,
                 Nav_Fine_Forward_Limit,
                 Nav_Fine_Lateral_Limit,
             )
@@ -807,7 +813,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             nav_fine_brake_vy = 0.0
             apply_nav_targets(
                 cam_error_y * Nav_Fine_Forward_Gain,
-                -cam_error_x * Nav_Fine_Lateral_Gain,
+                -cam_error_x * fine_lateral_gain,
                 Nav_Fine_Forward_Limit,
                 Nav_Fine_Lateral_Limit,
             )
@@ -817,15 +823,17 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             or (abs(push_yaw_error_deg(yaw_deg)) <= Nav_Push_Prepare_Reorient_Yaw)
         )
         if push_orbit_done:
+            fine_ok_x = Nav_Fine_Push_Ok_X
             fine_ok_y_min = Nav_Fine_Push_Ok_Y_Min
             fine_ok_y_max = Nav_Fine_Push_Ok_Y_Max
             fine_ok_ms = Nav_Fine_Push_Ok_Ms
         else:
+            fine_ok_x = Nav_Fine_Classify_Ok_X
             fine_ok_y_min = Nav_Fine_Classify_Ok_Y_Min
             fine_ok_y_max = Nav_Fine_Classify_Ok_Y_Max
             fine_ok_ms = Nav_Fine_Classify_Ok_Ms
         if (
-            abs(cam_error_x) <= Nav_Fine_Ok_X
+            abs(cam_error_x) <= fine_ok_x
             and cam_error_y >= fine_ok_y_min
             and cam_error_y <= fine_ok_y_max
             and fine_yaw_ok

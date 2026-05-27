@@ -49,8 +49,8 @@ GYRO_SIGN = 1.0
 GYRO_OFFSET_Z = 3.16
 GYRO_SCALE = -1.0 / 16.54052
 GYRO_DEADBAND_DPS = 0.8  # 陀螺仪死区阈值
-GYRO_KP = 0.15
-GYRO_KI = 0.003
+GYRO_KP = 0.22
+GYRO_KI = 0.004
 GYRO_OUTPUT_LIMIT = 5.0
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True   #是否在启动时自动进行陀螺仪标定
 GYRO_CALIBRATE_SAMPLES = 1000
@@ -114,6 +114,7 @@ Nav_Search_Turn_Open_Vz = 2.2
 Nav_Coarse_Exit_Y = 230
 Nav_Coarse_Ok_Ms = 10
 Nav_Fine_Ok_X = 8.0
+Nav_Fine_Ok_Y_Min = -8
 Nav_Fine_Ok_Y_Max = 18  
 Nav_Fine_Ok_Ms = 120
 Nav_Transition_Grace_Ms = 200
@@ -126,10 +127,14 @@ Nav_Fine_Forward_Gain = 0.035
 Nav_Fine_Lateral_Gain = 0.12        #FINE 横移系数
 Nav_Fine_Forward_Limit = 4.2
 Nav_Fine_Lateral_Limit = 4.0    
+Nav_Fine_Forward_Brake_Enable = True
+Nav_Fine_Forward_Brake_Y = -8
+Nav_Fine_Forward_Brake_Ms = 120
+Nav_Fine_Forward_Brake_Speed = 3.0
 Nav_Fine_Lateral_Brake_Enable = True
-Nav_Fine_Lateral_Brake_Window_X = 45
+Nav_Fine_Lateral_Brake_Window_X = 45    #当摄像头误差在这个范围内且车速较高时启用横移制动
 Nav_Fine_Lateral_Brake_Ms = 90
-Nav_Fine_Lateral_Brake_Speed = 3.0
+Nav_Fine_Lateral_Brake_Speed = 5.5
 Nav_Forward_Deadband = 4
 Nav_Lateral_Deadband = 3    #横移死区，单位像素；如果摄像头误差在这个范围内则认为不需要横移
 Nav_Classify_Timeout_Ms = 1500
@@ -201,8 +206,11 @@ nav_search_turn_ok_since_ms = 0
 nav_coarse_ok_since_ms = 0
 nav_fine_ok_since_ms = 0
 nav_fine_last_x_sign = 0
+nav_fine_last_y_sign = 0
 nav_fine_brake_since_ms = 0
 nav_fine_brake_vy = 0.0
+nav_fine_forward_brake_since_ms = 0
+nav_fine_forward_brake_armed = True
 nav_transition_ms = 0
 nav_push_prepare_ok_since_ms = 0
 nav_push_turn_ok_since_ms = 0
@@ -440,7 +448,9 @@ def nav_state_code(state):
 def nav_set_state(new_state, reason="", force=False):
     global nav_state, nav_detect_since_ms, nav_target_lost_since_ms, nav_search_turn_ok_since_ms
     global nav_coarse_ok_since_ms, nav_fine_ok_since_ms, nav_transition_ms
-    global nav_fine_last_x_sign, nav_fine_brake_since_ms, nav_fine_brake_vy
+    global nav_fine_last_x_sign, nav_fine_last_y_sign
+    global nav_fine_brake_since_ms, nav_fine_brake_vy, nav_fine_forward_brake_since_ms
+    global nav_fine_forward_brake_armed
     global nav_push_prepare_ok_since_ms, nav_push_turn_ok_since_ms
     global nav_ready_for_push, cam_target_vx, cam_target_vy
     global yaw_ref_deg, cam_rx_started, push_dir_code, push_dir_name
@@ -461,8 +471,11 @@ def nav_set_state(new_state, reason="", force=False):
     nav_coarse_ok_since_ms = 0
     nav_fine_ok_since_ms = 0
     nav_fine_last_x_sign = 0
+    nav_fine_last_y_sign = 0
     nav_fine_brake_since_ms = 0
     nav_fine_brake_vy = 0.0
+    nav_fine_forward_brake_since_ms = 0
+    nav_fine_forward_brake_armed = True
     nav_push_prepare_ok_since_ms = 0
     nav_push_turn_ok_since_ms = 0
     nav_transition_ms = now
@@ -508,6 +521,10 @@ def nav_set_state(new_state, reason="", force=False):
             nav_fine_last_x_sign = 1
         elif cam_error_x < -Nav_Lateral_Deadband:
             nav_fine_last_x_sign = -1
+        if cam_error_y > Nav_Forward_Deadband:
+            nav_fine_last_y_sign = 1
+        elif cam_error_y < -Nav_Forward_Deadband:
+            nav_fine_last_y_sign = -1
 
     if ENABLE_IMU and imu_runtime is not None:
         if new_state == NAV_STATE_SEARCH_TURN:
@@ -562,7 +579,9 @@ def apply_nav_targets(vx, vy, vx_limit, vy_limit):
 def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
     global nav_detect_since_ms, nav_target_lost_since_ms, nav_search_turn_ok_since_ms
     global nav_coarse_ok_since_ms, nav_fine_ok_since_ms
-    global nav_fine_last_x_sign, nav_fine_brake_since_ms, nav_fine_brake_vy
+    global nav_fine_last_x_sign, nav_fine_last_y_sign
+    global nav_fine_brake_since_ms, nav_fine_brake_vy, nav_fine_forward_brake_since_ms
+    global nav_fine_forward_brake_armed
     global nav_push_prepare_ok_since_ms, nav_push_turn_ok_since_ms
     global nav_ready_for_push
     global cam_target_vx, cam_target_vy, yaw_ref_deg, push_yaw_target
@@ -706,15 +725,39 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             cam_target_vy = 0.0
             nav_fine_ok_since_ms = 0
             nav_fine_last_x_sign = 0
+            nav_fine_last_y_sign = 0
             nav_fine_brake_since_ms = 0
             nav_fine_brake_vy = 0.0
+            nav_fine_forward_brake_since_ms = 0
+            nav_fine_forward_brake_armed = True
             return
         current_x_sign = 0
         if cam_error_x > Nav_Lateral_Deadband:
             current_x_sign = 1
         elif cam_error_x < -Nav_Lateral_Deadband:
             current_x_sign = -1
+        current_y_sign = 0
+        if cam_error_y > Nav_Forward_Deadband:
+            current_y_sign = 1
+        elif cam_error_y < -Nav_Forward_Deadband:
+            current_y_sign = -1
         fine_braking = False
+        if current_y_sign > 0:
+            nav_fine_forward_brake_armed = True
+        if Nav_Fine_Forward_Brake_Enable and current_y_sign != 0:
+            if (
+                nav_fine_forward_brake_armed
+                and (
+                    cam_error_y < Nav_Fine_Forward_Brake_Y
+                    or (
+                        nav_fine_last_y_sign > 0
+                        and current_y_sign < 0
+                    )
+                )
+            ):
+                nav_fine_forward_brake_since_ms = now
+                nav_fine_forward_brake_armed = False
+            nav_fine_last_y_sign = current_y_sign
         if Nav_Fine_Lateral_Brake_Enable and current_x_sign != 0:
             if (
                 nav_fine_last_x_sign != 0
@@ -724,7 +767,23 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 nav_fine_brake_since_ms = now
                 nav_fine_brake_vy = -current_x_sign * Nav_Fine_Lateral_Brake_Speed
             nav_fine_last_x_sign = current_x_sign
-        if (not Nav_Fine_Lateral_Brake_Enable) or nav_fine_brake_since_ms == 0:
+        if (
+            Nav_Fine_Forward_Brake_Enable
+            and nav_fine_forward_brake_since_ms != 0
+            and utime.ticks_diff(now, nav_fine_forward_brake_since_ms) < Nav_Fine_Forward_Brake_Ms
+        ):
+            fine_braking = True
+            cam_target_vx = -Nav_Fine_Forward_Brake_Speed
+            cam_target_vy = 0.0
+        elif Nav_Fine_Forward_Brake_Enable and nav_fine_forward_brake_since_ms != 0:
+            nav_fine_forward_brake_since_ms = 0
+            apply_nav_targets(
+                cam_error_y * Nav_Fine_Forward_Gain,
+                -cam_error_x * Nav_Fine_Lateral_Gain,
+                Nav_Fine_Forward_Limit,
+                Nav_Fine_Lateral_Limit,
+            )
+        elif (not Nav_Fine_Lateral_Brake_Enable) or nav_fine_brake_since_ms == 0:
             apply_nav_targets(
                 cam_error_y * Nav_Fine_Forward_Gain,
                 -cam_error_x * Nav_Fine_Lateral_Gain,
@@ -756,6 +815,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         )
         if (
             abs(cam_error_x) <= Nav_Fine_Ok_X
+            and cam_error_y >= Nav_Fine_Ok_Y_Min
             and cam_error_y <= Nav_Fine_Ok_Y_Max
             and fine_yaw_ok
             and low_speed

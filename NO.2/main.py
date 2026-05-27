@@ -71,7 +71,7 @@ ART_MODE_IDLE_CMD = b"IDLE\n"
 # ====================== Follow control ======================
 Follow_Forward_Gain = 0.060
 Follow_Lateral_Gain = 0.045
-Follow_Forward_Error_Sign = -1.0
+Follow_Forward_Error_Sign = 1.0
 Follow_Forward_Limit = 12.0
 Follow_Lateral_Limit = 7.0
 Follow_Forward_Deadband = 4

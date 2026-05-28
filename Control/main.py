@@ -737,7 +737,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             Nav_Coarse_Forward_Limit,
             Nav_Coarse_Lateral_Limit,
         )
-        if cam_error_y <= Nav_Coarse_Exit_Y:
+        if seen and cam_error_y <= Nav_Coarse_Exit_Y:
             if nav_coarse_ok_since_ms == 0:
                 nav_coarse_ok_since_ms = now
             elif utime.ticks_diff(now, nav_coarse_ok_since_ms) >= Nav_Coarse_Ok_Ms:
@@ -1055,7 +1055,8 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                     vy_cmd = -min_vy
             apply_nav_targets(vx_cmd, vy_cmd, Nav_Push_Prepare_Forward_Limit, Nav_Push_Prepare_Lateral_Limit)
         if (
-            abs(cam_error_x) <= Nav_Push_Prepare_Ok_X
+            seen
+            and abs(cam_error_x) <= Nav_Push_Prepare_Ok_X
             and cam_error_y >= Nav_Push_Prepare_Ok_Y_Min
             and cam_error_y <= Nav_Push_Prepare_Ok_Y_Max
             and ((not ENABLE_IMU) or (yaw_prepare_err_abs <= Nav_Push_Prepare_Ok_Yaw))

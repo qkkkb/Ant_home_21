@@ -80,9 +80,8 @@ Follow_Lateral_Deadband = 4
 Follow_Distance_Far_Boost_Error = 8
 Follow_Distance_Far_Boost_Gain = 0.070
 Follow_Distance_Close_Gain = 0.260
-Follow_Distance_Close_Min_Brake = 1.0
 Follow_Distance_Close_Limit = 10.0
-Follow_Distance_No_Forward_Error = 4
+Follow_Distance_No_Forward_Error = 0
 Follow_Distance_Feedforward_Enable_Error = 10
 Follow_Feedforward_Gain = 1.0
 Follow_Hold_Feedforward_Gain = 0.95
@@ -233,11 +232,7 @@ def calc_follow_forward(error_y):
 
     out = error_y * Follow_Distance_Close_Gain * Follow_Forward_Error_Sign
     if Follow_Forward_Error_Sign >= 0:
-        if out > -Follow_Distance_Close_Min_Brake:
-            out = -Follow_Distance_Close_Min_Brake
         return clamp(out, -Follow_Distance_Close_Limit, 0.0)
-    if out < Follow_Distance_Close_Min_Brake:
-        out = Follow_Distance_Close_Min_Brake
     return clamp(out, 0.0, Follow_Distance_Close_Limit)
 
 

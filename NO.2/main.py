@@ -54,9 +54,9 @@ FORCE_MOTOR_OFF = False
 AUTO_START_ON_BOOT = False
 AUTO_START_DELAY_MS = 2000
 WHEEL_TARGET_STOP_EPS = 0.05
-FOLLOW_START_PWM = 4500
-FOLLOW_STALL_BOOST_PWM = 5500
-FOLLOW_RUN_PWM_LIMIT = 9000
+FOLLOW_START_PWM = 5200
+FOLLOW_STALL_BOOST_PWM = 7000
+FOLLOW_RUN_PWM_LIMIT = 12000
 FOLLOW_STALL_BOOST_FRAMES = 3
 
 
@@ -73,18 +73,18 @@ ART_MODE_IDLE_CMD = b"IDLE\n"
 
 
 # ====================== Follow control ======================
-Follow_Forward_Gain = 0.085
-Follow_Lateral_Gain = 0.060
+Follow_Forward_Gain = 0.16
+Follow_Lateral_Gain = 0.10
 Follow_Forward_Error_Sign = 1.0
 Follow_Lateral_Error_Sign = -1.0
-Follow_Forward_Limit = 15.0
-Follow_Lateral_Limit = 9.0
+Follow_Forward_Limit = 22.0
+Follow_Lateral_Limit = 14.0
 Follow_Forward_Deadband = 4
 Follow_Lateral_Deadband = 4
 Follow_Distance_Far_Boost_Error = 8
-Follow_Distance_Far_Boost_Gain = 0.070
-Follow_Distance_Close_Gain = 0.260
-Follow_Distance_Close_Limit = 10.0
+Follow_Distance_Far_Boost_Gain = 0.16
+Follow_Distance_Close_Gain = 0.38
+Follow_Distance_Close_Limit = 16.0
 Follow_Distance_No_Forward_Error = 0
 Follow_Distance_Feedforward_Enable_Error = 10
 Follow_Feedforward_Gain = 1.0

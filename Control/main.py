@@ -117,15 +117,10 @@ Nav_Fine_Classify_Ok_X = 30
 Nav_Fine_Classify_Ok_Y_Min = -35
 Nav_Fine_Classify_Ok_Y_Max = 30
 Nav_Fine_Classify_Ok_Ms = 40
-Nav_Fine_Push_Ok_X = 8
-Nav_Fine_Push_Ok_Y_Min = -8
-Nav_Fine_Push_Ok_Y_Max = 18
-Nav_Fine_Push_Ok_Ms = 120
-Nav_Fine_Push_Min_Vx = 1.6
-Nav_Fine_Push_Min_Vy = 4.5
-Nav_Fine_Push_Kick_X = 18
-Nav_Fine_Push_Kick_Vy = 5.0
-Nav_Fine_Push_Lateral_Limit = 5.2
+Nav_Fine_Push_Ok_X = 14
+Nav_Fine_Push_Ok_Y_Min = -12
+Nav_Fine_Push_Ok_Y_Max = 24
+Nav_Fine_Push_Ok_Ms = 40
 Nav_Transition_Grace_Ms = 200
 Nav_Low_Speed_Th = 30
 Nav_Coarse_Forward_Gain = 0.075
@@ -556,7 +551,7 @@ def nav_set_state(new_state, reason="", force=False):
         elif cam_error_y < -Nav_Forward_Deadband:
             nav_fine_last_y_sign = -1
 
-    if new_state in (NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH) or (new_state == NAV_STATE_FINE and push_orbit_done):
+    if new_state in (NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH):
         reset_gyro_pid_state()
 
     if ENABLE_IMU and imu_runtime is not None:
@@ -845,27 +840,6 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 Nav_Fine_Forward_Limit,
                 Nav_Fine_Lateral_Limit,
             )
-        if push_orbit_done and (not fine_braking):
-            if Nav_Fine_Push_Ok_Y_Min <= cam_error_y <= Nav_Fine_Push_Ok_Y_Max:
-                cam_target_vx = 0.0
-            elif 0.0 < cam_target_vx < Nav_Fine_Push_Min_Vx:
-                cam_target_vx = Nav_Fine_Push_Min_Vx
-            elif -Nav_Fine_Push_Min_Vx < cam_target_vx < 0.0:
-                cam_target_vx = -Nav_Fine_Push_Min_Vx
-            if abs(cam_error_x) <= Nav_Fine_Push_Ok_X:
-                cam_target_vy = 0.0
-            else:
-                min_vy = Nav_Fine_Push_Min_Vy
-                if abs(cam_error_x) <= Nav_Fine_Push_Kick_X:
-                    min_vy = Nav_Fine_Push_Kick_Vy
-                if 0.0 < cam_target_vy < min_vy:
-                    cam_target_vy = min_vy
-                elif -min_vy < cam_target_vy < 0.0:
-                    cam_target_vy = -min_vy
-                if cam_target_vy > Nav_Fine_Push_Lateral_Limit:
-                    cam_target_vy = Nav_Fine_Push_Lateral_Limit
-                elif cam_target_vy < -Nav_Fine_Push_Lateral_Limit:
-                    cam_target_vy = -Nav_Fine_Push_Lateral_Limit
         fine_yaw_ok = (
             (not push_orbit_done)
             or (not ENABLE_IMU)

@@ -21,6 +21,7 @@ from coop_protocol import (
 _pid_mod.PWM_MAX = cfg.PWM_MAX
 speed_ctrl = _pid_mod.speed_ctrl
 gyro_ctrl = _pid_mod.gyro_ctrl
+speed_reset = _pid_mod.speed_reset
 
 
 # ====================== Base config ======================
@@ -31,6 +32,7 @@ PWM_SMOOTH_FACTOR = cfg.PWM_SMOOTH_FACTOR
 MAX_PWM_CHANGE = cfg.MAX_PWM_CHANGE
 
 ENABLE_GYRO_LOOP = True
+FOLLOW_GYRO_HOLD_ENABLE = False
 ENABLE_IMU = ENABLE_GYRO_LOOP
 GYRO_SIGN = 1.0
 GYRO_OFFSET_Z = 3.16
@@ -51,6 +53,7 @@ FOLLOW_TUNE_LOG_INTERVAL_MS = 100
 FORCE_MOTOR_OFF = False
 AUTO_START_ON_BOOT = False
 AUTO_START_DELAY_MS = 2000
+WHEEL_TARGET_STOP_EPS = 0.05
 
 
 # ====================== Camera protocol ======================
@@ -141,6 +144,7 @@ last_ff_vx = 0.0
 last_ff_vy = 0.0
 last_ff_wz = 0.0
 last_tune_log_ms = 0
+last_hard_stop = False
 yaw_ref_deg = 0.0
 
 
@@ -385,7 +389,13 @@ def update_follow_targets(yaw_deg, gyro_z):
         turn_rate_cmd += yaw_correction
 
     if ENABLE_GYRO_LOOP and gyro_pid is not None:
-        vz_cmd = gyro_ctrl(gyro_pid, turn_rate_cmd - gyro_z)
+        if FOLLOW_GYRO_HOLD_ENABLE or abs(turn_rate_cmd) > 0.001:
+            vz_cmd = gyro_ctrl(gyro_pid, turn_rate_cmd - gyro_z)
+        else:
+            gyro_pid.output = 0.0
+            gyro_pid.err = 0.0
+            gyro_pid.err_last = 0.0
+            vz_cmd = 0.0
     else:
         vz_cmd = turn_rate_cmd
 
@@ -405,6 +415,17 @@ def stop_all():
     motor_fr.duty(0)
     motor_b.duty(0)
     log("[STOP] motors off")
+
+
+def reset_speed_outputs():
+    global last_pwm_fl, last_pwm_fr, last_pwm_b
+
+    speed_reset(pid_fl)
+    speed_reset(pid_fr)
+    speed_reset(pid_b)
+    last_pwm_fl = 0
+    last_pwm_fr = 0
+    last_pwm_b = 0
 
 
 def clamp_duty(value):
@@ -446,6 +467,26 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
     return s_fl, s_fr, s_b
 
 
+def set_three_pwm_zero():
+    global last_pwm_fl, last_pwm_fr, last_pwm_b
+
+    motor_fl.duty(0)
+    motor_fr.duty(0)
+    motor_b.duty(0)
+    last_pwm_fl = 0
+    last_pwm_fr = 0
+    last_pwm_b = 0
+    return 0, 0, 0
+
+
+def wheel_targets_zero(t_fl, t_fr, t_b):
+    return (
+        -WHEEL_TARGET_STOP_EPS <= t_fl <= WHEEL_TARGET_STOP_EPS
+        and -WHEEL_TARGET_STOP_EPS <= t_fr <= WHEEL_TARGET_STOP_EPS
+        and -WHEEL_TARGET_STOP_EPS <= t_b <= WHEEL_TARGET_STOP_EPS
+    )
+
+
 def update_nav_led_display():
     straight_value = 1 if cam_target_seen() else 0
     translate_value = 1 if master_motion_rx_fresh() else 0
@@ -476,7 +517,7 @@ def wireless_tune_log(snap):
     try:
         wireless.send_str(
             "FT seen=%d err=%d,%d vis=%.2f,%.2f out=%.2f,%.2f,%.2f "
-            "tar=%.1f,%.1f,%.1f enc=%d,%d,%d pwm=%d,%d,%d "
+            "tar=%.1f,%.1f,%.1f enc=%d,%d,%d pid=%d,%d,%d pwm=%d,%d,%d stop=%d "
             "g=%.2f yaw=%.1f mf=%d rx=%d\r\n"
             % (
                 1 if last_follow_seen else 0,
@@ -493,9 +534,13 @@ def wireless_tune_log(snap):
                 int(snap["enc_fl"]),
                 int(snap["enc_fr"]),
                 int(snap["enc_b"]),
+                int(snap["pid_fl"]),
+                int(snap["pid_fr"]),
+                int(snap["pid_b"]),
                 int(snap["pwm_fl"]),
                 int(snap["pwm_fr"]),
                 int(snap["pwm_b"]),
+                int(snap["hard_stop"]),
                 snap["gyro_z"],
                 snap["yaw_deg"],
                 1 if USE_MASTER_MOTION_FEEDFORWARD else 0,
@@ -577,9 +622,12 @@ def time_pit_handler(_):
 
 def calc_speed_closed_loop():
     global last_pwm_fl, last_pwm_fr, last_pwm_b
+    global last_hard_stop
 
     if not car_started:
-        set_three_pwm_smooth(0, 0, 0)
+        reset_speed_outputs()
+        set_three_pwm_zero()
+        last_hard_stop = True
         return None
 
     if ENABLE_IMU:
@@ -600,14 +648,26 @@ def calc_speed_closed_loop():
     t_fl = move_cmd.speed_fl
     t_fr = move_cmd.speed_fr
     t_b = move_cmd.speed_b
-    u_fl = speed_ctrl(pid_fl, e_fl, t_fl)
-    u_fr = speed_ctrl(pid_fr, e_fr, t_fr)
-    u_b = speed_ctrl(pid_b, e_b, t_b)
 
-    if FORCE_MOTOR_OFF:
-        s_fl, s_fr, s_b = set_three_pwm_smooth(0, 0, 0)
+    if wheel_targets_zero(t_fl, t_fr, t_b):
+        reset_speed_outputs()
+        s_fl, s_fr, s_b = set_three_pwm_zero()
+        u_fl = 0.0
+        u_fr = 0.0
+        u_b = 0.0
+        last_hard_stop = True
     else:
-        s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
+        last_hard_stop = False
+        u_fl = speed_ctrl(pid_fl, e_fl, t_fl)
+        u_fr = speed_ctrl(pid_fr, e_fr, t_fr)
+        u_b = speed_ctrl(pid_b, e_b, t_b)
+
+        if FORCE_MOTOR_OFF:
+            reset_speed_outputs()
+            s_fl, s_fr, s_b = set_three_pwm_zero()
+            last_hard_stop = True
+        else:
+            s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
 
     return {
         "enc_fl": e_fl,
@@ -616,9 +676,13 @@ def calc_speed_closed_loop():
         "tar_fl": t_fl,
         "tar_fr": t_fr,
         "tar_b": t_b,
+        "pid_fl": u_fl,
+        "pid_fr": u_fr,
+        "pid_b": u_b,
         "pwm_fl": s_fl,
         "pwm_fr": s_fr,
         "pwm_b": s_b,
+        "hard_stop": 1 if last_hard_stop else 0,
         "raw_gyro_z": raw_gyro_z,
         "gyro_z": gyro_z,
         "yaw_deg": yaw_deg,

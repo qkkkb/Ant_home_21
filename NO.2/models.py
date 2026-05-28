@@ -48,7 +48,7 @@ class SpeedPID:
         self.kd = 30.0
         self.gama = 0.4
         self.kp = 760.0
-        self.ki = 115.0
+        self.ki = 0.0
 
     def init_c(self):
         # 根据 kd/gama/kp 计算离散控制系数

@@ -71,6 +71,10 @@ def speed_reset(pid):
     pid.output = 0.0
     pid.err_last = 0.0
     pid.err = 0.0
+    pid.tar_spd_last = 0.0
+    pid.delta_tar_last = 0.0
+    pid.delta_tar = 0.0
+    pid.delta_ud = 0.0
 
 
 def pos_ctrl(err_pos):

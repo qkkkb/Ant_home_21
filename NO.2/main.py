@@ -77,11 +77,15 @@ Follow_Forward_Limit = 15.0
 Follow_Lateral_Limit = 9.0
 Follow_Forward_Deadband = 4
 Follow_Lateral_Deadband = 4
+Follow_Distance_Far_Boost_Error = 10
+Follow_Distance_Far_Boost_Gain = 0.055
+Follow_Distance_Close_Gain = 0.135
+Follow_Distance_Close_Limit = 6.0
 Follow_Feedforward_Gain = 1.0
 Follow_Hold_Feedforward_Gain = 0.95
 Follow_Wz_Feedforward_Gain = 0.20
 Follow_Wz_Forward_Gain = 0.0
-Follow_Wz_Lateral_Gain = 0.035
+Follow_Wz_Lateral_Gain = -0.08
 Follow_Yaw_Enable = False
 Follow_Yaw_Gain = 0.08
 Follow_Yaw_Limit = 15.0
@@ -209,6 +213,27 @@ def follow_limit(base_limit, master_value, extra):
     return limit
 
 
+def calc_follow_forward(error_y):
+    if -Follow_Forward_Deadband <= error_y <= Follow_Forward_Deadband:
+        return 0.0
+
+    if error_y > 0:
+        out = error_y * Follow_Forward_Gain
+        if error_y > Follow_Distance_Far_Boost_Error:
+            out += (
+                error_y - Follow_Distance_Far_Boost_Error
+            ) * Follow_Distance_Far_Boost_Gain
+        out *= Follow_Forward_Error_Sign
+        if Follow_Forward_Error_Sign >= 0:
+            return clamp(out, 0.0, Follow_Forward_Limit)
+        return clamp(out, -Follow_Forward_Limit, 0.0)
+
+    out = error_y * Follow_Distance_Close_Gain * Follow_Forward_Error_Sign
+    if Follow_Forward_Error_Sign >= 0:
+        return clamp(out, -Follow_Distance_Close_Limit, 0.0)
+    return clamp(out, 0.0, Follow_Distance_Close_Limit)
+
+
 def poll_art_uart():
     global cam_rx_buf, cam_has_target, cam_rx_started, cam_valid_target_since_ms
     global cam_last_rx_ms, target_lost_since_ms
@@ -294,15 +319,15 @@ def update_follow_targets(yaw_deg, gyro_z):
     if seen:
         target_lost_since_ms = 0
         use_motion_feedforward = fresh_motion
-        cam_vx = cam_error_y * Follow_Forward_Gain * Follow_Forward_Error_Sign
+        cam_vx = calc_follow_forward(cam_error_y)
         cam_vy = -cam_error_x * Follow_Lateral_Gain * Follow_Lateral_Error_Sign
-        if -Follow_Forward_Deadband <= cam_error_y <= Follow_Forward_Deadband:
-            cam_vx = 0.0
         if -Follow_Lateral_Deadband <= cam_error_x <= Follow_Lateral_Deadband:
             cam_vy = 0.0
         body_vx, body_vy = rotate_camera_velocity_to_body(cam_vx, cam_vy)
         vx = body_vx + ff_vx * Follow_Feedforward_Gain
         vy = body_vy + ff_vy * Follow_Feedforward_Gain
+        if cam_error_y < -Follow_Forward_Deadband and vx > body_vx:
+            vx = body_vx
     else:
         if target_lost_since_ms == 0:
             target_lost_since_ms = now

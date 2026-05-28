@@ -86,7 +86,9 @@ Follow_Distance_Far_Boost_Gain = 0.32
 Follow_Distance_Close_Gain = 0.76
 Follow_Distance_Close_Limit = 28.0
 Follow_Distance_No_Forward_Error = 0
-Follow_Distance_Feedforward_Enable_Error = 10
+Follow_Distance_Feedforward_Enable_Error = 20
+Follow_Distance_Approach_Slow_Error = 12
+Follow_Distance_Approach_Vx_Limit = 2.0
 Follow_Feedforward_Gain = 1.75
 Follow_Hold_Feedforward_Gain = 1.35
 Follow_Wz_Feedforward_Gain = 0.85
@@ -255,6 +257,13 @@ def calc_follow_forward(error_y):
 
 
 def apply_distance_guard(vx, visual_vx, error_y):
+    if 0 < error_y <= Follow_Distance_Approach_Slow_Error:
+        if visual_vx > Follow_Distance_Approach_Vx_Limit:
+            visual_vx = Follow_Distance_Approach_Vx_Limit
+        elif visual_vx < -Follow_Distance_Approach_Vx_Limit:
+            visual_vx = -Follow_Distance_Approach_Vx_Limit
+        if vx > visual_vx:
+            vx = visual_vx
     if error_y <= Follow_Distance_No_Forward_Error:
         if vx > visual_vx:
             vx = visual_vx

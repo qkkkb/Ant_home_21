@@ -54,8 +54,10 @@ FORCE_MOTOR_OFF = False
 AUTO_START_ON_BOOT = False
 AUTO_START_DELAY_MS = 2000
 WHEEL_TARGET_STOP_EPS = 0.05
-FOLLOW_START_PWM = 1500
-FOLLOW_RUN_PWM_LIMIT = 6000
+FOLLOW_START_PWM = 4500
+FOLLOW_STALL_BOOST_PWM = 5500
+FOLLOW_RUN_PWM_LIMIT = 9000
+FOLLOW_STALL_BOOST_FRAMES = 3
 
 
 # ====================== Camera protocol ======================
@@ -147,6 +149,8 @@ last_ff_vy = 0.0
 last_ff_wz = 0.0
 last_tune_log_ms = 0
 last_hard_stop = False
+last_stall_count = 0
+last_stall_boost = False
 yaw_ref_deg = 0.0
 
 
@@ -421,6 +425,7 @@ def stop_all():
 
 def reset_speed_outputs():
     global last_pwm_fl, last_pwm_fr, last_pwm_b
+    global last_stall_count, last_stall_boost
 
     speed_reset(pid_fl)
     speed_reset(pid_fr)
@@ -428,6 +433,8 @@ def reset_speed_outputs():
     last_pwm_fl = 0
     last_pwm_fr = 0
     last_pwm_b = 0
+    last_stall_count = 0
+    last_stall_boost = False
 
 
 def clamp_duty(value):
@@ -469,14 +476,14 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
     return s_fl, s_fr, s_b
 
 
-def apply_start_pwm(cmd):
+def apply_start_pwm(cmd, min_pwm):
     cmd = int(cmd)
     if cmd > 0:
-        if cmd < FOLLOW_START_PWM:
-            cmd = FOLLOW_START_PWM
+        if cmd < min_pwm:
+            cmd = min_pwm
     elif cmd < 0:
-        if cmd > -FOLLOW_START_PWM:
-            cmd = -FOLLOW_START_PWM
+        if cmd > -min_pwm:
+            cmd = -min_pwm
     if cmd > FOLLOW_RUN_PWM_LIMIT:
         cmd = FOLLOW_RUN_PWM_LIMIT
     elif cmd < -FOLLOW_RUN_PWM_LIMIT:
@@ -484,11 +491,11 @@ def apply_start_pwm(cmd):
     return cmd
 
 
-def set_three_pwm_follow(u_fl, u_fr, u_b):
+def set_three_pwm_follow(u_fl, u_fr, u_b, min_pwm):
     return set_three_pwm_smooth(
-        apply_start_pwm(u_fl),
-        apply_start_pwm(u_fr),
-        apply_start_pwm(u_b),
+        apply_start_pwm(u_fl, min_pwm),
+        apply_start_pwm(u_fr, min_pwm),
+        apply_start_pwm(u_b, min_pwm),
     )
 
 
@@ -510,6 +517,10 @@ def wheel_targets_zero(t_fl, t_fr, t_b):
         and -WHEEL_TARGET_STOP_EPS <= t_fr <= WHEEL_TARGET_STOP_EPS
         and -WHEEL_TARGET_STOP_EPS <= t_b <= WHEEL_TARGET_STOP_EPS
     )
+
+
+def encoders_stalled(e_fl, e_fr, e_b):
+    return e_fl == 0 and e_fr == 0 and e_b == 0
 
 
 def update_nav_led_display():
@@ -542,7 +553,7 @@ def wireless_tune_log(snap):
     try:
         wireless.send_str(
             "FT seen=%d err=%d,%d vis=%.2f,%.2f out=%.2f,%.2f,%.2f "
-            "tar=%.1f,%.1f,%.1f enc=%d,%d,%d pid=%d,%d,%d pwm=%d,%d,%d stop=%d "
+            "tar=%.1f,%.1f,%.1f enc=%d,%d,%d pid=%d,%d,%d pwm=%d,%d,%d stop=%d boost=%d "
             "g=%.2f yaw=%.1f mf=%d rx=%d\r\n"
             % (
                 1 if last_follow_seen else 0,
@@ -566,6 +577,7 @@ def wireless_tune_log(snap):
                 int(snap["pwm_fr"]),
                 int(snap["pwm_b"]),
                 int(snap["hard_stop"]),
+                int(snap["stall_boost"]),
                 snap["gyro_z"],
                 snap["yaw_deg"],
                 1 if USE_MASTER_MOTION_FEEDFORWARD else 0,
@@ -648,6 +660,7 @@ def time_pit_handler(_):
 def calc_speed_closed_loop():
     global last_pwm_fl, last_pwm_fr, last_pwm_b
     global last_hard_stop
+    global last_stall_count, last_stall_boost
 
     if not car_started:
         reset_speed_outputs()
@@ -683,6 +696,12 @@ def calc_speed_closed_loop():
         last_hard_stop = True
     else:
         last_hard_stop = False
+        if encoders_stalled(e_fl, e_fr, e_b):
+            last_stall_count += 1
+        else:
+            last_stall_count = 0
+        last_stall_boost = last_stall_count >= FOLLOW_STALL_BOOST_FRAMES
+
         u_fl = speed_ctrl(pid_fl, e_fl, t_fl)
         u_fr = speed_ctrl(pid_fr, e_fr, t_fr)
         u_b = speed_ctrl(pid_b, e_b, t_b)
@@ -692,7 +711,8 @@ def calc_speed_closed_loop():
             s_fl, s_fr, s_b = set_three_pwm_zero()
             last_hard_stop = True
         else:
-            s_fl, s_fr, s_b = set_three_pwm_follow(u_fl, u_fr, u_b)
+            min_pwm = FOLLOW_STALL_BOOST_PWM if last_stall_boost else FOLLOW_START_PWM
+            s_fl, s_fr, s_b = set_three_pwm_follow(u_fl, u_fr, u_b, min_pwm)
 
     return {
         "enc_fl": e_fl,
@@ -708,6 +728,7 @@ def calc_speed_closed_loop():
         "pwm_fr": s_fr,
         "pwm_b": s_b,
         "hard_stop": 1 if last_hard_stop else 0,
+        "stall_boost": 1 if last_stall_boost else 0,
         "raw_gyro_z": raw_gyro_z,
         "gyro_z": gyro_z,
         "yaw_deg": yaw_deg,

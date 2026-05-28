@@ -354,38 +354,6 @@ def reset_gyro_pid_state():
         pid.err_last = 0.0
 
 
-def reset_speed_pid_state():
-    global last_pwm_fl, last_pwm_fr, last_pwm_b
-
-    pid_fl.output = 0.0
-    pid_fl.err = 0.0
-    pid_fl.err_last = 0.0
-    pid_fl.tar_spd_last = 0.0
-    pid_fl.delta_tar = 0.0
-    pid_fl.delta_tar_last = 0.0
-    pid_fl.delta_ud = 0.0
-
-    pid_fr.output = 0.0
-    pid_fr.err = 0.0
-    pid_fr.err_last = 0.0
-    pid_fr.tar_spd_last = 0.0
-    pid_fr.delta_tar = 0.0
-    pid_fr.delta_tar_last = 0.0
-    pid_fr.delta_ud = 0.0
-
-    pid_b.output = 0.0
-    pid_b.err = 0.0
-    pid_b.err_last = 0.0
-    pid_b.tar_spd_last = 0.0
-    pid_b.delta_tar = 0.0
-    pid_b.delta_tar_last = 0.0
-    pid_b.delta_ud = 0.0
-
-    last_pwm_fl = 0
-    last_pwm_fr = 0
-    last_pwm_b = 0
-
-
 def get_push_orbit_motion(yaw_err_abs):
     if yaw_err_abs <= Nav_Push_Orient_Ok_Yaw:
         return 0.0, 0.0
@@ -509,6 +477,7 @@ def nav_set_state(new_state, reason="", force=False):
     global push_orbit_dir, push_orbit_vy_sign, push_orbit_done
     global push_orbit_reached, push_orbit_progress_deg, push_orbit_last_ms
     global push_orbit_brake_since_ms
+    global last_pwm_fl, last_pwm_fr, last_pwm_b
 
     if nav_state == new_state and (not force):
         return
@@ -580,7 +549,10 @@ def nav_set_state(new_state, reason="", force=False):
     if new_state in (NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH):
         reset_gyro_pid_state()
     if new_state == NAV_STATE_PUSH:
-        reset_speed_pid_state()
+        pid_fl.output = pid_fr.output = pid_b.output = 0.0
+        pid_fl.tar_spd_last = pid_fr.tar_spd_last = pid_b.tar_spd_last = 0.0
+        pid_fl.delta_ud = pid_fr.delta_ud = pid_b.delta_ud = 0.0
+        last_pwm_fl = last_pwm_fr = last_pwm_b = 0
 
     if ENABLE_IMU and imu_runtime is not None:
         if new_state == NAV_STATE_SEARCH_TURN:

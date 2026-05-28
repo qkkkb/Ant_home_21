@@ -45,12 +45,9 @@ GYRO_CALIBRATE_DELAY_MS = 2
 
 EXIT_CHECK_DIV = 5
 GC_DIV = 50
-FOLLOW_LOG_ENABLE = False
-TURN_DEBUG_LOG_ENABLE = False
-TURN_DEBUG_LOG_INTERVAL_MS = 100
-MAP_DEBUG_LOG_ENABLE = False
-MAP_DEBUG_LOG_INTERVAL_MS = 100
-DEBUG_DIV = 50
+USE_MASTER_MOTION_FEEDFORWARD = False
+FOLLOW_WIRELESS_TUNE_LOG_ENABLE = True
+FOLLOW_TUNE_LOG_INTERVAL_MS = 100
 FORCE_MOTOR_OFF = False
 AUTO_START_ON_BOOT = False
 AUTO_START_DELAY_MS = 2000
@@ -135,16 +132,20 @@ loop_count = 0
 last_pwm_fl = 0
 last_pwm_fr = 0
 last_pwm_b = 0
-turn_debug_last_ms = 0
-map_debug_last_ms = 0
 last_turn_rate_cmd = 0.0
 last_vz_cmd = 0.0
+last_follow_seen = False
+last_visual_vx = 0.0
+last_visual_vy = 0.0
+last_ff_vx = 0.0
+last_ff_vy = 0.0
+last_ff_wz = 0.0
+last_tune_log_ms = 0
 yaw_ref_deg = 0.0
 
 
 def log(msg):
-    if FOLLOW_LOG_ENABLE:
-        print(msg)
+    pass
 
 
 def clamp(value, low, high):
@@ -194,6 +195,13 @@ def cam_target_seen():
 
 
 def master_motion_fresh():
+    return (
+        USE_MASTER_MOTION_FEEDFORWARD
+        and utime.ticks_diff(utime.ticks_ms(), master_last_rx_ms) <= Master_Motion_Timeout_Ms
+    )
+
+
+def master_motion_rx_fresh():
     return utime.ticks_diff(utime.ticks_ms(), master_last_rx_ms) <= Master_Motion_Timeout_Ms
 
 
@@ -315,7 +323,8 @@ def poll_coop_uart():
 def update_follow_targets(yaw_deg, gyro_z):
     global cam_target_vx, cam_target_vy, target_lost_since_ms
     global yaw_ref_deg, last_turn_rate_cmd, last_vz_cmd
-    global turn_debug_last_ms, map_debug_last_ms
+    global last_follow_seen, last_visual_vx, last_visual_vy
+    global last_ff_vx, last_ff_vy, last_ff_wz
 
     now = utime.ticks_ms()
     seen = cam_target_seen()
@@ -366,26 +375,6 @@ def update_follow_targets(yaw_deg, gyro_z):
     cam_target_vx = vx
     cam_target_vy = vy
 
-    if MAP_DEBUG_LOG_ENABLE:
-        if utime.ticks_diff(now, map_debug_last_ms) >= MAP_DEBUG_LOG_INTERVAL_MS:
-            map_debug_last_ms = now
-            print(
-                "[MAP] seen=%d err=(%d,%d) cam=(%.2f,%.2f) body=(%.2f,%.2f) ff=(%.2f,%.2f) out=(%.2f,%.2f)"
-                % (
-                    1 if seen else 0,
-                    cam_error_x,
-                    cam_error_y,
-                    cam_vx,
-                    cam_vy,
-                    body_vx,
-                    body_vy,
-                    ff_vx,
-                    ff_vy,
-                    vx,
-                    vy,
-                )
-            )
-
     turn_rate_cmd = ff_wz * Follow_Wz_Feedforward_Gain if use_motion_feedforward else 0.0
     yaw_err = 0.0
     yaw_correction = 0.0
@@ -400,25 +389,14 @@ def update_follow_targets(yaw_deg, gyro_z):
     else:
         vz_cmd = turn_rate_cmd
 
-    if TURN_DEBUG_LOG_ENABLE:
-        if utime.ticks_diff(now, turn_debug_last_ms) >= TURN_DEBUG_LOG_INTERVAL_MS:
-            turn_debug_last_ms = now
-            print(
-                "[TURN] fwz=%.2f gain=%.2f yaw_en=%d yaw_err=%.2f yaw_fix=%.2f cmd=%.2f gyro=%.2f vz=%.2f"
-                % (
-                    ff_wz,
-                    Follow_Wz_Feedforward_Gain,
-                    1 if Follow_Yaw_Enable else 0,
-                    yaw_err,
-                    yaw_correction,
-                    turn_rate_cmd,
-                    gyro_z,
-                    vz_cmd,
-                )
-            )
-
     last_turn_rate_cmd = turn_rate_cmd
     last_vz_cmd = vz_cmd
+    last_follow_seen = seen
+    last_visual_vx = body_vx
+    last_visual_vy = body_vy
+    last_ff_vx = ff_vx
+    last_ff_vy = ff_vy
+    last_ff_wz = ff_wz
     return vz_cmd
 
 
@@ -470,7 +448,7 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
 
 def update_nav_led_display():
     straight_value = 1 if cam_target_seen() else 0
-    translate_value = 1 if master_motion_fresh() else 0
+    translate_value = 1 if master_motion_rx_fresh() else 0
     rotate_value = 1 if car_started else 0
     now = utime.ticks_ms()
     rx_active = coop_rx_led_until_ms and utime.ticks_diff(coop_rx_led_until_ms, now) > 0
@@ -484,6 +462,48 @@ def update_nav_led_display():
 def coop_flash_rx():
     global coop_rx_led_until_ms
     coop_rx_led_until_ms = utime.ticks_add(utime.ticks_ms(), COOP_LED_PULSE_MS)
+
+
+def wireless_tune_log(snap):
+    global last_tune_log_ms
+
+    if not FOLLOW_WIRELESS_TUNE_LOG_ENABLE or snap is None:
+        return
+    now = utime.ticks_ms()
+    if utime.ticks_diff(now, last_tune_log_ms) < FOLLOW_TUNE_LOG_INTERVAL_MS:
+        return
+    last_tune_log_ms = now
+    try:
+        wireless.send_str(
+            "FT seen=%d err=%d,%d vis=%.2f,%.2f out=%.2f,%.2f,%.2f "
+            "tar=%.1f,%.1f,%.1f enc=%d,%d,%d pwm=%d,%d,%d "
+            "g=%.2f yaw=%.1f mf=%d rx=%d\r\n"
+            % (
+                1 if last_follow_seen else 0,
+                cam_error_x,
+                cam_error_y,
+                last_visual_vx,
+                last_visual_vy,
+                cam_target_vx,
+                cam_target_vy,
+                last_vz_cmd,
+                snap["tar_fl"],
+                snap["tar_fr"],
+                snap["tar_b"],
+                int(snap["enc_fl"]),
+                int(snap["enc_fr"]),
+                int(snap["enc_b"]),
+                int(snap["pwm_fl"]),
+                int(snap["pwm_fr"]),
+                int(snap["pwm_b"]),
+                snap["gyro_z"],
+                snap["yaw_deg"],
+                1 if USE_MASTER_MOTION_FEEDFORWARD else 0,
+                1 if master_motion_rx_fresh() else 0,
+            )
+        )
+    except Exception:
+        pass
 
 
 def calibrate_gyro_before_launch():
@@ -672,8 +692,6 @@ try:
     while True:
         loop_count += 1
         now = utime.ticks_ms()
-        elapsed_s = utime.ticks_diff(now, start_time) / 1000.0
-
         check_c8_exit()
         check_c9_start()
         poll_art_uart()
@@ -683,54 +701,18 @@ try:
         if AUTO_START_ON_BOOT and (not auto_start_done):
             if utime.ticks_diff(now, start_time) >= AUTO_START_DELAY_MS:
                 start_follow("auto")
-        if (not car_started) and (cam_target_seen() or master_started()):
+        if (not car_started) and cam_target_seen():
             start_follow("signal")
 
         snap = None
         if pit_flag:
             pit_flag = False
             snap = calc_speed_closed_loop()
+            wireless_tune_log(snap)
 
         if utime.ticks_diff(now, last_status_ms) >= 1000:
             led.toggle()
             last_status_ms = now
-            if FOLLOW_LOG_ENABLE:
-                log(
-                    "[FOLLOW] t=%.1f started=%d seen=%d err=(%d,%d) cmd=(%.1f,%.1f,%.1f) master=(%.1f,%.1f,%.1f) fresh=%d"
-                    % (
-                        elapsed_s,
-                        1 if car_started else 0,
-                        1 if cam_target_seen() else 0,
-                        cam_error_x,
-                        cam_error_y,
-                        cam_target_vx,
-                        cam_target_vy,
-                        last_turn_rate_cmd,
-                        master_vx,
-                        master_vy,
-                        master_wz,
-                        1 if master_motion_fresh() else 0,
-                    )
-                )
-
-        if FOLLOW_LOG_ENABLE and snap is not None and (pit_count % DEBUG_DIV) == 0:
-            log(
-                "[LOOP] enc=(%d,%d,%d) tar=(%.1f,%.1f,%.1f) pwm=(%d,%d,%d) gyro=%.2f yaw=%.2f vz=%.2f"
-                % (
-                    int(snap["enc_fl"]),
-                    int(snap["enc_fr"]),
-                    int(snap["enc_b"]),
-                    snap["tar_fl"],
-                    snap["tar_fr"],
-                    snap["tar_b"],
-                    int(snap["pwm_fl"]),
-                    int(snap["pwm_fr"]),
-                    int(snap["pwm_b"]),
-                    snap["gyro_z"],
-                    snap["yaw_deg"],
-                    snap["vz_cmd"],
-                )
-            )
 
         if loop_count % EXIT_CHECK_DIV == 0 and check_upper_exit():
             break

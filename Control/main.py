@@ -60,19 +60,13 @@ GYRO_CALIBRATE_DELAY_MS = 2
 ENABLE_IMU = ENABLE_GYRO_LOOP
 
 # 调试与退出配置
-EXIT_CHECK_DIV = 5
 GC_DIV = 50
 FORCE_MOTOR_OFF = False  # 调试开关：True 时程序继续运行，但三个电机始终断输出
-AUTO_START_ON_BOOT = False
-AUTO_START_DELAY_MS = 2000
 DEBUG_LOG_ENABLE = True
 DEBUG_LOG_PERIOD_MS = 500
 MASTER_MOTION_TX_PERIOD_MS = cfg.MASTER_MOTION_TX_PERIOD_MS
 MASTER_MOTION_FRAME_LEN = 15
 
-# 无线遥控器 7 通道作为退出触发
-EXIT_TRIGGER_CHANNEL = 7
-CH7_TOLERANCE = 1.0
 Cam_Error_Offset = 120
 Cam_Error_Scale = 2
 Cam_Packet_Timeout_Ms = 200
@@ -1356,10 +1350,6 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
 
     return s_fl, s_fr, s_b
 
-# 检查遥控器 7 通道是否触发退出
-def check_upper_exit():
-    return False
-
 # ---------------------- CH7 exit calibration ----------------------
 ch7_init_value = 0.0
 log("Wireless debug log enabled; master motion broadcast disabled")
@@ -1792,19 +1782,6 @@ try:
         # ====================== 按键检查（主循环最前面） ======================
         check_c8_exit()
         check_c9_start()
-        if AUTO_START_ON_BOOT and (not auto_start_done) and (not car_started):
-            if utime.ticks_diff(now, start_time) >= AUTO_START_DELAY_MS:
-                calibrate_gyro_before_launch()
-                if ENABLE_IMU and imu_runtime is not None:
-                    yaw_ref_deg = imu_runtime.read_yaw()
-                else:
-                    yaw_ref_deg = 0.0
-                refresh_field_reference()
-                car_started = True
-                auto_start_done = True
-                start_time = now
-                nav_set_state(NAV_STATE_SEARCH_TURN, "launch_search_turn", force=True)
-                log("[AUTO] boot delay reached, started=1")
         poll_art_uart()
         update_nav_led_display()
         vision_ready = (
@@ -1833,10 +1810,6 @@ try:
         if utime.ticks_diff(now, last_status_ms) >= 1000:
             led.toggle()
             last_status_ms = now
-
-        if loop_count % EXIT_CHECK_DIV == 0 and check_upper_exit():
-            log("=== CH7 exit, stopping ===")
-            break
 
         if loop_count % GC_DIV == 0:
             gc.collect()

@@ -77,10 +77,13 @@ Follow_Forward_Limit = 15.0
 Follow_Lateral_Limit = 9.0
 Follow_Forward_Deadband = 4
 Follow_Lateral_Deadband = 4
-Follow_Distance_Far_Boost_Error = 10
-Follow_Distance_Far_Boost_Gain = 0.055
-Follow_Distance_Close_Gain = 0.135
-Follow_Distance_Close_Limit = 6.0
+Follow_Distance_Far_Boost_Error = 8
+Follow_Distance_Far_Boost_Gain = 0.070
+Follow_Distance_Close_Gain = 0.260
+Follow_Distance_Close_Min_Brake = 1.0
+Follow_Distance_Close_Limit = 10.0
+Follow_Distance_No_Forward_Error = 4
+Follow_Distance_Feedforward_Enable_Error = 10
 Follow_Feedforward_Gain = 1.0
 Follow_Hold_Feedforward_Gain = 0.95
 Follow_Wz_Feedforward_Gain = 0.20
@@ -230,8 +233,23 @@ def calc_follow_forward(error_y):
 
     out = error_y * Follow_Distance_Close_Gain * Follow_Forward_Error_Sign
     if Follow_Forward_Error_Sign >= 0:
+        if out > -Follow_Distance_Close_Min_Brake:
+            out = -Follow_Distance_Close_Min_Brake
         return clamp(out, -Follow_Distance_Close_Limit, 0.0)
+    if out < Follow_Distance_Close_Min_Brake:
+        out = Follow_Distance_Close_Min_Brake
     return clamp(out, 0.0, Follow_Distance_Close_Limit)
+
+
+def apply_distance_guard(vx, visual_vx, error_y):
+    if error_y <= Follow_Distance_No_Forward_Error:
+        if vx > visual_vx:
+            vx = visual_vx
+        if vx > 0.0:
+            vx = 0.0
+    elif error_y <= Follow_Distance_Feedforward_Enable_Error and vx > visual_vx:
+        vx = visual_vx
+    return vx
 
 
 def poll_art_uart():
@@ -326,8 +344,6 @@ def update_follow_targets(yaw_deg, gyro_z):
         body_vx, body_vy = rotate_camera_velocity_to_body(cam_vx, cam_vy)
         vx = body_vx + ff_vx * Follow_Feedforward_Gain
         vy = body_vy + ff_vy * Follow_Feedforward_Gain
-        if cam_error_y < -Follow_Forward_Deadband and vx > body_vx:
-            vx = body_vx
     else:
         if target_lost_since_ms == 0:
             target_lost_since_ms = now
@@ -341,6 +357,9 @@ def update_follow_targets(yaw_deg, gyro_z):
     if use_motion_feedforward:
         vx += ff_wz * Follow_Wz_Forward_Gain
         vy += ff_wz * Follow_Wz_Lateral_Gain
+
+    if seen:
+        vx = apply_distance_guard(vx, body_vx, cam_error_y)
 
     vx_limit = Follow_Forward_Limit
     vy_limit = Follow_Lateral_Limit

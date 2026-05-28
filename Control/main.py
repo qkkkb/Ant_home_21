@@ -546,9 +546,9 @@ def nav_set_state(new_state, reason="", force=False):
         elif cam_error_y < -Nav_Forward_Deadband:
             nav_fine_last_y_sign = -1
 
-    if new_state in (NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH):
+    if new_state in (NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH, NAV_STATE_PUSH_TURN):
         reset_gyro_pid_state()
-    if new_state == NAV_STATE_PUSH:
+    if new_state in (NAV_STATE_PUSH, NAV_STATE_PUSH_TURN):
         pid_fl.output = pid_fr.output = pid_b.output = 0.0
         pid_fl.tar_spd_last = pid_fr.tar_spd_last = pid_b.tar_spd_last = 0.0
         pid_fl.delta_ud = pid_fr.delta_ud = pid_b.delta_ud = 0.0

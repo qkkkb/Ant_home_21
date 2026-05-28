@@ -54,6 +54,8 @@ FORCE_MOTOR_OFF = False
 AUTO_START_ON_BOOT = False
 AUTO_START_DELAY_MS = 2000
 WHEEL_TARGET_STOP_EPS = 0.05
+FOLLOW_START_PWM = 1500
+FOLLOW_RUN_PWM_LIMIT = 6000
 
 
 # ====================== Camera protocol ======================
@@ -467,6 +469,29 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
     return s_fl, s_fr, s_b
 
 
+def apply_start_pwm(cmd):
+    cmd = int(cmd)
+    if cmd > 0:
+        if cmd < FOLLOW_START_PWM:
+            cmd = FOLLOW_START_PWM
+    elif cmd < 0:
+        if cmd > -FOLLOW_START_PWM:
+            cmd = -FOLLOW_START_PWM
+    if cmd > FOLLOW_RUN_PWM_LIMIT:
+        cmd = FOLLOW_RUN_PWM_LIMIT
+    elif cmd < -FOLLOW_RUN_PWM_LIMIT:
+        cmd = -FOLLOW_RUN_PWM_LIMIT
+    return cmd
+
+
+def set_three_pwm_follow(u_fl, u_fr, u_b):
+    return set_three_pwm_smooth(
+        apply_start_pwm(u_fl),
+        apply_start_pwm(u_fr),
+        apply_start_pwm(u_b),
+    )
+
+
 def set_three_pwm_zero():
     global last_pwm_fl, last_pwm_fr, last_pwm_b
 
@@ -667,7 +692,7 @@ def calc_speed_closed_loop():
             s_fl, s_fr, s_b = set_three_pwm_zero()
             last_hard_stop = True
         else:
-            s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
+            s_fl, s_fr, s_b = set_three_pwm_follow(u_fl, u_fr, u_b)
 
     return {
         "enc_fl": e_fl,

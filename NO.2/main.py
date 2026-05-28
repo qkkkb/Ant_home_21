@@ -47,8 +47,8 @@ GYRO_CALIBRATE_DELAY_MS = 2
 
 EXIT_CHECK_DIV = 5
 GC_DIV = 50
-USE_MASTER_MOTION_FEEDFORWARD = False
-FOLLOW_WIRELESS_TUNE_LOG_ENABLE = True
+USE_MASTER_MOTION_FEEDFORWARD = True
+FOLLOW_WIRELESS_TUNE_LOG_ENABLE = False
 FOLLOW_TUNE_LOG_INTERVAL_MS = 100
 FORCE_MOTOR_OFF = False
 AUTO_START_ON_BOOT = False
@@ -818,7 +818,8 @@ try:
         if pit_flag:
             pit_flag = False
             snap = calc_speed_closed_loop()
-            wireless_tune_log(snap)
+            if FOLLOW_WIRELESS_TUNE_LOG_ENABLE:
+                wireless_tune_log(snap)
 
         if utime.ticks_diff(now, last_status_ms) >= 1000:
             led.toggle()

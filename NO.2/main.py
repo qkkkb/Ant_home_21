@@ -82,7 +82,7 @@ ART_MODE_IDLE_CMD = b"IDLE\n"
 
 
 # ====================== Follow control ======================
-Follow_Forward_Gain = 0.36
+Follow_Forward_Gain = 0.50
 Follow_Lateral_Gain = 0.22
 Follow_Forward_Error_Sign = 1.0
 Follow_Lateral_Error_Sign = -1.0
@@ -90,14 +90,15 @@ Follow_Forward_Limit = 58.0
 Follow_Lateral_Limit = 36.0
 Follow_Forward_Deadband = 4
 Follow_Lateral_Deadband = 6
-Follow_Distance_Far_Boost_Error = 8
-Follow_Distance_Far_Boost_Gain = 0.50
+Follow_Distance_Far_Boost_Error = 6
+Follow_Distance_Far_Boost_Gain = 0.65
 Follow_Distance_Close_Gain = 0.76
 Follow_Distance_Close_Limit = 28.0
 Follow_Distance_No_Forward_Error = 0
 Follow_Distance_Feedforward_Enable_Error = 20
-Follow_Distance_Approach_Slow_Error = 12
-Follow_Distance_Approach_Vx_Limit = 2.0
+Follow_Distance_Min_Chase_Vx = 4.2
+Follow_Distance_Approach_Slow_Error = 4
+Follow_Distance_Approach_Vx_Limit = 0.0
 Follow_Feedforward_Gain = 2.25
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Wz_Feedforward_Gain = 1.60
@@ -108,7 +109,7 @@ Follow_Vision_Angle_Limit = 36.0
 Follow_Vision_Angle_Deadband = 4
 Follow_Vision_Angle_Far_Limit = 18.0
 Follow_Vision_Angle_Close_Y = 36
-Follow_Command_Ramp_Vx = 3.0
+Follow_Command_Ramp_Vx = 5.0
 Follow_Command_Ramp_Vy = 2.4
 Follow_Command_Ramp_Wz = 6.0
 Follow_Yaw_Enable = False
@@ -293,7 +294,11 @@ def calc_follow_forward(error_y):
             ) * Follow_Distance_Far_Boost_Gain
         out *= Follow_Forward_Error_Sign
         if Follow_Forward_Error_Sign >= 0:
+            if 0.0 < out < Follow_Distance_Min_Chase_Vx:
+                out = Follow_Distance_Min_Chase_Vx
             return clamp(out, 0.0, Follow_Forward_Limit)
+        if -Follow_Distance_Min_Chase_Vx < out < 0.0:
+            out = -Follow_Distance_Min_Chase_Vx
         return clamp(out, -Follow_Forward_Limit, 0.0)
 
     out = error_y * Follow_Distance_Close_Gain * Follow_Forward_Error_Sign
@@ -462,6 +467,9 @@ def update_follow_targets(yaw_deg, gyro_z):
         vy_limit = follow_limit(vy_limit, ff_vy, Follow_Master_Extra_Vy)
     vx = clamp(vx, -vx_limit, vx_limit)
     vy = clamp(vy, -vy_limit, vy_limit)
+    if seen and cam_error_y <= Follow_Forward_Deadband and vx <= 0.0 and last_cmd_vx > 0.0:
+        # Do not let the ramp coast forward through the distance stop zone.
+        last_cmd_vx = 0.0
     vx = ramp_value(vx, last_cmd_vx, Follow_Command_Ramp_Vx)
     vy = ramp_value(vy, last_cmd_vy, Follow_Command_Ramp_Vy)
     last_cmd_vx = vx

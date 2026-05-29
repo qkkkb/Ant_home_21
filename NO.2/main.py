@@ -38,9 +38,9 @@ GYRO_SIGN = 1.0
 GYRO_OFFSET_Z = 3.16
 GYRO_SCALE = -1.0 / 16.54052
 GYRO_DEADBAND_DPS = 0.8
-GYRO_KP = 0.32
-GYRO_KI = 0.006
-GYRO_OUTPUT_LIMIT = 18.0
+GYRO_KP = 0.40
+GYRO_KI = 0.003
+GYRO_OUTPUT_LIMIT = 26.0
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True
 GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
@@ -54,9 +54,14 @@ FORCE_MOTOR_OFF = False
 AUTO_START_ON_BOOT = False
 AUTO_START_DELAY_MS = 2000
 WHEEL_TARGET_STOP_EPS = 0.05
-FOLLOW_START_PWM = 6500
-FOLLOW_STALL_BOOST_PWM = 9000
-FOLLOW_RUN_PWM_LIMIT = 20000
+FOLLOW_START_PWM = 7000
+FOLLOW_START_PWM_MID = 5200
+FOLLOW_START_PWM_LOW = 3200
+FOLLOW_STALL_BOOST_PWM = 9800
+FOLLOW_START_PWM_LOW_TARGET = 0.9
+FOLLOW_START_PWM_MID_TARGET = 2.4
+FOLLOW_STALL_BOOST_TARGET = 2.8
+FOLLOW_RUN_PWM_LIMIT = 24000
 FOLLOW_STALL_BOOST_FRAMES = 3
 
 
@@ -73,25 +78,25 @@ ART_MODE_IDLE_CMD = b"IDLE\n"
 
 
 # ====================== Follow control ======================
-Follow_Forward_Gain = 0.32
-Follow_Lateral_Gain = 0.20
+Follow_Forward_Gain = 0.36
+Follow_Lateral_Gain = 0.22
 Follow_Forward_Error_Sign = 1.0
 Follow_Lateral_Error_Sign = -1.0
-Follow_Forward_Limit = 44.0
-Follow_Lateral_Limit = 28.0
+Follow_Forward_Limit = 58.0
+Follow_Lateral_Limit = 36.0
 Follow_Forward_Deadband = 4
 Follow_Lateral_Deadband = 4
 Follow_Distance_Far_Boost_Error = 8
-Follow_Distance_Far_Boost_Gain = 0.32
+Follow_Distance_Far_Boost_Gain = 0.50
 Follow_Distance_Close_Gain = 0.76
 Follow_Distance_Close_Limit = 28.0
 Follow_Distance_No_Forward_Error = 0
 Follow_Distance_Feedforward_Enable_Error = 20
 Follow_Distance_Approach_Slow_Error = 12
 Follow_Distance_Approach_Vx_Limit = 2.0
-Follow_Feedforward_Gain = 1.75
-Follow_Hold_Feedforward_Gain = 1.35
-Follow_Wz_Feedforward_Gain = 0.85
+Follow_Feedforward_Gain = 2.25
+Follow_Hold_Feedforward_Gain = 1.70
+Follow_Wz_Feedforward_Gain = 1.10
 Follow_Wz_Forward_Gain = 0.0
 Follow_Wz_Lateral_Gain = -0.18
 Follow_Yaw_Enable = False
@@ -99,8 +104,8 @@ Follow_Yaw_Gain = 0.08
 Follow_Yaw_Limit = 15.0
 Follow_Target_Lost_Hold_Ms = 250
 Master_Motion_Timeout_Ms = 250
-Follow_Master_Extra_Vx = 5.0
-Follow_Master_Extra_Vy = 4.0
+Follow_Master_Extra_Vx = 10.0
+Follow_Master_Extra_Vy = 8.0
 Camera_Right_Yaw_Cos = 0.5
 Camera_Right_Yaw_Sin = 0.8660254
 
@@ -486,6 +491,8 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
 
 
 def apply_start_pwm(cmd, min_pwm):
+    if min_pwm <= 0:
+        return 0
     cmd = int(cmd)
     if cmd > 0:
         if cmd < min_pwm:
@@ -500,11 +507,24 @@ def apply_start_pwm(cmd, min_pwm):
     return cmd
 
 
-def set_three_pwm_follow(u_fl, u_fr, u_b, min_pwm):
+def follow_start_pwm_for_target(target, stall_boost):
+    target_abs = abs(target)
+    if target_abs <= WHEEL_TARGET_STOP_EPS:
+        return 0
+    if stall_boost and target_abs >= FOLLOW_STALL_BOOST_TARGET:
+        return FOLLOW_STALL_BOOST_PWM
+    if target_abs < FOLLOW_START_PWM_LOW_TARGET:
+        return FOLLOW_START_PWM_LOW
+    if target_abs < FOLLOW_START_PWM_MID_TARGET:
+        return FOLLOW_START_PWM_MID
+    return FOLLOW_START_PWM
+
+
+def set_three_pwm_follow(u_fl, u_fr, u_b, t_fl, t_fr, t_b, stall_boost):
     return set_three_pwm_smooth(
-        apply_start_pwm(u_fl, min_pwm),
-        apply_start_pwm(u_fr, min_pwm),
-        apply_start_pwm(u_b, min_pwm),
+        apply_start_pwm(u_fl, follow_start_pwm_for_target(t_fl, stall_boost)),
+        apply_start_pwm(u_fr, follow_start_pwm_for_target(t_fr, stall_boost)),
+        apply_start_pwm(u_b, follow_start_pwm_for_target(t_b, stall_boost)),
     )
 
 
@@ -720,8 +740,9 @@ def calc_speed_closed_loop():
             s_fl, s_fr, s_b = set_three_pwm_zero()
             last_hard_stop = True
         else:
-            min_pwm = FOLLOW_STALL_BOOST_PWM if last_stall_boost else FOLLOW_START_PWM
-            s_fl, s_fr, s_b = set_three_pwm_follow(u_fl, u_fr, u_b, min_pwm)
+            s_fl, s_fr, s_b = set_three_pwm_follow(
+                u_fl, u_fr, u_b, t_fl, t_fr, t_b, last_stall_boost
+            )
 
     return {
         "enc_fl": e_fl,

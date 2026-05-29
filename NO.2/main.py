@@ -38,9 +38,12 @@ GYRO_SIGN = 1.0
 GYRO_OFFSET_Z = 3.16
 GYRO_SCALE = -1.0 / 16.54052
 GYRO_DEADBAND_DPS = 0.8
-GYRO_KP = 0.58
-GYRO_KI = 0.0015
-GYRO_OUTPUT_LIMIT = 46.0
+GYRO_KP = 0.24
+GYRO_KI = 0.0005
+GYRO_OUTPUT_LIMIT = 14.0
+GYRO_OUTPUT_BASE_LIMIT = 6.0
+GYRO_OUTPUT_TARGET_GAIN = 2.2
+GYRO_OUTPUT_MAX_LIMIT = 22.0
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True
 GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
@@ -193,6 +196,15 @@ def ramp_value(target, last, step):
     if delta < -step:
         return last - step
     return target
+
+
+def gyro_limit_for_turn(turn_rate_cmd):
+    limit = GYRO_OUTPUT_BASE_LIMIT + abs(turn_rate_cmd) * GYRO_OUTPUT_TARGET_GAIN
+    if limit > GYRO_OUTPUT_MAX_LIMIT:
+        return GYRO_OUTPUT_MAX_LIMIT
+    if limit < GYRO_OUTPUT_BASE_LIMIT:
+        return GYRO_OUTPUT_BASE_LIMIT
+    return limit
 
 
 def wrapped_yaw_error(ref_deg, now_deg):
@@ -471,6 +483,7 @@ def update_follow_targets(yaw_deg, gyro_z):
 
     if ENABLE_GYRO_LOOP and gyro_pid is not None:
         if FOLLOW_GYRO_HOLD_ENABLE or abs(turn_rate_cmd) > 0.001:
+            gyro_pid.gyro_output_limit = gyro_limit_for_turn(turn_rate_cmd)
             vz_cmd = gyro_ctrl(gyro_pid, turn_rate_cmd - gyro_z)
         else:
             gyro_pid.output = 0.0
@@ -586,12 +599,26 @@ def follow_start_pwm_for_target(target, stall_boost):
     return FOLLOW_START_PWM
 
 
+def follow_channel_pwm(cmd, target, stall_boost, last_pwm):
+    min_pwm = follow_start_pwm_for_target(target, stall_boost)
+    if min_pwm <= 0:
+        return 0
+    return smooth_value(apply_start_pwm(cmd, min_pwm), last_pwm)
+
+
 def set_three_pwm_follow(u_fl, u_fr, u_b, t_fl, t_fr, t_b, stall_boost):
-    return set_three_pwm_smooth(
-        apply_start_pwm(u_fl, follow_start_pwm_for_target(t_fl, stall_boost)),
-        apply_start_pwm(u_fr, follow_start_pwm_for_target(t_fr, stall_boost)),
-        apply_start_pwm(u_b, follow_start_pwm_for_target(t_b, stall_boost)),
-    )
+    global last_pwm_fl, last_pwm_fr, last_pwm_b
+
+    s_fl = follow_channel_pwm(u_fl, t_fl, stall_boost, last_pwm_fl)
+    s_fr = follow_channel_pwm(u_fr, t_fr, stall_boost, last_pwm_fr)
+    s_b = follow_channel_pwm(u_b, t_b, stall_boost, last_pwm_b)
+    apply_motor_duty(s_fl, motor_fl)
+    apply_motor_duty(s_fr, motor_fr)
+    apply_motor_duty(s_b, motor_b)
+    last_pwm_fl = s_fl
+    last_pwm_fr = s_fr
+    last_pwm_b = s_b
+    return s_fl, s_fr, s_b
 
 
 def set_three_pwm_zero():
@@ -616,6 +643,17 @@ def wheel_targets_zero(t_fl, t_fr, t_b):
 
 def encoders_stalled(e_fl, e_fr, e_b):
     return e_fl == 0 and e_fr == 0 and e_b == 0
+
+
+def wheel_target_idle(target):
+    return -WHEEL_TARGET_IDLE_EPS <= target <= WHEEL_TARGET_IDLE_EPS
+
+
+def speed_ctrl_follow(pid, actual_speed, target_speed):
+    if wheel_target_idle(target_speed):
+        speed_reset(pid)
+        return 0.0
+    return speed_ctrl(pid, actual_speed, target_speed)
 
 
 def update_nav_led_display():
@@ -649,7 +687,7 @@ def wireless_tune_log(snap):
         wireless.send_str(
             "FT seen=%d err=%d,%d,%d vis=%.2f,%.2f out=%.2f,%.2f,%.2f wz=%.2f,%.2f,%.2f "
             "tar=%.1f,%.1f,%.1f enc=%d,%d,%d pid=%d,%d,%d pwm=%d,%d,%d stop=%d boost=%d "
-            "g=%.2f yaw=%.1f mf=%d rx=%d\r\n"
+            "g=%.2f glim=%.1f yaw=%.1f mf=%d rx=%d\r\n"
             % (
                 1 if last_follow_seen else 0,
                 cam_error_x,
@@ -678,6 +716,7 @@ def wireless_tune_log(snap):
                 int(snap["hard_stop"]),
                 int(snap["stall_boost"]),
                 snap["gyro_z"],
+                snap["gyro_limit"],
                 snap["yaw_deg"],
                 1 if USE_MASTER_MOTION_FEEDFORWARD else 0,
                 1 if master_motion_rx_fresh() else 0,
@@ -801,9 +840,9 @@ def calc_speed_closed_loop():
             last_stall_count = 0
         last_stall_boost = last_stall_count >= FOLLOW_STALL_BOOST_FRAMES
 
-        u_fl = speed_ctrl(pid_fl, e_fl, t_fl)
-        u_fr = speed_ctrl(pid_fr, e_fr, t_fr)
-        u_b = speed_ctrl(pid_b, e_b, t_b)
+        u_fl = speed_ctrl_follow(pid_fl, e_fl, t_fl)
+        u_fr = speed_ctrl_follow(pid_fr, e_fr, t_fr)
+        u_b = speed_ctrl_follow(pid_b, e_b, t_b)
 
         if FORCE_MOTOR_OFF:
             reset_speed_outputs()
@@ -831,6 +870,7 @@ def calc_speed_closed_loop():
         "stall_boost": 1 if last_stall_boost else 0,
         "raw_gyro_z": raw_gyro_z,
         "gyro_z": gyro_z,
+        "gyro_limit": gyro_pid.gyro_output_limit if gyro_pid is not None else 0.0,
         "yaw_deg": yaw_deg,
         "turn_rate_cmd": last_turn_rate_cmd,
         "vz_cmd": last_vz_cmd,

@@ -56,6 +56,8 @@ TARGET_PAIR_DX = 25
 TARGET_PAIR_DY = -13
 TARGET_CENTER_X_OFFSET = 8
 ERROR_OUTPUT_SCALE = 2
+PAIR_SPAN_WEIGHT = 3
+PAIR_ANGLE_WEIGHT = 2
 
 MAX_PAIR_BLOBS = 10
 ROI_PAD_X = 36
@@ -178,6 +180,23 @@ def collect_candidate_blobs(blobs):
     return count
 
 
+def pair_signed_dy(b0, b1):
+    if b0.cx() >= b1.cx():
+        return b0.cy() - b1.cy()
+    return b1.cy() - b0.cy()
+
+
+def pair_angle_error_num(pair_dy, span_x):
+    return pair_dy * TARGET_PAIR_DX - TARGET_PAIR_DY * span_x
+
+
+def pair_angle_error(pair_dy, span_x):
+    err = pair_angle_error_num(pair_dy, span_x)
+    if err < 0:
+        err = -err
+    return err // TARGET_PAIR_DX
+
+
 def find_lamp_pair(img, roi):
     if roi is None:
         blobs = img.find_blobs(
@@ -200,7 +219,7 @@ def find_lamp_pair(img, roi):
     best_b1 = None
     best_dx = 0
     best_score = -1
-    best_span_err = 10000
+    best_cost = 10000
 
     for i in range(count - 1):
         b0 = blob_pool[i]
@@ -218,12 +237,14 @@ def find_lamp_pair(img, roi):
             span_err = dx - TARGET_PAIR_DX
             if span_err < 0:
                 span_err = -span_err
-            if score > best_score or (score == best_score and span_err < best_span_err):
+            angle_err = pair_angle_error(pair_signed_dy(b0, b1), dx)
+            cost = span_err * PAIR_SPAN_WEIGHT + angle_err * PAIR_ANGLE_WEIGHT
+            if cost < best_cost or (cost == best_cost and score > best_score):
                 best_b0 = b0
                 best_b1 = b1
                 best_dx = dx
                 best_score = score
-                best_span_err = span_err
+                best_cost = cost
 
     if best_b0 is None:
         return None
@@ -322,19 +343,13 @@ def process_frame(img):
     b0, b1, span_x = pair
     roi_miss_count = 0
     track_roi = make_track_roi(b0, b1)
-    if b0.cx() >= b1.cx():
-        right_blob = b0
-        left_blob = b1
-    else:
-        right_blob = b1
-        left_blob = b0
 
     center_x = (b0.cx() + b1.cx()) // 2
     center_y = (b0.cy() + b1.cy()) // 2
-    pair_dy = right_blob.cy() - left_blob.cy()
+    pair_dy = pair_signed_dy(b0, b1)
     err_x = (center_x - (IMG_CENTER_X + TARGET_CENTER_X_OFFSET)) * ERROR_OUTPUT_SCALE
     err_y = (TARGET_PAIR_DX - span_x) * ERROR_OUTPUT_SCALE
-    err_angle = (pair_dy - TARGET_PAIR_DY) * ERROR_OUTPUT_SCALE
+    err_angle = (pair_angle_error_num(pair_dy, span_x) * ERROR_OUTPUT_SCALE) // TARGET_PAIR_DX
     err_x, err_y, err_angle = update_ema(int(err_x), int(err_y), int(err_angle))
     send_error(err_x, err_y, err_angle)
 

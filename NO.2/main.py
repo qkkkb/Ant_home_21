@@ -54,12 +54,13 @@ FORCE_MOTOR_OFF = False
 AUTO_START_ON_BOOT = False
 AUTO_START_DELAY_MS = 2000
 WHEEL_TARGET_STOP_EPS = 0.05
-FOLLOW_START_PWM = 6600
-FOLLOW_START_PWM_MID = 4400
-FOLLOW_START_PWM_LOW = 2200
+WHEEL_TARGET_IDLE_EPS = 0.35
+FOLLOW_START_PWM = 6200
+FOLLOW_START_PWM_MID = 3600
+FOLLOW_START_PWM_LOW = 0
 FOLLOW_STALL_BOOST_PWM = 8800
-FOLLOW_START_PWM_LOW_TARGET = 0.9
-FOLLOW_START_PWM_MID_TARGET = 2.4
+FOLLOW_START_PWM_LOW_TARGET = 1.2
+FOLLOW_START_PWM_MID_TARGET = 2.8
 FOLLOW_STALL_BOOST_TARGET = 2.8
 FOLLOW_RUN_PWM_LIMIT = 24000
 FOLLOW_STALL_BOOST_FRAMES = 3
@@ -85,7 +86,7 @@ Follow_Lateral_Error_Sign = -1.0
 Follow_Forward_Limit = 58.0
 Follow_Lateral_Limit = 36.0
 Follow_Forward_Deadband = 4
-Follow_Lateral_Deadband = 4
+Follow_Lateral_Deadband = 6
 Follow_Distance_Far_Boost_Error = 8
 Follow_Distance_Far_Boost_Gain = 0.50
 Follow_Distance_Close_Gain = 0.76
@@ -99,10 +100,14 @@ Follow_Hold_Feedforward_Gain = 1.70
 Follow_Wz_Feedforward_Gain = 1.35
 Follow_Wz_Forward_Gain = 0.0
 Follow_Wz_Lateral_Gain = -0.18
-Follow_Vision_Angle_Gain = -0.16
-Follow_Vision_Angle_Limit = 22.0
-Follow_Vision_Angle_Deadband = 4
+Follow_Vision_Angle_Gain = -0.12
+Follow_Vision_Angle_Limit = 18.0
+Follow_Vision_Angle_Deadband = 8
+Follow_Vision_Angle_Far_Limit = 8.0
 Follow_Vision_Angle_Close_Y = 28
+Follow_Command_Ramp_Vx = 3.0
+Follow_Command_Ramp_Vy = 2.4
+Follow_Command_Ramp_Wz = 2.0
 Follow_Yaw_Enable = False
 Follow_Yaw_Gain = 0.08
 Follow_Yaw_Limit = 15.0
@@ -159,6 +164,9 @@ last_visual_vy = 0.0
 last_ff_vx = 0.0
 last_ff_vy = 0.0
 last_ff_wz = 0.0
+last_cmd_vx = 0.0
+last_cmd_vy = 0.0
+last_cmd_wz = 0.0
 last_tune_log_ms = 0
 last_hard_stop = False
 last_stall_count = 0
@@ -176,6 +184,15 @@ def clamp(value, low, high):
     if value > high:
         return high
     return value
+
+
+def ramp_value(target, last, step):
+    delta = target - last
+    if delta > step:
+        return last + step
+    if delta < -step:
+        return last - step
+    return target
 
 
 def wrapped_yaw_error(ref_deg, now_deg):
@@ -200,10 +217,14 @@ def clear_cam_target_state():
     global cam_error_x, cam_error_y, cam_last_rx_ms, cam_rx_buf
     global cam_error_angle
     global cam_has_target, cam_valid_target_since_ms, target_lost_since_ms
+    global last_cmd_vx, last_cmd_vy, last_cmd_wz
 
     cam_error_x = 0
     cam_error_y = 0
     cam_error_angle = 0
+    last_cmd_vx = 0.0
+    last_cmd_vy = 0.0
+    last_cmd_wz = 0.0
     cam_has_target = False
     cam_valid_target_since_ms = 0
     target_lost_since_ms = 0
@@ -290,12 +311,13 @@ def apply_distance_guard(vx, visual_vx, error_y):
 def visual_angle_correction(error_angle, error_y):
     if -Follow_Vision_Angle_Deadband <= error_angle <= Follow_Vision_Angle_Deadband:
         return 0.0
+    limit = Follow_Vision_Angle_Limit
     if error_y > Follow_Vision_Angle_Close_Y:
-        return 0.0
+        limit = Follow_Vision_Angle_Far_Limit
     return clamp(
         error_angle * Follow_Vision_Angle_Gain,
-        -Follow_Vision_Angle_Limit,
-        Follow_Vision_Angle_Limit,
+        -limit,
+        limit,
     )
 
 
@@ -378,6 +400,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     global yaw_ref_deg, last_turn_rate_cmd, last_vz_cmd
     global last_follow_seen, last_visual_vx, last_visual_vy
     global last_ff_vx, last_ff_vy, last_ff_wz
+    global last_cmd_vx, last_cmd_vy, last_cmd_wz
 
     now = utime.ticks_ms()
     seen = cam_target_seen()
@@ -427,11 +450,17 @@ def update_follow_targets(yaw_deg, gyro_z):
         vy_limit = follow_limit(vy_limit, ff_vy, Follow_Master_Extra_Vy)
     vx = clamp(vx, -vx_limit, vx_limit)
     vy = clamp(vy, -vy_limit, vy_limit)
+    vx = ramp_value(vx, last_cmd_vx, Follow_Command_Ramp_Vx)
+    vy = ramp_value(vy, last_cmd_vy, Follow_Command_Ramp_Vy)
+    last_cmd_vx = vx
+    last_cmd_vy = vy
     cam_target_vx = vx
     cam_target_vy = vy
 
     turn_rate_cmd = ff_wz * Follow_Wz_Feedforward_Gain if use_motion_feedforward else 0.0
     turn_rate_cmd += vision_wz
+    turn_rate_cmd = ramp_value(turn_rate_cmd, last_cmd_wz, Follow_Command_Ramp_Wz)
+    last_cmd_wz = turn_rate_cmd
     yaw_err = 0.0
     yaw_correction = 0.0
     if Follow_Yaw_Enable and fresh_motion and ENABLE_IMU:
@@ -448,6 +477,7 @@ def update_follow_targets(yaw_deg, gyro_z):
             gyro_pid.err = 0.0
             gyro_pid.err_last = 0.0
             vz_cmd = 0.0
+            last_cmd_wz = 0.0
     else:
         vz_cmd = turn_rate_cmd
 
@@ -472,6 +502,7 @@ def stop_all():
 def reset_speed_outputs():
     global last_pwm_fl, last_pwm_fr, last_pwm_b
     global last_stall_count, last_stall_boost
+    global last_cmd_vx, last_cmd_vy, last_cmd_wz
 
     speed_reset(pid_fl)
     speed_reset(pid_fr)
@@ -481,6 +512,9 @@ def reset_speed_outputs():
     last_pwm_b = 0
     last_stall_count = 0
     last_stall_boost = False
+    last_cmd_vx = 0.0
+    last_cmd_vy = 0.0
+    last_cmd_wz = 0.0
 
 
 def clamp_duty(value):
@@ -541,7 +575,7 @@ def apply_start_pwm(cmd, min_pwm):
 
 def follow_start_pwm_for_target(target, stall_boost):
     target_abs = abs(target)
-    if target_abs <= WHEEL_TARGET_STOP_EPS:
+    if target_abs <= WHEEL_TARGET_IDLE_EPS:
         return 0
     if stall_boost and target_abs >= FOLLOW_STALL_BOOST_TARGET:
         return FOLLOW_STALL_BOOST_PWM

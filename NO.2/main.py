@@ -47,8 +47,8 @@ GYRO_CALIBRATE_DELAY_MS = 2
 
 EXIT_CHECK_DIV = 5
 GC_DIV = 50
-USE_MASTER_MOTION_FEEDFORWARD = True
-FOLLOW_WIRELESS_TUNE_LOG_ENABLE = False
+USE_MASTER_MOTION_FEEDFORWARD = False
+FOLLOW_WIRELESS_TUNE_LOG_ENABLE = True
 FOLLOW_TUNE_LOG_INTERVAL_MS = 100
 FORCE_MOTOR_OFF = False
 AUTO_START_ON_BOOT = False
@@ -647,7 +647,7 @@ def wireless_tune_log(snap):
     last_tune_log_ms = now
     try:
         wireless.send_str(
-            "FT seen=%d err=%d,%d,%d vis=%.2f,%.2f out=%.2f,%.2f,%.2f "
+            "FT seen=%d err=%d,%d,%d vis=%.2f,%.2f out=%.2f,%.2f,%.2f wz=%.2f,%.2f,%.2f "
             "tar=%.1f,%.1f,%.1f enc=%d,%d,%d pid=%d,%d,%d pwm=%d,%d,%d stop=%d boost=%d "
             "g=%.2f yaw=%.1f mf=%d rx=%d\r\n"
             % (
@@ -659,6 +659,9 @@ def wireless_tune_log(snap):
                 last_visual_vy,
                 cam_target_vx,
                 cam_target_vy,
+                last_vz_cmd,
+                last_ff_wz,
+                last_turn_rate_cmd,
                 last_vz_cmd,
                 snap["tar_fl"],
                 snap["tar_fr"],

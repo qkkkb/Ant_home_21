@@ -35,7 +35,7 @@ ERROR_OFFSET = 120
 ERROR_LIMIT = 240
 ERROR_SCALE = 2.0
 
-uart_packet = bytearray([UART_FRAME_HEAD, ERROR_OFFSET, ERROR_OFFSET])
+uart_packet = bytearray([UART_FRAME_HEAD, ERROR_OFFSET, ERROR_OFFSET, ERROR_OFFSET])
 no_target_packet = bytearray([UART_FRAME_HEAD, NO_TARGET_MARKER, NO_TARGET_MARKER])
 
 
@@ -53,6 +53,7 @@ MAX_PAIR_DY = 16
 MIN_PAIR_DX = 4
 MAX_PAIR_DX = 90
 TARGET_PAIR_DX = 25
+TARGET_PAIR_DY = -13
 TARGET_CENTER_X_OFFSET = 8
 ERROR_OUTPUT_SCALE = 2
 
@@ -82,6 +83,7 @@ detect_mode = MODE_TRACK
 uart_rx_buf = bytearray()
 ema_err_x = None
 ema_err_y = None
+ema_err_angle = None
 track_roi = None
 roi_miss_count = 0
 frame_count = 0
@@ -102,9 +104,10 @@ def encode_error(value):
     return clamp(int(value / ERROR_SCALE) + ERROR_OFFSET, 0, ERROR_OFFSET * 2)
 
 
-def send_error(err_x, err_y):
+def send_error(err_x, err_y, err_angle):
     uart_packet[1] = encode_error(err_x)
     uart_packet[2] = encode_error(err_y)
+    uart_packet[3] = encode_error(err_angle)
     uart.write(uart_packet)
 
 
@@ -113,10 +116,12 @@ def send_no_target():
 
 
 def set_mode(mode):
-    global detect_mode, ema_err_x, ema_err_y, track_roi, roi_miss_count
+    global detect_mode, ema_err_x, ema_err_y, ema_err_angle
+    global track_roi, roi_miss_count
     detect_mode = mode
     ema_err_x = None
     ema_err_y = None
+    ema_err_angle = None
     track_roi = None
     roi_miss_count = 0
 
@@ -247,12 +252,13 @@ def make_track_roi(b0, b1):
     return (x0, y0, x1 - x0, y1 - y0)
 
 
-def update_ema(err_x, err_y):
-    global ema_err_x, ema_err_y
+def update_ema(err_x, err_y, err_angle):
+    global ema_err_x, ema_err_y, ema_err_angle
 
     if ema_err_x is None:
         ema_err_x = err_x
         ema_err_y = err_y
+        ema_err_angle = err_angle
     else:
         ema_err_x = (
             EMA_ALPHA_NUM * err_x
@@ -262,7 +268,11 @@ def update_ema(err_x, err_y):
             EMA_ALPHA_NUM * err_y
             + (EMA_ALPHA_DEN - EMA_ALPHA_NUM) * ema_err_y
         ) // EMA_ALPHA_DEN
-    return ema_err_x, ema_err_y
+        ema_err_angle = (
+            EMA_ALPHA_NUM * err_angle
+            + (EMA_ALPHA_DEN - EMA_ALPHA_NUM) * ema_err_angle
+        ) // EMA_ALPHA_DEN
+    return ema_err_x, ema_err_y, ema_err_angle
 
 
 def should_calib_log():
@@ -312,13 +322,21 @@ def process_frame(img):
     b0, b1, span_x = pair
     roi_miss_count = 0
     track_roi = make_track_roi(b0, b1)
+    if b0.cx() >= b1.cx():
+        right_blob = b0
+        left_blob = b1
+    else:
+        right_blob = b1
+        left_blob = b0
 
     center_x = (b0.cx() + b1.cx()) // 2
     center_y = (b0.cy() + b1.cy()) // 2
+    pair_dy = right_blob.cy() - left_blob.cy()
     err_x = (center_x - (IMG_CENTER_X + TARGET_CENTER_X_OFFSET)) * ERROR_OUTPUT_SCALE
     err_y = (TARGET_PAIR_DX - span_x) * ERROR_OUTPUT_SCALE
-    err_x, err_y = update_ema(int(err_x), int(err_y))
-    send_error(err_x, err_y)
+    err_angle = (pair_dy - TARGET_PAIR_DY) * ERROR_OUTPUT_SCALE
+    err_x, err_y, err_angle = update_ema(int(err_x), int(err_y), int(err_angle))
+    send_error(err_x, err_y, err_angle)
 
     if DRAW_DEBUG:
         img.draw_rectangle(b0.rect(), color=255)
@@ -328,19 +346,22 @@ def process_frame(img):
             img.draw_rectangle(track_roi, color=255)
     if should_calib_log():
         print(
-            "IR CALIB HIT center=(%d,%d) span_x=%d err=(%d,%d) "
-            "target_center_x=%d roi=%s threshold=%s exposure_us=%d target_dx=%d"
+            "IR CALIB HIT center=(%d,%d) span_x=%d pair_dy=%d err=(%d,%d,%d) "
+            "target_center_x=%d roi=%s threshold=%s exposure_us=%d target_dx=%d target_dy=%d"
             % (
                 center_x,
                 center_y,
                 span_x,
+                pair_dy,
                 err_x,
                 err_y,
+                err_angle,
                 IMG_CENTER_X + TARGET_CENTER_X_OFFSET,
                 track_roi,
                 IR_THRESHOLDS,
                 EXPOSURE_US,
                 TARGET_PAIR_DX,
+                TARGET_PAIR_DY,
             )
         )
         if CALIB_LOG_BLOBS:

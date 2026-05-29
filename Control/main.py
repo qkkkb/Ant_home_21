@@ -19,9 +19,10 @@ from coop_protocol import (
     MSG_MASTER_MOTION,
 )
 
-# DEBUG_WIRELESS_LOG_ENABLE = True
-# DEBUG_WIRELESS_BAUD = 460800
-MASTER_MOTION_BROADCAST_ENABLE = True
+DEBUG_WIRELESS_LOG_ENABLE = True
+DEBUG_WIRELESS_BAUD = 460800
+# MASTER_MOTION_BROADCAST_ENABLE = True
+MASTER_MOTION_BROADCAST_ENABLE = False
 
 # 设置 PID 最大 PWM 值
 _pid_mod.PWM_MAX = cfg.PWM_MAX
@@ -1201,18 +1202,19 @@ enc_fl = encoder(cfg.ENC_FL_A, cfg.ENC_FL_B, cfg.ENC_FL_INVERT)
 enc_fr = encoder(cfg.ENC_FR_A, cfg.ENC_FR_B, cfg.ENC_FR_INVERT)
 enc_b  = encoder(cfg.ENC_B_A,  cfg.ENC_B_B,  cfg.ENC_B_INVERT)
 
-# debug_wireless = None
-# if DEBUG_WIRELESS_LOG_ENABLE:
-#     try:
-#         debug_wireless = WIRELESS_UART(DEBUG_WIRELESS_BAUD)
-#     except Exception:
-#         debug_wireless = None
-wireless = None
-if MASTER_MOTION_BROADCAST_ENABLE:
+debug_wireless = None
+if DEBUG_WIRELESS_LOG_ENABLE:
     try:
-        wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
+        debug_wireless = WIRELESS_UART(DEBUG_WIRELESS_BAUD)
     except Exception:
-        wireless = None
+        debug_wireless = None
+# wireless = None
+# if MASTER_MOTION_BROADCAST_ENABLE:
+#     try:
+#         wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
+#     except Exception:
+#         wireless = None
+wireless = None
 motion_tx_buf = array('b', [0] * 16)
 cam_uart = UART(cfg.CAM_UART_ID, cfg.CAM_UART_BAUD)
 cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
@@ -1306,12 +1308,12 @@ def check_c8_exit():
 # 日志输出
 def log(msg):
     print(msg)
-    # if debug_wireless is not None:
-    #     try:
-    #         debug_wireless.send_str(msg)
-    #         debug_wireless.send_str("\r\n")
-    #     except Exception:
-    #         pass
+    if debug_wireless is not None:
+        try:
+            debug_wireless.send_str(msg)
+            debug_wireless.send_str("\r\n")
+        except Exception:
+            pass
 
 
 # 停止所有电机
@@ -1365,7 +1367,7 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
 
 # ---------------------- CH7 exit calibration ----------------------
 ch7_init_value = 0.0
-log("Wireless debug log disabled; master motion broadcast enabled")
+log("Wireless debug log enabled; master motion broadcast disabled")
 
 motion_seq = 0
 motion_last_tx_ms = 0
@@ -1818,7 +1820,7 @@ try:
         if pit_flag:
             pit_flag = False
             calc_speed_closed_loop()
-        send_master_motion(now)
+        # send_master_motion(now)
 
         if utime.ticks_diff(now, last_status_ms) >= 1000:
             led.toggle()

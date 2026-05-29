@@ -38,9 +38,9 @@ GYRO_SIGN = 1.0
 GYRO_OFFSET_Z = 3.16
 GYRO_SCALE = -1.0 / 16.54052
 GYRO_DEADBAND_DPS = 0.8
-GYRO_KP = 0.40
-GYRO_KI = 0.003
-GYRO_OUTPUT_LIMIT = 26.0
+GYRO_KP = 0.46
+GYRO_KI = 0.0015
+GYRO_OUTPUT_LIMIT = 34.0
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True
 GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
@@ -54,10 +54,10 @@ FORCE_MOTOR_OFF = False
 AUTO_START_ON_BOOT = False
 AUTO_START_DELAY_MS = 2000
 WHEEL_TARGET_STOP_EPS = 0.05
-FOLLOW_START_PWM = 7000
-FOLLOW_START_PWM_MID = 5200
-FOLLOW_START_PWM_LOW = 3200
-FOLLOW_STALL_BOOST_PWM = 9800
+FOLLOW_START_PWM = 6600
+FOLLOW_START_PWM_MID = 4400
+FOLLOW_START_PWM_LOW = 2200
+FOLLOW_STALL_BOOST_PWM = 8800
 FOLLOW_START_PWM_LOW_TARGET = 0.9
 FOLLOW_START_PWM_MID_TARGET = 2.4
 FOLLOW_STALL_BOOST_TARGET = 2.8
@@ -96,9 +96,13 @@ Follow_Distance_Approach_Slow_Error = 12
 Follow_Distance_Approach_Vx_Limit = 2.0
 Follow_Feedforward_Gain = 2.25
 Follow_Hold_Feedforward_Gain = 1.70
-Follow_Wz_Feedforward_Gain = 1.10
+Follow_Wz_Feedforward_Gain = 1.35
 Follow_Wz_Forward_Gain = 0.0
 Follow_Wz_Lateral_Gain = -0.18
+Follow_Vision_Angle_Gain = -0.16
+Follow_Vision_Angle_Limit = 22.0
+Follow_Vision_Angle_Deadband = 4
+Follow_Vision_Angle_Close_Y = 28
 Follow_Yaw_Enable = False
 Follow_Yaw_Gain = 0.08
 Follow_Yaw_Limit = 15.0
@@ -118,6 +122,7 @@ last_c8_state = 1
 
 cam_error_x = 0
 cam_error_y = 0
+cam_error_angle = 0
 cam_target_vx = 0.0
 cam_target_vy = 0.0
 cam_last_rx_ms = 0
@@ -182,20 +187,23 @@ def wrapped_yaw_error(ref_deg, now_deg):
     return err
 
 
-def update_cam_target(err_x, err_y):
-    global cam_error_x, cam_error_y, cam_last_rx_ms
+def update_cam_target(err_x, err_y, err_angle=0):
+    global cam_error_x, cam_error_y, cam_error_angle, cam_last_rx_ms
 
     cam_error_x = int(err_x)
     cam_error_y = int(err_y)
+    cam_error_angle = int(err_angle)
     cam_last_rx_ms = utime.ticks_ms()
 
 
 def clear_cam_target_state():
     global cam_error_x, cam_error_y, cam_last_rx_ms, cam_rx_buf
+    global cam_error_angle
     global cam_has_target, cam_valid_target_since_ms, target_lost_since_ms
 
     cam_error_x = 0
     cam_error_y = 0
+    cam_error_angle = 0
     cam_has_target = False
     cam_valid_target_since_ms = 0
     target_lost_since_ms = 0
@@ -279,6 +287,18 @@ def apply_distance_guard(vx, visual_vx, error_y):
     return vx
 
 
+def visual_angle_correction(error_angle, error_y):
+    if -Follow_Vision_Angle_Deadband <= error_angle <= Follow_Vision_Angle_Deadband:
+        return 0.0
+    if error_y > Follow_Vision_Angle_Close_Y:
+        return 0.0
+    return clamp(
+        error_angle * Follow_Vision_Angle_Gain,
+        -Follow_Vision_Angle_Limit,
+        Follow_Vision_Angle_Limit,
+    )
+
+
 def poll_art_uart():
     global cam_rx_buf, cam_has_target, cam_rx_started, cam_valid_target_since_ms
     global cam_last_rx_ms, target_lost_since_ms
@@ -296,6 +316,7 @@ def poll_art_uart():
                     continue
                 if not cam_rx_started:
                     cam_rx_started = True
+                frame_len = 3
                 if cam_rx_buf[1] == No_Target_Marker and cam_rx_buf[2] == No_Target_Marker:
                     cam_has_target = False
                     cam_valid_target_since_ms = 0
@@ -303,6 +324,13 @@ def poll_art_uart():
                 elif cam_rx_buf[1] in (Line_Packet_Tag, Classify_Packet_Tag):
                     cam_last_rx_ms = utime.ticks_ms()
                 else:
+                    if len(cam_rx_buf) < 4:
+                        return
+                    if cam_rx_buf[3] == Cam_Frame_Head:
+                        err_angle = 0
+                    else:
+                        err_angle = (int(cam_rx_buf[3]) - Cam_Error_Offset) * Cam_Error_Scale
+                        frame_len = 4
                     cam_has_target = True
                     target_lost_since_ms = 0
                     if cam_valid_target_since_ms == 0:
@@ -310,8 +338,9 @@ def poll_art_uart():
                     update_cam_target(
                         (int(cam_rx_buf[1]) - Cam_Error_Offset) * Cam_Error_Scale,
                         (int(cam_rx_buf[2]) - Cam_Error_Offset) * Cam_Error_Scale,
+                        err_angle,
                     )
-                cam_rx_buf = cam_rx_buf[3:]
+                cam_rx_buf = cam_rx_buf[frame_len:]
 
     if len(cam_rx_buf) > 20:
         cam_rx_buf = bytearray()
@@ -360,6 +389,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     cam_vy = 0.0
     body_vx = 0.0
     body_vy = 0.0
+    vision_wz = 0.0
     use_motion_feedforward = False
 
     if seen:
@@ -369,6 +399,7 @@ def update_follow_targets(yaw_deg, gyro_z):
         cam_vy = -cam_error_x * Follow_Lateral_Gain * Follow_Lateral_Error_Sign
         if -Follow_Lateral_Deadband <= cam_error_x <= Follow_Lateral_Deadband:
             cam_vy = 0.0
+        vision_wz = visual_angle_correction(cam_error_angle, cam_error_y)
         body_vx, body_vy = rotate_camera_velocity_to_body(cam_vx, cam_vy)
         vx = body_vx + ff_vx * Follow_Feedforward_Gain
         vy = body_vy + ff_vy * Follow_Feedforward_Gain
@@ -400,6 +431,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     cam_target_vy = vy
 
     turn_rate_cmd = ff_wz * Follow_Wz_Feedforward_Gain if use_motion_feedforward else 0.0
+    turn_rate_cmd += vision_wz
     yaw_err = 0.0
     yaw_correction = 0.0
     if Follow_Yaw_Enable and fresh_motion and ENABLE_IMU:
@@ -581,13 +613,14 @@ def wireless_tune_log(snap):
     last_tune_log_ms = now
     try:
         wireless.send_str(
-            "FT seen=%d err=%d,%d vis=%.2f,%.2f out=%.2f,%.2f,%.2f "
+            "FT seen=%d err=%d,%d,%d vis=%.2f,%.2f out=%.2f,%.2f,%.2f "
             "tar=%.1f,%.1f,%.1f enc=%d,%d,%d pid=%d,%d,%d pwm=%d,%d,%d stop=%d boost=%d "
             "g=%.2f yaw=%.1f mf=%d rx=%d\r\n"
             % (
                 1 if last_follow_seen else 0,
                 cam_error_x,
                 cam_error_y,
+                cam_error_angle,
                 last_visual_vx,
                 last_visual_vy,
                 cam_target_vx,

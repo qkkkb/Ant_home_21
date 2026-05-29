@@ -184,7 +184,7 @@ Nav_Push_Turn_Slow_Rate = 55.0
 Nav_Push_Turn_Gyro_Limit = 16.0
 Nav_Push_Turn_Ok_Yaw = 6.0
 Nav_Push_Turn_Ok_Ms = 150
-Nav_Post_Turn_No_Target_Ms = 200
+Nav_Post_Turn_No_Target_Ms = 100
 Nav_Post_Turn_Forward_Ms = 1500
 Nav_Post_Turn_Forward_Speed = 9
 
@@ -546,13 +546,17 @@ def nav_set_state(new_state, reason="", force=False):
         elif cam_error_y < -Nav_Forward_Deadband:
             nav_fine_last_y_sign = -1
 
-    if new_state in (NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH, NAV_STATE_PUSH_TURN):
+    if new_state in (NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH, NAV_STATE_PUSH_TURN, NAV_STATE_POST_TURN_FORWARD):
         reset_gyro_pid_state()
-    if new_state in (NAV_STATE_PUSH, NAV_STATE_PUSH_TURN):
+    if new_state in (NAV_STATE_PUSH, NAV_STATE_PUSH_TURN, NAV_STATE_POST_TURN_FORWARD):
         pid_fl.output = pid_fr.output = pid_b.output = 0.0
         pid_fl.tar_spd_last = pid_fr.tar_spd_last = pid_b.tar_spd_last = 0.0
         pid_fl.delta_ud = pid_fr.delta_ud = pid_b.delta_ud = 0.0
         last_pwm_fl = last_pwm_fr = last_pwm_b = 0
+    if new_state == NAV_STATE_POST_TURN_FORWARD:
+        motor_fl.duty(0)
+        motor_fr.duty(0)
+        motor_b.duty(0)
 
     if ENABLE_IMU and imu_runtime is not None:
         if new_state == NAV_STATE_SEARCH_TURN:
@@ -691,6 +695,11 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         nav_ready_for_push = False
         yaw_ref_deg = push_return_yaw_target
         cam_target_vy = 0.0
+        post_turn_elapsed = utime.ticks_diff(now, nav_transition_ms)
+        if post_turn_elapsed < Nav_Post_Turn_No_Target_Ms:
+            nav_detect_since_ms = 0
+            cam_target_vx = 0.0
+            return
         if seen:
             cam_target_vx = 0.0
             if nav_detect_since_ms > 0:
@@ -700,10 +709,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                     nav_set_state(NAV_STATE_COARSE, "post_turn_target_seen")
             return
 
-        post_turn_elapsed = utime.ticks_diff(now, nav_transition_ms)
-        if post_turn_elapsed < Nav_Post_Turn_No_Target_Ms:
-            cam_target_vx = 0.0
-        elif post_turn_elapsed < Nav_Post_Turn_No_Target_Ms + Nav_Post_Turn_Forward_Ms:
+        if post_turn_elapsed < Nav_Post_Turn_No_Target_Ms + Nav_Post_Turn_Forward_Ms:
             cam_target_vx = Nav_Post_Turn_Forward_Speed
         else:
             cam_target_vx = 0.0

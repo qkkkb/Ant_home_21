@@ -9,8 +9,14 @@ import pid as _pid_mod
 import config as cfg
 from hardware import Motor
 from seekfree import WIRELESS_UART
-DEBUG_WIRELESS_LOG_ENABLE = True
-DEBUG_WIRELESS_BAUD = 460800
+# DEBUG_WIRELESS_LOG_ENABLE = True
+# DEBUG_WIRELESS_BAUD = 460800
+
+MASTER_MOTION_TX_PERIOD_MS = cfg.MASTER_MOTION_TX_PERIOD_MS
+MASTER_MOTION_FRAME_LEN = 15
+MASTER_MOTION_FLAG_STARTED = 0x01
+MASTER_MOTION_FLAG_TARGET = 0x02
+MASTER_MOTION_FLAG_CLOSED_LOOP = 0x04
 
 # 设置 PID 最大 PWM 值
 _pid_mod.PWM_MAX = cfg.PWM_MAX
@@ -1199,12 +1205,18 @@ enc_fl = encoder(cfg.ENC_FL_A, cfg.ENC_FL_B, cfg.ENC_FL_INVERT)
 enc_fr = encoder(cfg.ENC_FR_A, cfg.ENC_FR_B, cfg.ENC_FR_INVERT)
 enc_b  = encoder(cfg.ENC_B_A,  cfg.ENC_B_B,  cfg.ENC_B_INVERT)
 
-debug_wireless = None
-if DEBUG_WIRELESS_LOG_ENABLE:
-    try:
-        debug_wireless = WIRELESS_UART(DEBUG_WIRELESS_BAUD)
-    except Exception:
-        debug_wireless = None
+motion_wireless = None
+try:
+    motion_wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
+except Exception:
+    motion_wireless = None
+
+# debug_wireless = None
+# if DEBUG_WIRELESS_LOG_ENABLE:
+#     try:
+#         debug_wireless = WIRELESS_UART(DEBUG_WIRELESS_BAUD)
+#     except Exception:
+#         debug_wireless = None
 cam_uart = UART(cfg.CAM_UART_ID, cfg.CAM_UART_BAUD)
 cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
 
@@ -1297,12 +1309,12 @@ def check_c8_exit():
 # 日志输出
 def log(msg):
     print(msg)
-    if debug_wireless is not None:
-        try:
-            debug_wireless.send_str(msg)
-            debug_wireless.send_str("\r\n")
-        except Exception:
-            pass
+    # if debug_wireless is not None:
+    #     try:
+    #         debug_wireless.send_str(msg)
+    #         debug_wireless.send_str("\r\n")
+    #     except Exception:
+    #         pass
 
 
 # 停止所有电机
@@ -1354,7 +1366,77 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
 
     return s_fl, s_fr, s_b
 
-log("Wireless debug log enabled; master motion broadcast disabled")
+log("Wireless debug log disabled; master motion broadcast enabled")
+
+motion_tx_buf = bytearray(16)
+motion_seq = 0
+motion_last_tx_ms = 0
+
+
+def motion_next_seq():
+    global motion_seq
+    motion_seq = (motion_seq + 1) & 0xFF
+    if motion_seq == 0:
+        motion_seq = 1
+    return motion_seq
+
+
+def motion_put_u8(idx, value):
+    motion_tx_buf[idx] = int(value) & 0xFF
+
+
+def motion_put_i16(idx, value):
+    value = int(value)
+    if value > 32767:
+        value = 32767
+    elif value < -32768:
+        value = -32768
+    if value < 0:
+        value += 65536
+    motion_tx_buf[idx] = value & 0xFF
+    motion_tx_buf[idx + 1] = (value >> 8) & 0xFF
+
+
+def send_master_motion(now):
+    global motion_last_tx_ms
+
+    if motion_wireless is None:
+        return
+    if utime.ticks_diff(now, motion_last_tx_ms) < MASTER_MOTION_TX_PERIOD_MS:
+        return
+    flags = 0
+    vx = 0.0
+    vy = 0.0
+    wz = 0.0
+    if car_started:
+        flags = MASTER_MOTION_FLAG_STARTED | MASTER_MOTION_FLAG_CLOSED_LOOP
+        vx = cam_target_vx
+        vy = cam_target_vy
+        wz = last_vz_cmd
+    if cam_target_seen():
+        flags |= MASTER_MOTION_FLAG_TARGET
+    yaw_deg = imu_runtime.read_yaw() if (ENABLE_IMU and imu_runtime is not None) else 0.0
+    motion_put_u8(0, 0xA5)
+    motion_put_u8(1, 0x5A)
+    motion_put_u8(2, 11)
+    motion_put_u8(3, 0x19)
+    motion_put_u8(4, motion_next_seq())
+    motion_put_i16(5, vx * 10)
+    motion_put_i16(7, vy * 10)
+    motion_put_i16(9, wz * 10)
+    motion_put_i16(11, yaw_deg * 10)
+    motion_put_u8(13, flags)
+    checksum = 0
+    i = 2
+    while i < 14:
+        checksum = (checksum + motion_tx_buf[i]) & 0xFF
+        i += 1
+    motion_put_u8(14, checksum)
+    try:
+        motion_wireless.send_bytearray(motion_tx_buf, MASTER_MOTION_FRAME_LEN)
+        motion_last_tx_ms = now
+    except Exception:
+        pass
 
 # ====================== 初始化 LED 显示 ======================
 update_nav_led_display()
@@ -1706,6 +1788,7 @@ try:
         if pit_flag:
             pit_flag = False
             calc_speed_closed_loop()
+        send_master_motion(now)
 
         if utime.ticks_diff(now, last_status_ms) >= 1000:
             led.toggle()

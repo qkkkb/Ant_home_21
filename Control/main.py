@@ -184,6 +184,7 @@ Nav_Push_Turn_Fast_Rate = 170.0
 Nav_Push_Turn_Slow_Rate = 55.0
 Nav_Push_Turn_Gyro_Limit = 16.0
 Nav_Push_Turn_Ok_Yaw = 6.0
+Nav_Push_Turn_Recover_Yaw = 12.0
 Nav_Push_Turn_Ok_Ms = 150
 Nav_Post_Turn_No_Target_Ms = 100
 Nav_Post_Turn_Forward_Ms = 1500
@@ -224,6 +225,7 @@ nav_transition_ms = 0
 nav_push_prepare_ok_since_ms = 0
 nav_push_prepare_back_since_ms = 0
 nav_push_turn_ok_since_ms = 0
+push_turn_settle = False
 nav_ready_for_push = False
 field_up_yaw = 0.0
 field_right_yaw = 90.0
@@ -471,7 +473,7 @@ def nav_set_state(new_state, reason="", force=False):
     global nav_fine_brake_since_ms, nav_fine_brake_vy, nav_fine_forward_brake_since_ms
     global nav_fine_forward_brake_armed
     global nav_push_prepare_ok_since_ms, nav_push_prepare_back_since_ms, nav_push_turn_ok_since_ms
-    global nav_ready_for_push, cam_target_vx, cam_target_vy
+    global push_turn_settle, nav_ready_for_push, cam_target_vx, cam_target_vy
     global yaw_ref_deg, cam_rx_started, push_dir_code, push_dir_name
     global line_crossed, push_line_seen_once, push_line_lost_since_ms, push_line_extra_since_ms
     global push_return_yaw_target, search_turn_yaw_target
@@ -499,6 +501,7 @@ def nav_set_state(new_state, reason="", force=False):
     nav_push_prepare_ok_since_ms = 0
     nav_push_prepare_back_since_ms = 0
     nav_push_turn_ok_since_ms = 0
+    push_turn_settle = False
     nav_transition_ms = now
     nav_ready_for_push = False
     cam_target_vx = 0.0
@@ -617,6 +620,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
     global nav_fine_forward_brake_armed
     global nav_push_prepare_ok_since_ms, nav_push_prepare_back_since_ms, nav_push_turn_ok_since_ms
     global nav_ready_for_push
+    global push_turn_settle
     global cam_target_vx, cam_target_vy, yaw_ref_deg, push_yaw_target
     global line_crossed, push_line_seen_once, push_line_lost_since_ms, push_line_extra_since_ms
     global push_return_yaw_target, push_face_obj_yaw
@@ -1114,7 +1118,14 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         cam_target_vx = 0.0
         cam_target_vy = 0.0
         yaw_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg)) if ENABLE_IMU else 0.0
-        if (not ENABLE_IMU) or (yaw_err_abs <= Nav_Push_Turn_Ok_Yaw and low_speed and abs(gyro_z) <= 8.0):
+        if yaw_err_abs <= Nav_Push_Turn_Ok_Yaw:
+            if not push_turn_settle:
+                reset_gyro_pid_state()
+            push_turn_settle = True
+        elif push_turn_settle and yaw_err_abs > Nav_Push_Turn_Recover_Yaw:
+            push_turn_settle = False
+            nav_push_turn_ok_since_ms = 0
+        if (not ENABLE_IMU) or (push_turn_settle and low_speed and abs(gyro_z) <= 8.0):
             if nav_push_turn_ok_since_ms == 0:
                 nav_push_turn_ok_since_ms = now
             elif utime.ticks_diff(now, nav_push_turn_ok_since_ms) >= Nav_Push_Turn_Ok_Ms:
@@ -1683,14 +1694,17 @@ def calc_speed_closed_loop():
             turn_rate_cmd = 0.0
         gyro_rate_mode = True
     elif nav_state == NAV_STATE_PUSH_TURN:
-        push_turn_rate_mag = get_push_turn_rate(abs(yaw_err_deg))
-        if push_turn_rate_mag > 0.0:
-            if yaw_err_deg > 0.0:
-                turn_rate_cmd = push_turn_rate_mag
-            else:
-                turn_rate_cmd = -push_turn_rate_mag
-        else:
+        if push_turn_settle:
             turn_rate_cmd = 0.0
+        else:
+            push_turn_rate_mag = get_push_turn_rate(abs(yaw_err_deg))
+            if push_turn_rate_mag > 0.0:
+                if yaw_err_deg > 0.0:
+                    turn_rate_cmd = push_turn_rate_mag
+                else:
+                    turn_rate_cmd = -push_turn_rate_mag
+            else:
+                turn_rate_cmd = 0.0
         gyro_rate_mode = True
 
     if gyro_rate_mode:

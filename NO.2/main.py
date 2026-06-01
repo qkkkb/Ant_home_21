@@ -40,15 +40,15 @@ GYRO_SCALE = -1.0 / 16.54052
 GYRO_DEADBAND_DPS = 0.8
 GYRO_KP = 0.24
 GYRO_KI = 0.0005
-GYRO_PRIORITY_KP = 0.38
-GYRO_PRIORITY_KI = 0.0008
+GYRO_PRIORITY_KP = 0.24
+GYRO_PRIORITY_KI = 0.0
 GYRO_OUTPUT_LIMIT = 14.0
 GYRO_OUTPUT_BASE_LIMIT = 6.0
 GYRO_OUTPUT_TARGET_GAIN = 2.2
 GYRO_OUTPUT_MAX_LIMIT = 22.0
-GYRO_PRIORITY_OUTPUT_BASE_LIMIT = 8.0
-GYRO_PRIORITY_OUTPUT_TARGET_GAIN = 1.4
-GYRO_PRIORITY_OUTPUT_MAX_LIMIT = 28.0
+GYRO_PRIORITY_OUTPUT_BASE_LIMIT = 4.0
+GYRO_PRIORITY_OUTPUT_TARGET_GAIN = 1.0
+GYRO_PRIORITY_OUTPUT_MAX_LIMIT = 20.0
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True
 GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
@@ -66,9 +66,12 @@ WHEEL_TARGET_IDLE_EPS = 0.35
 FOLLOW_START_PWM = 6200
 FOLLOW_START_PWM_MID = 3600
 FOLLOW_START_PWM_LOW = 0
+FOLLOW_AP_START_PWM = 3200
+FOLLOW_AP_START_PWM_MID = 1800
 FOLLOW_STALL_BOOST_PWM = 8800
 FOLLOW_START_PWM_LOW_TARGET = 1.2
 FOLLOW_START_PWM_MID_TARGET = 2.8
+FOLLOW_AP_START_PWM_TARGET = 14.0
 FOLLOW_STALL_BOOST_TARGET = 2.8
 FOLLOW_RUN_PWM_LIMIT = 24000
 FOLLOW_STALL_BOOST_FRAMES = 3
@@ -119,12 +122,13 @@ Follow_Vision_Angle_Priority_Gain = -0.48
 Follow_Vision_Angle_Limit = 36.0
 Follow_Vision_Angle_Priority_Limit = 32.0
 Follow_Vision_Angle_Deadband = 4
-Follow_Angle_Priority_Enter_Error = 6
-Follow_Angle_Priority_Release_Error = 3
-Follow_Angle_Priority_Force_Error = 14
+Follow_Angle_Priority_Enter_Error = 12
+Follow_Angle_Priority_Release_Error = 8
+Follow_Angle_Priority_Force_Error = 16
 Follow_Angle_Priority_Max_Distance_Error = 45
 Follow_Angle_Priority_Vx_Limit = 1.5
 Follow_Angle_Priority_Vy_Limit = 4.0
+Follow_Angle_Priority_Turn_Deadband = 4.5
 Follow_Vision_Angle_Far_Limit = 18.0
 Follow_Vision_Angle_Close_Y = 36
 Follow_Command_Ramp_Vx = 5.0
@@ -626,8 +630,17 @@ def update_follow_targets(yaw_deg, gyro_z):
 
     turn_rate_cmd = ff_wz * Follow_Wz_Feedforward_Gain if use_motion_feedforward else 0.0
     turn_rate_cmd += vision_wz
-    turn_rate_cmd = ramp_value(turn_rate_cmd, last_cmd_wz, Follow_Command_Ramp_Wz)
-    last_cmd_wz = turn_rate_cmd
+    if (
+        angle_priority_active
+        and -Follow_Angle_Priority_Turn_Deadband
+        < turn_rate_cmd
+        < Follow_Angle_Priority_Turn_Deadband
+    ):
+        reset_turn_loop_state()
+        turn_rate_cmd = 0.0
+    else:
+        turn_rate_cmd = ramp_value(turn_rate_cmd, last_cmd_wz, Follow_Command_Ramp_Wz)
+        last_cmd_wz = turn_rate_cmd
     yaw_err = 0.0
     yaw_correction = 0.0
     if Follow_Yaw_Enable and fresh_motion and ENABLE_IMU:
@@ -759,6 +772,13 @@ def follow_start_pwm_for_target(target, stall_boost):
     target_abs = abs(target)
     if target_abs <= WHEEL_TARGET_IDLE_EPS:
         return 0
+    if last_angle_priority_active and not last_back_priority_active:
+        if target_abs < FOLLOW_START_PWM_LOW_TARGET:
+            return FOLLOW_START_PWM_LOW
+        if target_abs < FOLLOW_START_PWM_MID_TARGET:
+            return FOLLOW_AP_START_PWM_MID
+        if target_abs < FOLLOW_AP_START_PWM_TARGET:
+            return FOLLOW_AP_START_PWM
     if stall_boost and target_abs >= FOLLOW_STALL_BOOST_TARGET:
         return FOLLOW_STALL_BOOST_PWM
     if target_abs < FOLLOW_START_PWM_LOW_TARGET:

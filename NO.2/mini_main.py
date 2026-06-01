@@ -55,7 +55,10 @@ MAX_PAIR_DX = 90
 TARGET_PAIR_DX = 24
 TARGET_PAIR_DY = -12
 TARGET_CENTER_X_OFFSET = 12
+TARGET_CENTER_Y = 80
 ERROR_OUTPUT_SCALE = 2
+DIST_SPAN_WEIGHT = 1
+DIST_CENTER_Y_WEIGHT = 2
 PAIR_SPAN_WEIGHT = 3
 PAIR_ANGLE_WEIGHT = 2
 
@@ -348,7 +351,12 @@ def process_frame(img):
     center_y = (b0.cy() + b1.cy()) // 2
     pair_dy = pair_signed_dy(b0, b1)
     err_x = (center_x - (IMG_CENTER_X + TARGET_CENTER_X_OFFSET)) * ERROR_OUTPUT_SCALE
-    err_y = (TARGET_PAIR_DX - span_x) * ERROR_OUTPUT_SCALE
+    span_err_y = (TARGET_PAIR_DX - span_x) * ERROR_OUTPUT_SCALE
+    center_err_y = (TARGET_CENTER_Y - center_y) * ERROR_OUTPUT_SCALE
+    err_y = (
+        span_err_y * DIST_SPAN_WEIGHT
+        + center_err_y * DIST_CENTER_Y_WEIGHT
+    ) // (DIST_SPAN_WEIGHT + DIST_CENTER_Y_WEIGHT)
     err_angle = (pair_angle_error_num(pair_dy, span_x) * ERROR_OUTPUT_SCALE) // TARGET_PAIR_DX
     err_x, err_y, err_angle = update_ema(int(err_x), int(err_y), int(err_angle))
     send_error(err_x, err_y, err_angle)
@@ -362,7 +370,7 @@ def process_frame(img):
     if should_calib_log():
         print(
             "IR CALIB HIT center=(%d,%d) span_x=%d pair_dy=%d err=(%d,%d,%d) "
-            "target_center_x=%d roi=%s threshold=%s exposure_us=%d target_dx=%d target_dy=%d"
+            "target_center_x=%d target_center_y=%d roi=%s threshold=%s exposure_us=%d target_dx=%d target_dy=%d"
             % (
                 center_x,
                 center_y,
@@ -372,6 +380,7 @@ def process_frame(img):
                 err_y,
                 err_angle,
                 IMG_CENTER_X + TARGET_CENTER_X_OFFSET,
+                TARGET_CENTER_Y,
                 track_roi,
                 IR_THRESHOLDS,
                 EXPOSURE_US,

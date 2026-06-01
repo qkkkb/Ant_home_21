@@ -72,12 +72,9 @@ WHEEL_TARGET_IDLE_EPS = 0.35
 FOLLOW_START_PWM = 6200
 FOLLOW_START_PWM_MID = 3600
 FOLLOW_START_PWM_LOW = 0
-FOLLOW_AP_START_PWM = 3600
-FOLLOW_AP_START_PWM_MID = 1500
 FOLLOW_STALL_BOOST_PWM = 8800
 FOLLOW_START_PWM_LOW_TARGET = 1.2
 FOLLOW_START_PWM_MID_TARGET = 2.8
-FOLLOW_AP_START_PWM_TARGET = 14.0
 FOLLOW_STALL_BOOST_TARGET = 2.8
 FOLLOW_RUN_PWM_LIMIT = 24000
 FOLLOW_STALL_BOOST_FRAMES = 3
@@ -123,24 +120,15 @@ Follow_Hold_Feedforward_Gain = 1.70
 Follow_Wz_Feedforward_Gain = 1.60
 Follow_Wz_Forward_Gain = 0.0
 Follow_Wz_Lateral_Gain = -0.18
-Follow_Vision_Angle_Gain = -0.26
-Follow_Vision_Angle_Priority_Gain = -0.48
-Follow_Vision_Angle_Limit = 36.0
-Follow_Vision_Angle_Priority_Limit = 32.0
-Follow_Vision_Angle_Deadband = 4
-Follow_Angle_Priority_Enter_Error = 12
-Follow_Angle_Priority_Release_Error = 8
-Follow_Angle_Priority_Force_Error = 16
-Follow_Angle_Priority_Max_Distance_Error = 45
-Follow_Angle_Priority_Position_Guard_Y = 22
-Follow_Angle_Priority_Position_Guard_X = 28
-Follow_Angle_Priority_Turn_Deadband = 4.5
-Follow_Vision_Angle_Far_Limit = 18.0
-Follow_Vision_Angle_Close_Y = 36
+Follow_Pose_Angle_Gain = -0.52
+Follow_Pose_Angle_Limit = 30.0
+Follow_Pose_Angle_Deadband = 4
+Follow_Pose_Angle_Active_Error = 6
+Follow_Pose_Wheel_Target_Limit = 34.0
 Follow_Command_Ramp_Vx = 5.0
 Follow_Command_Ramp_Vy = 2.4
 Follow_Command_Ramp_Wz = 9.0
-Follow_Angle_Priority_Output_Ramp = 0.75
+Follow_Pose_Gyro_Output_Ramp = 2.4
 Follow_Yaw_Enable = False
 Follow_Yaw_Gain = 0.08
 Follow_Yaw_Limit = 15.0
@@ -376,46 +364,63 @@ def apply_distance_guard(vx, visual_vx, error_y):
     return vx
 
 
-def visual_angle_correction(error_angle, error_y, priority):
-    deadband = Follow_Vision_Angle_Deadband
-    gain = Follow_Vision_Angle_Gain
-    limit = Follow_Vision_Angle_Limit
-    if priority:
-        deadband = Follow_Angle_Priority_Release_Error
-        gain = Follow_Vision_Angle_Priority_Gain
-        limit = Follow_Vision_Angle_Priority_Limit
-    elif error_y > Follow_Vision_Angle_Close_Y:
-        limit = Follow_Vision_Angle_Far_Limit
-    if -deadband <= error_angle <= deadband:
+def calc_follow_lateral(error_x):
+    if -Follow_Lateral_Deadband <= error_x <= Follow_Lateral_Deadband:
         return 0.0
     return clamp(
-        error_angle * gain,
-        -limit,
-        limit,
+        -error_x * Follow_Lateral_Gain * Follow_Lateral_Error_Sign,
+        -Follow_Lateral_Limit,
+        Follow_Lateral_Limit,
     )
 
 
-def angle_priority_enabled(now, error_x, error_y, error_angle):
-    angle_abs = abs(error_angle)
-    distance_abs = abs(error_y)
-    lateral_abs = abs(error_x)
-    position_guard = (
-        distance_abs > Follow_Angle_Priority_Position_Guard_Y
-        or lateral_abs > Follow_Angle_Priority_Position_Guard_X
+def calc_follow_angle(error_angle):
+    if -Follow_Pose_Angle_Deadband <= error_angle <= Follow_Pose_Angle_Deadband:
+        return 0.0
+    return clamp(
+        error_angle * Follow_Pose_Angle_Gain,
+        -Follow_Pose_Angle_Limit,
+        Follow_Pose_Angle_Limit,
     )
-    if position_guard:
-        return False
-    if last_angle_priority_active:
-        return angle_abs > Follow_Angle_Priority_Release_Error
-    if angle_abs >= Follow_Angle_Priority_Force_Error:
-        return True
-    if (
-        last_distance_lock_ms == 0
-        or utime.ticks_diff(now, last_distance_lock_ms) > Follow_Distance_Lock_Hold_Ms
-        or distance_abs > Follow_Angle_Priority_Max_Distance_Error
-    ):
-        return False
-    return angle_abs >= Follow_Angle_Priority_Enter_Error
+
+
+def solve_follow_pose_twist(error_x, error_y, error_angle, ff_vx, ff_vy, ff_wz, use_ff):
+    cam_vx = calc_follow_forward(error_y)
+    cam_vy = calc_follow_lateral(error_x)
+    vision_wz = calc_follow_angle(error_angle)
+    body_vx, body_vy = rotate_camera_velocity_to_body(cam_vx, cam_vy)
+    vx = body_vx
+    vy = body_vy
+    wz = vision_wz
+    if use_ff:
+        vx += ff_vx * Follow_Feedforward_Gain
+        vy += ff_vy * Follow_Feedforward_Gain
+        vx += ff_wz * Follow_Wz_Forward_Gain
+        vy += ff_wz * Follow_Wz_Lateral_Gain
+        wz += ff_wz * Follow_Wz_Feedforward_Gain
+    angle_active = (
+        error_angle >= Follow_Pose_Angle_Active_Error
+        or error_angle <= -Follow_Pose_Angle_Active_Error
+    )
+    return vx, vy, wz, body_vx, body_vy, angle_active
+
+
+def pose_wheel_target_scale(vx, vy, vz):
+    if Follow_Pose_Wheel_Target_Limit <= 0.0:
+        return 1.0
+    wheel_fr = -vx * 0.866025 + vy * 0.5 + vz
+    wheel_fl = vx * 0.866025 + vy * 0.5 + vz
+    wheel_b = -vy + vz
+    max_abs = abs(wheel_fr)
+    tmp = abs(wheel_fl)
+    if tmp > max_abs:
+        max_abs = tmp
+    tmp = abs(wheel_b)
+    if tmp > max_abs:
+        max_abs = tmp
+    if max_abs <= Follow_Pose_Wheel_Target_Limit:
+        return 1.0
+    return Follow_Pose_Wheel_Target_Limit / max_abs
 
 
 def reset_turn_loop_state():
@@ -544,11 +549,9 @@ def update_follow_targets(yaw_deg, gyro_z):
     ff_vx = master_vx if fresh_motion else 0.0
     ff_vy = master_vy if fresh_motion else 0.0
     ff_wz = master_wz if fresh_motion else 0.0
-    cam_vx = 0.0
-    cam_vy = 0.0
     body_vx = 0.0
     body_vy = 0.0
-    vision_wz = 0.0
+    turn_rate_cmd = 0.0
     use_motion_feedforward = False
     angle_priority_active = False
     back_priority_active = False
@@ -560,28 +563,24 @@ def update_follow_targets(yaw_deg, gyro_z):
         back_priority_active = cam_error_y < -Follow_Forward_Deadband
         if -Follow_Distance_Lock_Error <= cam_error_y <= Follow_Distance_Lock_Error:
             last_distance_lock_ms = now
-        angle_priority_active = angle_priority_enabled(
-            now,
+        (
+            vx,
+            vy,
+            turn_rate_cmd,
+            body_vx,
+            body_vy,
+            angle_priority_active,
+        ) = solve_follow_pose_twist(
             cam_error_x,
             cam_error_y,
             cam_error_angle,
+            ff_vx,
+            ff_vy,
+            ff_wz,
+            use_motion_feedforward,
         )
-        if angle_priority_active != prev_angle_priority_active:
-            reset_turn_loop_state()
         last_angle_priority_active = angle_priority_active
         last_back_priority_active = back_priority_active
-        cam_vx = calc_follow_forward(cam_error_y)
-        cam_vy = -cam_error_x * Follow_Lateral_Gain * Follow_Lateral_Error_Sign
-        if -Follow_Lateral_Deadband <= cam_error_x <= Follow_Lateral_Deadband:
-            cam_vy = 0.0
-        vision_wz = visual_angle_correction(
-            cam_error_angle,
-            cam_error_y,
-            angle_priority_active,
-        )
-        body_vx, body_vy = rotate_camera_velocity_to_body(cam_vx, cam_vy)
-        vx = body_vx + ff_vx * Follow_Feedforward_Gain
-        vy = body_vy + ff_vy * Follow_Feedforward_Gain
     else:
         if target_lost_since_ms == 0:
             target_lost_since_ms = now
@@ -596,9 +595,6 @@ def update_follow_targets(yaw_deg, gyro_z):
             reset_turn_loop_state()
         last_angle_priority_active = False
         last_back_priority_active = False
-    if use_motion_feedforward:
-        vx += ff_wz * Follow_Wz_Forward_Gain
-        vy += ff_wz * Follow_Wz_Lateral_Gain
 
     if seen:
         vx = apply_distance_guard(vx, body_vx, cam_error_y)
@@ -644,14 +640,9 @@ def update_follow_targets(yaw_deg, gyro_z):
     cam_target_vx = vx
     cam_target_vy = vy
 
-    turn_rate_cmd = ff_wz * Follow_Wz_Feedforward_Gain if use_motion_feedforward else 0.0
-    turn_rate_cmd += vision_wz
-    if (
-        angle_priority_active
-        and -Follow_Angle_Priority_Turn_Deadband
-        < turn_rate_cmd
-        < Follow_Angle_Priority_Turn_Deadband
-    ):
+    if (not seen) and use_motion_feedforward:
+        turn_rate_cmd = ff_wz * Follow_Wz_Feedforward_Gain
+    if -0.001 < turn_rate_cmd < 0.001:
         reset_turn_loop_state()
         turn_rate_cmd = 0.0
     else:
@@ -673,11 +664,7 @@ def update_follow_targets(yaw_deg, gyro_z):
                 gyro_pid.gyro_output_limit = gyro_limit_for_turn(turn_rate_cmd, True)
                 gyro_pid.err = turn_rate_cmd - gyro_z
                 vz_cmd = priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z)
-                vz_cmd = ramp_value(
-                    vz_cmd,
-                    last_ap_vz_cmd,
-                    Follow_Angle_Priority_Output_Ramp,
-                )
+                vz_cmd = ramp_value(vz_cmd, last_ap_vz_cmd, Follow_Pose_Gyro_Output_Ramp)
                 last_ap_vz_cmd = vz_cmd
                 gyro_pid.output = vz_cmd
                 gyro_pid.err_last = gyro_pid.err
@@ -699,6 +686,16 @@ def update_follow_targets(yaw_deg, gyro_z):
     else:
         last_ap_vz_cmd = 0.0
         vz_cmd = turn_rate_cmd
+
+    pose_scale = pose_wheel_target_scale(cam_target_vx, cam_target_vy, vz_cmd)
+    if pose_scale < 1.0:
+        cam_target_vx *= pose_scale
+        cam_target_vy *= pose_scale
+        last_cmd_vx = cam_target_vx
+        last_cmd_vy = cam_target_vy
+        vz_cmd *= pose_scale
+        if ENABLE_GYRO_LOOP and gyro_pid is not None:
+            gyro_pid.output = vz_cmd
 
     last_turn_rate_cmd = turn_rate_cmd
     last_vz_cmd = vz_cmd
@@ -800,13 +797,6 @@ def follow_start_pwm_for_target(target, stall_boost):
     target_abs = abs(target)
     if target_abs <= WHEEL_TARGET_IDLE_EPS:
         return 0
-    if last_angle_priority_active and not last_back_priority_active:
-        if target_abs < FOLLOW_START_PWM_LOW_TARGET:
-            return FOLLOW_START_PWM_LOW
-        if target_abs < FOLLOW_START_PWM_MID_TARGET:
-            return FOLLOW_AP_START_PWM_MID
-        if target_abs < FOLLOW_AP_START_PWM_TARGET:
-            return FOLLOW_AP_START_PWM
     if stall_boost and target_abs >= FOLLOW_STALL_BOOST_TARGET:
         return FOLLOW_STALL_BOOST_PWM
     if target_abs < FOLLOW_START_PWM_LOW_TARGET:

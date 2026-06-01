@@ -40,17 +40,21 @@ GYRO_SCALE = -1.0 / 16.54052
 GYRO_DEADBAND_DPS = 0.8
 GYRO_KP = 0.24
 GYRO_KI = 0.0005
-GYRO_PRIORITY_KP = 1.05
+GYRO_PRIORITY_KP = 0.58
 GYRO_PRIORITY_KI = 0.0
 GYRO_OUTPUT_LIMIT = 14.0
 GYRO_OUTPUT_BASE_LIMIT = 6.0
 GYRO_OUTPUT_TARGET_GAIN = 2.2
 GYRO_OUTPUT_MAX_LIMIT = 22.0
-GYRO_PRIORITY_OUTPUT_BASE_LIMIT = 7.0
-GYRO_PRIORITY_OUTPUT_TARGET_GAIN = 1.1
-GYRO_PRIORITY_OUTPUT_MAX_LIMIT = 24.0
-GYRO_PRIORITY_MIN_OUTPUT = 7.0
-GYRO_PRIORITY_MIN_RATE_RATIO = 0.45
+GYRO_PRIORITY_OUTPUT_BASE_LIMIT = 4.5
+GYRO_PRIORITY_OUTPUT_TARGET_GAIN = 0.85
+GYRO_PRIORITY_OUTPUT_MAX_LIMIT = 18.0
+GYRO_PRIORITY_MIN_OUTPUT = 4.2
+GYRO_PRIORITY_MIN_RATE_RATIO = 0.35
+GYRO_PRIORITY_MIN_CMD = 6.5
+GYRO_PRIORITY_OVERSPEED_RATIO = 1.20
+GYRO_PRIORITY_BRAKE_KP = 0.22
+GYRO_PRIORITY_BRAKE_LIMIT = 5.0
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True
 GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
@@ -68,8 +72,8 @@ WHEEL_TARGET_IDLE_EPS = 0.35
 FOLLOW_START_PWM = 6200
 FOLLOW_START_PWM_MID = 3600
 FOLLOW_START_PWM_LOW = 0
-FOLLOW_AP_START_PWM = 4200
-FOLLOW_AP_START_PWM_MID = 1800
+FOLLOW_AP_START_PWM = 3600
+FOLLOW_AP_START_PWM_MID = 1500
 FOLLOW_STALL_BOOST_PWM = 8800
 FOLLOW_START_PWM_LOW_TARGET = 1.2
 FOLLOW_START_PWM_MID_TARGET = 2.8
@@ -136,6 +140,7 @@ Follow_Vision_Angle_Close_Y = 36
 Follow_Command_Ramp_Vx = 5.0
 Follow_Command_Ramp_Vy = 2.4
 Follow_Command_Ramp_Wz = 9.0
+Follow_Angle_Priority_Output_Ramp = 0.75
 Follow_Yaw_Enable = False
 Follow_Yaw_Gain = 0.08
 Follow_Yaw_Limit = 15.0
@@ -195,6 +200,7 @@ last_ff_wz = 0.0
 last_cmd_vx = 0.0
 last_cmd_vy = 0.0
 last_cmd_wz = 0.0
+last_ap_vz_cmd = 0.0
 last_distance_lock_ms = 0
 last_angle_priority_active = False
 last_back_priority_active = False
@@ -265,7 +271,7 @@ def clear_cam_target_state():
     global cam_error_x, cam_error_y, cam_last_rx_ms, cam_rx_buf
     global cam_error_angle
     global cam_has_target, cam_valid_target_since_ms, target_lost_since_ms
-    global last_cmd_vx, last_cmd_vy, last_cmd_wz
+    global last_cmd_vx, last_cmd_vy, last_cmd_wz, last_ap_vz_cmd
     global last_distance_lock_ms, last_angle_priority_active
     global last_back_priority_active
 
@@ -275,6 +281,7 @@ def clear_cam_target_state():
     last_cmd_vx = 0.0
     last_cmd_vy = 0.0
     last_cmd_wz = 0.0
+    last_ap_vz_cmd = 0.0
     last_distance_lock_ms = 0
     last_angle_priority_active = False
     last_back_priority_active = False
@@ -405,9 +412,10 @@ def angle_priority_enabled(now, error_y, error_angle):
 
 
 def reset_turn_loop_state():
-    global last_cmd_wz
+    global last_cmd_wz, last_ap_vz_cmd
 
     last_cmd_wz = 0.0
+    last_ap_vz_cmd = 0.0
     if ENABLE_GYRO_LOOP and gyro_pid is not None:
         gyro_pid.output = 0.0
         gyro_pid.err = 0.0
@@ -417,15 +425,19 @@ def reset_turn_loop_state():
 def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z):
     err = turn_rate_cmd - gyro_z
     limit = gyro_limit_for_turn(turn_rate_cmd, True)
-    out = clamp(err * GYRO_PRIORITY_KP, -limit, limit)
     turn_abs = abs(turn_rate_cmd)
     gyro_abs = abs(gyro_z)
     same_dir = (
         (turn_rate_cmd > 0.0 and gyro_z > 0.0)
         or (turn_rate_cmd < 0.0 and gyro_z < 0.0)
     )
+    if same_dir and gyro_abs > turn_abs * GYRO_PRIORITY_OVERSPEED_RATIO:
+        out = err * GYRO_PRIORITY_BRAKE_KP
+        return clamp(out, -GYRO_PRIORITY_BRAKE_LIMIT, GYRO_PRIORITY_BRAKE_LIMIT)
+
+    out = clamp(err * GYRO_PRIORITY_KP, -limit, limit)
     if (
-        turn_abs >= Follow_Angle_Priority_Turn_Deadband
+        turn_abs >= GYRO_PRIORITY_MIN_CMD
         and (not same_dir or gyro_abs < turn_abs * GYRO_PRIORITY_MIN_RATE_RATIO)
     ):
         if 0.0 < out < GYRO_PRIORITY_MIN_OUTPUT:
@@ -515,6 +527,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     global last_follow_seen, last_visual_vx, last_visual_vy
     global last_ff_vx, last_ff_vy, last_ff_wz
     global last_cmd_vx, last_cmd_vy, last_cmd_wz
+    global last_ap_vz_cmd
     global last_distance_lock_ms, last_angle_priority_active
     global last_back_priority_active
 
@@ -680,9 +693,16 @@ def update_follow_targets(yaw_deg, gyro_z):
                 gyro_pid.gyro_output_limit = gyro_limit_for_turn(turn_rate_cmd, True)
                 gyro_pid.err = turn_rate_cmd - gyro_z
                 vz_cmd = priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z)
+                vz_cmd = ramp_value(
+                    vz_cmd,
+                    last_ap_vz_cmd,
+                    Follow_Angle_Priority_Output_Ramp,
+                )
+                last_ap_vz_cmd = vz_cmd
                 gyro_pid.output = vz_cmd
                 gyro_pid.err_last = gyro_pid.err
             else:
+                last_ap_vz_cmd = 0.0
                 gyro_pid.gyro_kp = GYRO_KP
                 gyro_pid.gyro_ki = GYRO_KI
                 gyro_pid.gyro_output_limit = gyro_limit_for_turn(turn_rate_cmd)
@@ -695,7 +715,9 @@ def update_follow_targets(yaw_deg, gyro_z):
             gyro_pid.err_last = 0.0
             vz_cmd = 0.0
             last_cmd_wz = 0.0
+            last_ap_vz_cmd = 0.0
     else:
+        last_ap_vz_cmd = 0.0
         vz_cmd = turn_rate_cmd
 
     last_turn_rate_cmd = turn_rate_cmd
@@ -719,7 +741,7 @@ def stop_all():
 def reset_speed_outputs():
     global last_pwm_fl, last_pwm_fr, last_pwm_b
     global last_stall_count, last_stall_boost
-    global last_cmd_vx, last_cmd_vy, last_cmd_wz
+    global last_cmd_vx, last_cmd_vy, last_cmd_wz, last_ap_vz_cmd
     global last_angle_priority_active, last_back_priority_active
 
     speed_reset(pid_fl)
@@ -733,6 +755,7 @@ def reset_speed_outputs():
     last_cmd_vx = 0.0
     last_cmd_vy = 0.0
     last_cmd_wz = 0.0
+    last_ap_vz_cmd = 0.0
     last_angle_priority_active = False
     last_back_priority_active = False
 

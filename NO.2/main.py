@@ -40,10 +40,15 @@ GYRO_SCALE = -1.0 / 16.54052
 GYRO_DEADBAND_DPS = 0.8
 GYRO_KP = 0.24
 GYRO_KI = 0.0005
+GYRO_PRIORITY_KP = 0.75
+GYRO_PRIORITY_KI = 0.003
 GYRO_OUTPUT_LIMIT = 14.0
 GYRO_OUTPUT_BASE_LIMIT = 6.0
 GYRO_OUTPUT_TARGET_GAIN = 2.2
 GYRO_OUTPUT_MAX_LIMIT = 22.0
+GYRO_PRIORITY_OUTPUT_BASE_LIMIT = 10.0
+GYRO_PRIORITY_OUTPUT_TARGET_GAIN = 3.0
+GYRO_PRIORITY_OUTPUT_MAX_LIMIT = 42.0
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True
 GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
@@ -94,6 +99,9 @@ Follow_Distance_Far_Boost_Error = 6
 Follow_Distance_Far_Boost_Gain = 0.65
 Follow_Distance_Close_Gain = 0.76
 Follow_Distance_Close_Limit = 28.0
+Follow_Distance_Back_Min_Vx = 8.0
+Follow_Distance_Back_Max_Vx = 22.0
+Follow_Distance_Back_Vy_Limit = 5.0
 Follow_Distance_No_Forward_Error = 0
 Follow_Distance_Feedforward_Enable_Error = 20
 Follow_Distance_Min_Chase_Vx = 4.2
@@ -107,12 +115,13 @@ Follow_Wz_Feedforward_Gain = 1.60
 Follow_Wz_Forward_Gain = 0.0
 Follow_Wz_Lateral_Gain = -0.18
 Follow_Vision_Angle_Gain = -0.26
-Follow_Vision_Angle_Priority_Gain = -0.55
+Follow_Vision_Angle_Priority_Gain = -0.85
 Follow_Vision_Angle_Limit = 36.0
-Follow_Vision_Angle_Priority_Limit = 36.0
+Follow_Vision_Angle_Priority_Limit = 60.0
 Follow_Vision_Angle_Deadband = 4
 Follow_Angle_Priority_Enter_Error = 6
 Follow_Angle_Priority_Release_Error = 3
+Follow_Angle_Priority_Force_Error = 14
 Follow_Angle_Priority_Max_Distance_Error = 45
 Follow_Angle_Priority_Vx_Limit = 1.5
 Follow_Angle_Priority_Vy_Limit = 4.0
@@ -120,7 +129,7 @@ Follow_Vision_Angle_Far_Limit = 18.0
 Follow_Vision_Angle_Close_Y = 36
 Follow_Command_Ramp_Vx = 5.0
 Follow_Command_Ramp_Vy = 2.4
-Follow_Command_Ramp_Wz = 10.0
+Follow_Command_Ramp_Wz = 16.0
 Follow_Yaw_Enable = False
 Follow_Yaw_Gain = 0.08
 Follow_Yaw_Limit = 15.0
@@ -182,6 +191,7 @@ last_cmd_vy = 0.0
 last_cmd_wz = 0.0
 last_distance_lock_ms = 0
 last_angle_priority_active = False
+last_back_priority_active = False
 last_tune_log_ms = 0
 last_hard_stop = False
 last_stall_count = 0
@@ -210,12 +220,20 @@ def ramp_value(target, last, step):
     return target
 
 
-def gyro_limit_for_turn(turn_rate_cmd):
-    limit = GYRO_OUTPUT_BASE_LIMIT + abs(turn_rate_cmd) * GYRO_OUTPUT_TARGET_GAIN
-    if limit > GYRO_OUTPUT_MAX_LIMIT:
-        return GYRO_OUTPUT_MAX_LIMIT
-    if limit < GYRO_OUTPUT_BASE_LIMIT:
-        return GYRO_OUTPUT_BASE_LIMIT
+def gyro_limit_for_turn(turn_rate_cmd, priority=False):
+    if priority:
+        base_limit = GYRO_PRIORITY_OUTPUT_BASE_LIMIT
+        target_gain = GYRO_PRIORITY_OUTPUT_TARGET_GAIN
+        max_limit = GYRO_PRIORITY_OUTPUT_MAX_LIMIT
+    else:
+        base_limit = GYRO_OUTPUT_BASE_LIMIT
+        target_gain = GYRO_OUTPUT_TARGET_GAIN
+        max_limit = GYRO_OUTPUT_MAX_LIMIT
+    limit = base_limit + abs(turn_rate_cmd) * target_gain
+    if limit > max_limit:
+        return max_limit
+    if limit < base_limit:
+        return base_limit
     return limit
 
 
@@ -243,6 +261,7 @@ def clear_cam_target_state():
     global cam_has_target, cam_valid_target_since_ms, target_lost_since_ms
     global last_cmd_vx, last_cmd_vy, last_cmd_wz
     global last_distance_lock_ms, last_angle_priority_active
+    global last_back_priority_active
 
     cam_error_x = 0
     cam_error_y = 0
@@ -252,6 +271,7 @@ def clear_cam_target_state():
     last_cmd_wz = 0.0
     last_distance_lock_ms = 0
     last_angle_priority_active = False
+    last_back_priority_active = False
     cam_has_target = False
     cam_valid_target_since_ms = 0
     target_lost_since_ms = 0
@@ -317,7 +337,11 @@ def calc_follow_forward(error_y):
 
     out = error_y * Follow_Distance_Close_Gain * Follow_Forward_Error_Sign
     if Follow_Forward_Error_Sign >= 0:
+        if -Follow_Distance_Back_Min_Vx < out < 0.0:
+            out = -Follow_Distance_Back_Min_Vx
         return clamp(out, -Follow_Distance_Close_Limit, 0.0)
+    if 0.0 < out < Follow_Distance_Back_Min_Vx:
+        out = Follow_Distance_Back_Min_Vx
     return clamp(out, 0.0, Follow_Distance_Close_Limit)
 
 
@@ -361,14 +385,16 @@ def visual_angle_correction(error_angle, error_y, priority):
 def angle_priority_enabled(now, error_y, error_angle):
     angle_abs = abs(error_angle)
     distance_abs = abs(error_y)
+    if last_angle_priority_active:
+        return angle_abs > Follow_Angle_Priority_Release_Error
+    if angle_abs >= Follow_Angle_Priority_Force_Error:
+        return True
     if (
         last_distance_lock_ms == 0
         or utime.ticks_diff(now, last_distance_lock_ms) > Follow_Distance_Lock_Hold_Ms
         or distance_abs > Follow_Angle_Priority_Max_Distance_Error
     ):
         return False
-    if last_angle_priority_active:
-        return angle_abs > Follow_Angle_Priority_Release_Error
     return angle_abs >= Follow_Angle_Priority_Enter_Error
 
 
@@ -453,6 +479,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     global last_ff_vx, last_ff_vy, last_ff_wz
     global last_cmd_vx, last_cmd_vy, last_cmd_wz
     global last_distance_lock_ms, last_angle_priority_active
+    global last_back_priority_active
 
     now = utime.ticks_ms()
     seen = cam_target_seen()
@@ -467,10 +494,12 @@ def update_follow_targets(yaw_deg, gyro_z):
     vision_wz = 0.0
     use_motion_feedforward = False
     angle_priority_active = False
+    back_priority_active = False
 
     if seen:
         target_lost_since_ms = 0
         use_motion_feedforward = fresh_motion
+        back_priority_active = cam_error_y < -Follow_Forward_Deadband
         if -Follow_Distance_Lock_Error <= cam_error_y <= Follow_Distance_Lock_Error:
             last_distance_lock_ms = now
         angle_priority_active = angle_priority_enabled(
@@ -479,6 +508,7 @@ def update_follow_targets(yaw_deg, gyro_z):
             cam_error_angle,
         )
         last_angle_priority_active = angle_priority_active
+        last_back_priority_active = back_priority_active
         cam_vx = calc_follow_forward(cam_error_y)
         cam_vy = -cam_error_x * Follow_Lateral_Gain * Follow_Lateral_Error_Sign
         if -Follow_Lateral_Deadband <= cam_error_x <= Follow_Lateral_Deadband:
@@ -502,20 +532,38 @@ def update_follow_targets(yaw_deg, gyro_z):
             vx = 0.0
             vy = 0.0
         last_angle_priority_active = False
+        last_back_priority_active = False
     if use_motion_feedforward:
         vx += ff_wz * Follow_Wz_Forward_Gain
         vy += ff_wz * Follow_Wz_Lateral_Gain
 
     if seen:
         vx = apply_distance_guard(vx, body_vx, cam_error_y)
+        if back_priority_active:
+            if Follow_Forward_Error_Sign >= 0:
+                if vx > -Follow_Distance_Back_Min_Vx:
+                    vx = -Follow_Distance_Back_Min_Vx
+                elif vx < -Follow_Distance_Back_Max_Vx:
+                    vx = -Follow_Distance_Back_Max_Vx
+            else:
+                if vx < Follow_Distance_Back_Min_Vx:
+                    vx = Follow_Distance_Back_Min_Vx
+                elif vx > Follow_Distance_Back_Max_Vx:
+                    vx = Follow_Distance_Back_Max_Vx
+            vy = clamp(
+                vy,
+                -Follow_Distance_Back_Vy_Limit,
+                Follow_Distance_Back_Vy_Limit,
+            )
         if angle_priority_active:
             if cam_error_y > Follow_Distance_No_Forward_Error and vx > 0.0:
                 vx = 0.0
-            vx = clamp(
-                vx,
-                -Follow_Angle_Priority_Vx_Limit,
-                Follow_Angle_Priority_Vx_Limit,
-            )
+            if not back_priority_active:
+                vx = clamp(
+                    vx,
+                    -Follow_Angle_Priority_Vx_Limit,
+                    Follow_Angle_Priority_Vx_Limit,
+                )
             vy = clamp(
                 vy,
                 -Follow_Angle_Priority_Vy_Limit,
@@ -532,14 +580,23 @@ def update_follow_targets(yaw_deg, gyro_z):
     if seen and cam_error_y <= Follow_Forward_Deadband and vx <= 0.0 and last_cmd_vx > 0.0:
         # Do not let the ramp coast forward through the distance stop zone.
         last_cmd_vx = 0.0
+    if back_priority_active:
+        if last_cmd_vx > 0.0:
+            last_cmd_vx = 0.0
+        last_cmd_vy = clamp(
+            last_cmd_vy,
+            -Follow_Distance_Back_Vy_Limit,
+            Follow_Distance_Back_Vy_Limit,
+        )
     if angle_priority_active:
         if cam_error_y > Follow_Distance_No_Forward_Error and last_cmd_vx > 0.0:
             last_cmd_vx = 0.0
-        last_cmd_vx = clamp(
-            last_cmd_vx,
-            -Follow_Angle_Priority_Vx_Limit,
-            Follow_Angle_Priority_Vx_Limit,
-        )
+        if not back_priority_active:
+            last_cmd_vx = clamp(
+                last_cmd_vx,
+                -Follow_Angle_Priority_Vx_Limit,
+                Follow_Angle_Priority_Vx_Limit,
+            )
         last_cmd_vy = clamp(
             last_cmd_vy,
             -Follow_Angle_Priority_Vy_Limit,
@@ -566,9 +623,20 @@ def update_follow_targets(yaw_deg, gyro_z):
 
     if ENABLE_GYRO_LOOP and gyro_pid is not None:
         if FOLLOW_GYRO_HOLD_ENABLE or abs(turn_rate_cmd) > 0.001:
-            gyro_pid.gyro_output_limit = gyro_limit_for_turn(turn_rate_cmd)
+            if angle_priority_active:
+                gyro_pid.gyro_kp = GYRO_PRIORITY_KP
+                gyro_pid.gyro_ki = GYRO_PRIORITY_KI
+            else:
+                gyro_pid.gyro_kp = GYRO_KP
+                gyro_pid.gyro_ki = GYRO_KI
+            gyro_pid.gyro_output_limit = gyro_limit_for_turn(
+                turn_rate_cmd,
+                angle_priority_active,
+            )
             vz_cmd = gyro_ctrl(gyro_pid, turn_rate_cmd - gyro_z)
         else:
+            gyro_pid.gyro_kp = GYRO_KP
+            gyro_pid.gyro_ki = GYRO_KI
             gyro_pid.output = 0.0
             gyro_pid.err = 0.0
             gyro_pid.err_last = 0.0
@@ -599,7 +667,7 @@ def reset_speed_outputs():
     global last_pwm_fl, last_pwm_fr, last_pwm_b
     global last_stall_count, last_stall_boost
     global last_cmd_vx, last_cmd_vy, last_cmd_wz
-    global last_angle_priority_active
+    global last_angle_priority_active, last_back_priority_active
 
     speed_reset(pid_fl)
     speed_reset(pid_fr)
@@ -613,6 +681,7 @@ def reset_speed_outputs():
     last_cmd_vy = 0.0
     last_cmd_wz = 0.0
     last_angle_priority_active = False
+    last_back_priority_active = False
 
 
 def clamp_duty(value):
@@ -771,7 +840,7 @@ def wireless_tune_log(snap):
     try:
         wireless.send_str(
             "FT seen=%d err=%d,%d,%d vis=%.2f,%.2f out=%.2f,%.2f,%.2f wz=%.2f,%.2f,%.2f "
-            "tar=%.1f,%.1f,%.1f enc=%d,%d,%d pid=%d,%d,%d pwm=%d,%d,%d stop=%d boost=%d ap=%d "
+            "tar=%.1f,%.1f,%.1f enc=%d,%d,%d pid=%d,%d,%d pwm=%d,%d,%d stop=%d boost=%d ap=%d bp=%d "
             "g=%.2f glim=%.1f yaw=%.1f mf=%d rx=%d\r\n"
             % (
                 1 if last_follow_seen else 0,
@@ -801,6 +870,7 @@ def wireless_tune_log(snap):
                 int(snap["hard_stop"]),
                 int(snap["stall_boost"]),
                 1 if last_angle_priority_active else 0,
+                1 if last_back_priority_active else 0,
                 snap["gyro_z"],
                 snap["gyro_limit"],
                 snap["yaw_deg"],

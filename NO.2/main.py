@@ -40,15 +40,17 @@ GYRO_SCALE = -1.0 / 16.54052
 GYRO_DEADBAND_DPS = 0.8
 GYRO_KP = 0.24
 GYRO_KI = 0.0005
-GYRO_PRIORITY_KP = 0.24
+GYRO_PRIORITY_KP = 1.05
 GYRO_PRIORITY_KI = 0.0
 GYRO_OUTPUT_LIMIT = 14.0
 GYRO_OUTPUT_BASE_LIMIT = 6.0
 GYRO_OUTPUT_TARGET_GAIN = 2.2
 GYRO_OUTPUT_MAX_LIMIT = 22.0
-GYRO_PRIORITY_OUTPUT_BASE_LIMIT = 4.0
-GYRO_PRIORITY_OUTPUT_TARGET_GAIN = 1.0
-GYRO_PRIORITY_OUTPUT_MAX_LIMIT = 20.0
+GYRO_PRIORITY_OUTPUT_BASE_LIMIT = 7.0
+GYRO_PRIORITY_OUTPUT_TARGET_GAIN = 1.1
+GYRO_PRIORITY_OUTPUT_MAX_LIMIT = 24.0
+GYRO_PRIORITY_MIN_OUTPUT = 7.0
+GYRO_PRIORITY_MIN_RATE_RATIO = 0.45
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True
 GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
@@ -66,7 +68,7 @@ WHEEL_TARGET_IDLE_EPS = 0.35
 FOLLOW_START_PWM = 6200
 FOLLOW_START_PWM_MID = 3600
 FOLLOW_START_PWM_LOW = 0
-FOLLOW_AP_START_PWM = 3200
+FOLLOW_AP_START_PWM = 4200
 FOLLOW_AP_START_PWM_MID = 1800
 FOLLOW_STALL_BOOST_PWM = 8800
 FOLLOW_START_PWM_LOW_TARGET = 1.2
@@ -412,6 +414,27 @@ def reset_turn_loop_state():
         gyro_pid.err_last = 0.0
 
 
+def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z):
+    err = turn_rate_cmd - gyro_z
+    limit = gyro_limit_for_turn(turn_rate_cmd, True)
+    out = clamp(err * GYRO_PRIORITY_KP, -limit, limit)
+    turn_abs = abs(turn_rate_cmd)
+    gyro_abs = abs(gyro_z)
+    same_dir = (
+        (turn_rate_cmd > 0.0 and gyro_z > 0.0)
+        or (turn_rate_cmd < 0.0 and gyro_z < 0.0)
+    )
+    if (
+        turn_abs >= Follow_Angle_Priority_Turn_Deadband
+        and (not same_dir or gyro_abs < turn_abs * GYRO_PRIORITY_MIN_RATE_RATIO)
+    ):
+        if 0.0 < out < GYRO_PRIORITY_MIN_OUTPUT:
+            out = GYRO_PRIORITY_MIN_OUTPUT
+        elif -GYRO_PRIORITY_MIN_OUTPUT < out < 0.0:
+            out = -GYRO_PRIORITY_MIN_OUTPUT
+    return clamp(out, -limit, limit)
+
+
 def poll_art_uart():
     global cam_rx_buf, cam_has_target, cam_rx_started, cam_valid_target_since_ms
     global cam_last_rx_ms, target_lost_since_ms
@@ -654,14 +677,16 @@ def update_follow_targets(yaw_deg, gyro_z):
             if angle_priority_active:
                 gyro_pid.gyro_kp = GYRO_PRIORITY_KP
                 gyro_pid.gyro_ki = GYRO_PRIORITY_KI
+                gyro_pid.gyro_output_limit = gyro_limit_for_turn(turn_rate_cmd, True)
+                gyro_pid.err = turn_rate_cmd - gyro_z
+                vz_cmd = priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z)
+                gyro_pid.output = vz_cmd
+                gyro_pid.err_last = gyro_pid.err
             else:
                 gyro_pid.gyro_kp = GYRO_KP
                 gyro_pid.gyro_ki = GYRO_KI
-            gyro_pid.gyro_output_limit = gyro_limit_for_turn(
-                turn_rate_cmd,
-                angle_priority_active,
-            )
-            vz_cmd = gyro_ctrl(gyro_pid, turn_rate_cmd - gyro_z)
+                gyro_pid.gyro_output_limit = gyro_limit_for_turn(turn_rate_cmd)
+                vz_cmd = gyro_ctrl(gyro_pid, turn_rate_cmd - gyro_z)
         else:
             gyro_pid.gyro_kp = GYRO_KP
             gyro_pid.gyro_ki = GYRO_KI

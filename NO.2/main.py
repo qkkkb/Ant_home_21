@@ -40,15 +40,15 @@ GYRO_SCALE = -1.0 / 16.54052
 GYRO_DEADBAND_DPS = 0.8
 GYRO_KP = 0.24
 GYRO_KI = 0.0005
-GYRO_PRIORITY_KP = 0.75
-GYRO_PRIORITY_KI = 0.003
+GYRO_PRIORITY_KP = 0.38
+GYRO_PRIORITY_KI = 0.0008
 GYRO_OUTPUT_LIMIT = 14.0
 GYRO_OUTPUT_BASE_LIMIT = 6.0
 GYRO_OUTPUT_TARGET_GAIN = 2.2
 GYRO_OUTPUT_MAX_LIMIT = 22.0
-GYRO_PRIORITY_OUTPUT_BASE_LIMIT = 10.0
-GYRO_PRIORITY_OUTPUT_TARGET_GAIN = 3.0
-GYRO_PRIORITY_OUTPUT_MAX_LIMIT = 42.0
+GYRO_PRIORITY_OUTPUT_BASE_LIMIT = 8.0
+GYRO_PRIORITY_OUTPUT_TARGET_GAIN = 1.4
+GYRO_PRIORITY_OUTPUT_MAX_LIMIT = 28.0
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True
 GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
@@ -115,9 +115,9 @@ Follow_Wz_Feedforward_Gain = 1.60
 Follow_Wz_Forward_Gain = 0.0
 Follow_Wz_Lateral_Gain = -0.18
 Follow_Vision_Angle_Gain = -0.26
-Follow_Vision_Angle_Priority_Gain = -0.85
+Follow_Vision_Angle_Priority_Gain = -0.48
 Follow_Vision_Angle_Limit = 36.0
-Follow_Vision_Angle_Priority_Limit = 60.0
+Follow_Vision_Angle_Priority_Limit = 32.0
 Follow_Vision_Angle_Deadband = 4
 Follow_Angle_Priority_Enter_Error = 6
 Follow_Angle_Priority_Release_Error = 3
@@ -129,7 +129,7 @@ Follow_Vision_Angle_Far_Limit = 18.0
 Follow_Vision_Angle_Close_Y = 36
 Follow_Command_Ramp_Vx = 5.0
 Follow_Command_Ramp_Vy = 2.4
-Follow_Command_Ramp_Wz = 16.0
+Follow_Command_Ramp_Wz = 9.0
 Follow_Yaw_Enable = False
 Follow_Yaw_Gain = 0.08
 Follow_Yaw_Limit = 15.0
@@ -398,6 +398,16 @@ def angle_priority_enabled(now, error_y, error_angle):
     return angle_abs >= Follow_Angle_Priority_Enter_Error
 
 
+def reset_turn_loop_state():
+    global last_cmd_wz
+
+    last_cmd_wz = 0.0
+    if ENABLE_GYRO_LOOP and gyro_pid is not None:
+        gyro_pid.output = 0.0
+        gyro_pid.err = 0.0
+        gyro_pid.err_last = 0.0
+
+
 def poll_art_uart():
     global cam_rx_buf, cam_has_target, cam_rx_started, cam_valid_target_since_ms
     global cam_last_rx_ms, target_lost_since_ms
@@ -495,6 +505,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     use_motion_feedforward = False
     angle_priority_active = False
     back_priority_active = False
+    prev_angle_priority_active = last_angle_priority_active
 
     if seen:
         target_lost_since_ms = 0
@@ -507,6 +518,8 @@ def update_follow_targets(yaw_deg, gyro_z):
             cam_error_y,
             cam_error_angle,
         )
+        if angle_priority_active != prev_angle_priority_active:
+            reset_turn_loop_state()
         last_angle_priority_active = angle_priority_active
         last_back_priority_active = back_priority_active
         cam_vx = calc_follow_forward(cam_error_y)
@@ -531,6 +544,8 @@ def update_follow_targets(yaw_deg, gyro_z):
         else:
             vx = 0.0
             vy = 0.0
+        if prev_angle_priority_active:
+            reset_turn_loop_state()
         last_angle_priority_active = False
         last_back_priority_active = False
     if use_motion_feedforward:

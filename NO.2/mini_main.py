@@ -49,18 +49,19 @@ MIN_PIXELS = 3
 MIN_AREA = 3
 MAX_LAMP_W = 14
 MAX_LAMP_H = 14
-MAX_PAIR_DY = 16
+MAX_PAIR_DY = 36
 MIN_PAIR_DX = 4
 MAX_PAIR_DX = 90
 TARGET_PAIR_DX = 24
 TARGET_PAIR_DY = -12
+TARGET_PAIR_LEN = 26
 TARGET_CENTER_X_OFFSET = 12
 TARGET_CENTER_Y = 80
 ERROR_OUTPUT_SCALE = 2
-DIST_SPAN_WEIGHT = 1
-DIST_CENTER_Y_WEIGHT = 2
-PAIR_SPAN_WEIGHT = 3
-PAIR_ANGLE_WEIGHT = 2
+DIST_PAIR_LEN_WEIGHT = 4
+DIST_CENTER_Y_WEIGHT = 1
+PAIR_LEN_WEIGHT = 4
+PAIR_ANGLE_WEIGHT = 1
 
 MAX_PAIR_BLOBS = 10
 ROI_PAD_X = 36
@@ -183,6 +184,17 @@ def collect_candidate_blobs(blobs):
     return count
 
 
+def isqrt(value):
+    if value <= 0:
+        return 0
+    x = value
+    y = (x + 1) // 2
+    while y < x:
+        x = y
+        y = (x + value // x) // 2
+    return x
+
+
 def pair_signed_dy(b0, b1):
     if b0.cx() >= b1.cx():
         return b0.cy() - b1.cy()
@@ -193,11 +205,13 @@ def pair_angle_error_num(pair_dy, span_x):
     return pair_dy * TARGET_PAIR_DX - TARGET_PAIR_DY * span_x
 
 
-def pair_angle_error(pair_dy, span_x):
+def pair_angle_error(pair_dy, span_x, pair_len):
     err = pair_angle_error_num(pair_dy, span_x)
     if err < 0:
         err = -err
-    return err // TARGET_PAIR_DX
+    if pair_len <= 0:
+        return err
+    return err // pair_len
 
 
 def find_lamp_pair(img, roi):
@@ -236,12 +250,13 @@ def find_lamp_pair(img, roi):
                 dy = -dy
             if dx < MIN_PAIR_DX or dx > MAX_PAIR_DX or dy > MAX_PAIR_DY:
                 continue
+            pair_len = isqrt(dx * dx + dy * dy)
             score = b0.pixels() + b1.pixels()
-            span_err = dx - TARGET_PAIR_DX
-            if span_err < 0:
-                span_err = -span_err
-            angle_err = pair_angle_error(pair_signed_dy(b0, b1), dx)
-            cost = span_err * PAIR_SPAN_WEIGHT + angle_err * PAIR_ANGLE_WEIGHT
+            len_err = pair_len - TARGET_PAIR_LEN
+            if len_err < 0:
+                len_err = -len_err
+            angle_err = pair_angle_error(pair_signed_dy(b0, b1), dx, pair_len)
+            cost = len_err * PAIR_LEN_WEIGHT + angle_err * PAIR_ANGLE_WEIGHT
             if cost < best_cost or (cost == best_cost and score > best_score):
                 best_b0 = b0
                 best_b1 = b1
@@ -350,14 +365,19 @@ def process_frame(img):
     center_x = (b0.cx() + b1.cx()) // 2
     center_y = (b0.cy() + b1.cy()) // 2
     pair_dy = pair_signed_dy(b0, b1)
+    pair_len = isqrt(span_x * span_x + pair_dy * pair_dy)
     err_x = (center_x - (IMG_CENTER_X + TARGET_CENTER_X_OFFSET)) * ERROR_OUTPUT_SCALE
-    span_err_y = (TARGET_PAIR_DX - span_x) * ERROR_OUTPUT_SCALE
-    center_err_y = (TARGET_CENTER_Y - center_y) * ERROR_OUTPUT_SCALE
+    len_err_y = (TARGET_PAIR_LEN - pair_len) * ERROR_OUTPUT_SCALE
+    center_err_y = -(TARGET_CENTER_Y - center_y) * ERROR_OUTPUT_SCALE
     err_y = (
-        span_err_y * DIST_SPAN_WEIGHT
+        len_err_y * DIST_PAIR_LEN_WEIGHT
         + center_err_y * DIST_CENTER_Y_WEIGHT
-    ) // (DIST_SPAN_WEIGHT + DIST_CENTER_Y_WEIGHT)
-    err_angle = (pair_angle_error_num(pair_dy, span_x) * ERROR_OUTPUT_SCALE) // TARGET_PAIR_DX
+    ) // (DIST_PAIR_LEN_WEIGHT + DIST_CENTER_Y_WEIGHT)
+    angle_raw = pair_angle_error_num(pair_dy, span_x)
+    if pair_len > 0:
+        err_angle = (angle_raw * ERROR_OUTPUT_SCALE) // pair_len
+    else:
+        err_angle = 0
     err_x, err_y, err_angle = update_ema(int(err_x), int(err_y), int(err_angle))
     send_error(err_x, err_y, err_angle)
 
@@ -369,13 +389,19 @@ def process_frame(img):
             img.draw_rectangle(track_roi, color=255)
     if should_calib_log():
         print(
-            "IR CALIB HIT center=(%d,%d) span_x=%d pair_dy=%d err=(%d,%d,%d) "
-            "target_center_x=%d target_center_y=%d roi=%s threshold=%s exposure_us=%d target_dx=%d target_dy=%d"
+            "IR CALIB HIT center=(%d,%d) span_x=%d pair_dy=%d pair_len=%d "
+            "dist=(%d,%d) angle_raw=%d err=(%d,%d,%d) "
+            "target_center_x=%d target_center_y=%d roi=%s threshold=%s exposure_us=%d "
+            "target_dx=%d target_dy=%d target_len=%d"
             % (
                 center_x,
                 center_y,
                 span_x,
                 pair_dy,
+                pair_len,
+                len_err_y,
+                center_err_y,
+                angle_raw,
                 err_x,
                 err_y,
                 err_angle,
@@ -386,6 +412,7 @@ def process_frame(img):
                 EXPOSURE_US,
                 TARGET_PAIR_DX,
                 TARGET_PAIR_DY,
+                TARGET_PAIR_LEN,
             )
         )
         if CALIB_LOG_BLOBS:

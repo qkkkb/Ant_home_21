@@ -132,8 +132,8 @@ Follow_Angle_Priority_Enter_Error = 12
 Follow_Angle_Priority_Release_Error = 8
 Follow_Angle_Priority_Force_Error = 16
 Follow_Angle_Priority_Max_Distance_Error = 45
-Follow_Angle_Priority_Vx_Limit = 1.5
-Follow_Angle_Priority_Vy_Limit = 4.0
+Follow_Angle_Priority_Position_Guard_Y = 22
+Follow_Angle_Priority_Position_Guard_X = 28
 Follow_Angle_Priority_Turn_Deadband = 4.5
 Follow_Vision_Angle_Far_Limit = 18.0
 Follow_Vision_Angle_Close_Y = 36
@@ -395,9 +395,16 @@ def visual_angle_correction(error_angle, error_y, priority):
     )
 
 
-def angle_priority_enabled(now, error_y, error_angle):
+def angle_priority_enabled(now, error_x, error_y, error_angle):
     angle_abs = abs(error_angle)
     distance_abs = abs(error_y)
+    lateral_abs = abs(error_x)
+    position_guard = (
+        distance_abs > Follow_Angle_Priority_Position_Guard_Y
+        or lateral_abs > Follow_Angle_Priority_Position_Guard_X
+    )
+    if position_guard:
+        return False
     if last_angle_priority_active:
         return angle_abs > Follow_Angle_Priority_Release_Error
     if angle_abs >= Follow_Angle_Priority_Force_Error:
@@ -555,6 +562,7 @@ def update_follow_targets(yaw_deg, gyro_z):
             last_distance_lock_ms = now
         angle_priority_active = angle_priority_enabled(
             now,
+            cam_error_x,
             cam_error_y,
             cam_error_angle,
         )
@@ -610,20 +618,6 @@ def update_follow_targets(yaw_deg, gyro_z):
                 -Follow_Distance_Back_Vy_Limit,
                 Follow_Distance_Back_Vy_Limit,
             )
-        if angle_priority_active:
-            if cam_error_y > Follow_Distance_No_Forward_Error and vx > 0.0:
-                vx = 0.0
-            if not back_priority_active:
-                vx = clamp(
-                    vx,
-                    -Follow_Angle_Priority_Vx_Limit,
-                    Follow_Angle_Priority_Vx_Limit,
-                )
-            vy = clamp(
-                vy,
-                -Follow_Angle_Priority_Vy_Limit,
-                Follow_Angle_Priority_Vy_Limit,
-            )
 
     vx_limit = Follow_Forward_Limit
     vy_limit = Follow_Lateral_Limit
@@ -642,20 +636,6 @@ def update_follow_targets(yaw_deg, gyro_z):
             last_cmd_vy,
             -Follow_Distance_Back_Vy_Limit,
             Follow_Distance_Back_Vy_Limit,
-        )
-    if angle_priority_active:
-        if cam_error_y > Follow_Distance_No_Forward_Error and last_cmd_vx > 0.0:
-            last_cmd_vx = 0.0
-        if not back_priority_active:
-            last_cmd_vx = clamp(
-                last_cmd_vx,
-                -Follow_Angle_Priority_Vx_Limit,
-                Follow_Angle_Priority_Vx_Limit,
-            )
-        last_cmd_vy = clamp(
-            last_cmd_vy,
-            -Follow_Angle_Priority_Vy_Limit,
-            Follow_Angle_Priority_Vy_Limit,
         )
     vx = ramp_value(vx, last_cmd_vx, Follow_Command_Ramp_Vx)
     vy = ramp_value(vy, last_cmd_vy, Follow_Command_Ramp_Vy)

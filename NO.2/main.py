@@ -95,12 +95,18 @@ ART_MODE_IDLE_CMD = b"IDLE\n"
 # ====================== Follow control ======================
 Follow_Forward_Gain = 0.50
 Follow_Lateral_Gain = 0.22
+Follow_Orbit_Forward_Gain = 0.76
+Follow_Orbit_Lateral_Gain = 0.38
 Follow_Forward_Error_Sign = 1.0
 Follow_Lateral_Error_Sign = -1.0
 Follow_Forward_Limit = 58.0
 Follow_Lateral_Limit = 36.0
 Follow_Forward_Deadband = 4
 Follow_Lateral_Deadband = 6
+Follow_Orbit_Forward_Deadband = 3
+Follow_Orbit_Lateral_Deadband = 2
+Follow_Orbit_Position_X_Error = 4
+Follow_Orbit_Position_Y_Error = 4
 Follow_Distance_Far_Boost_Error = 6
 Follow_Distance_Far_Boost_Gain = 0.65
 Follow_Distance_Close_Gain = 0.76
@@ -127,6 +133,8 @@ Follow_Pose_Angle_Active_Error = 6
 Follow_Pose_Wheel_Target_Limit = 34.0
 Follow_Command_Ramp_Vx = 5.0
 Follow_Command_Ramp_Vy = 2.4
+Follow_Orbit_Command_Ramp_Vx = 8.0
+Follow_Orbit_Command_Ramp_Vy = 5.0
 Follow_Command_Ramp_Wz = 9.0
 Follow_Pose_Gyro_Output_Ramp = 2.4
 Follow_Yaw_Enable = False
@@ -317,12 +325,24 @@ def follow_limit(base_limit, master_value, extra):
     return limit
 
 
-def calc_follow_forward(error_y):
-    if -Follow_Forward_Deadband <= error_y <= Follow_Forward_Deadband:
+def position_priority_needed(error_x, error_y, angle_active):
+    return (
+        angle_active
+        or error_x >= Follow_Orbit_Position_X_Error
+        or error_x <= -Follow_Orbit_Position_X_Error
+        or error_y >= Follow_Orbit_Position_Y_Error
+        or error_y <= -Follow_Orbit_Position_Y_Error
+    )
+
+
+def calc_follow_forward(error_y, position_priority=False):
+    deadband = Follow_Orbit_Forward_Deadband if position_priority else Follow_Forward_Deadband
+    if -deadband <= error_y <= deadband:
         return 0.0
 
     if error_y > 0:
-        out = error_y * Follow_Forward_Gain
+        gain = Follow_Orbit_Forward_Gain if position_priority else Follow_Forward_Gain
+        out = error_y * gain
         if error_y > Follow_Distance_Far_Boost_Error:
             out += (
                 error_y - Follow_Distance_Far_Boost_Error
@@ -364,11 +384,13 @@ def apply_distance_guard(vx, visual_vx, error_y):
     return vx
 
 
-def calc_follow_lateral(error_x):
-    if -Follow_Lateral_Deadband <= error_x <= Follow_Lateral_Deadband:
+def calc_follow_lateral(error_x, position_priority=False):
+    deadband = Follow_Orbit_Lateral_Deadband if position_priority else Follow_Lateral_Deadband
+    if -deadband <= error_x <= deadband:
         return 0.0
+    gain = Follow_Orbit_Lateral_Gain if position_priority else Follow_Lateral_Gain
     return clamp(
-        -error_x * Follow_Lateral_Gain * Follow_Lateral_Error_Sign,
+        -error_x * gain * Follow_Lateral_Error_Sign,
         -Follow_Lateral_Limit,
         Follow_Lateral_Limit,
     )
@@ -385,9 +407,14 @@ def calc_follow_angle(error_angle):
 
 
 def solve_follow_pose_twist(error_x, error_y, error_angle, ff_vx, ff_vy, ff_wz, use_ff):
-    cam_vx = calc_follow_forward(error_y)
-    cam_vy = calc_follow_lateral(error_x)
     vision_wz = calc_follow_angle(error_angle)
+    angle_active = (
+        error_angle >= Follow_Pose_Angle_Active_Error
+        or error_angle <= -Follow_Pose_Angle_Active_Error
+    )
+    position_priority = position_priority_needed(error_x, error_y, angle_active)
+    cam_vx = calc_follow_forward(error_y, position_priority)
+    cam_vy = calc_follow_lateral(error_x, position_priority)
     body_vx, body_vy = rotate_camera_velocity_to_body(cam_vx, cam_vy)
     vx = body_vx
     vy = body_vy
@@ -398,19 +425,17 @@ def solve_follow_pose_twist(error_x, error_y, error_angle, ff_vx, ff_vy, ff_wz, 
         vx += ff_wz * Follow_Wz_Forward_Gain
         vy += ff_wz * Follow_Wz_Lateral_Gain
         wz += ff_wz * Follow_Wz_Feedforward_Gain
-    angle_active = (
-        error_angle >= Follow_Pose_Angle_Active_Error
-        or error_angle <= -Follow_Pose_Angle_Active_Error
-    )
-    return vx, vy, wz, body_vx, body_vy, angle_active
+    return vx, vy, wz, body_vx, body_vy, angle_active, position_priority
 
 
-def pose_wheel_target_scale(vx, vy, vz):
-    if Follow_Pose_Wheel_Target_Limit <= 0.0:
-        return 1.0
+def pose_wheel_targets(vx, vy, vz):
     wheel_fr = -vx * 0.866025 + vy * 0.5 + vz
     wheel_fl = vx * 0.866025 + vy * 0.5 + vz
     wheel_b = -vy + vz
+    return wheel_fr, wheel_fl, wheel_b
+
+
+def max_wheel_abs(wheel_fr, wheel_fl, wheel_b):
     max_abs = abs(wheel_fr)
     tmp = abs(wheel_fl)
     if tmp > max_abs:
@@ -418,9 +443,50 @@ def pose_wheel_target_scale(vx, vy, vz):
     tmp = abs(wheel_b)
     if tmp > max_abs:
         max_abs = tmp
-    if max_abs <= Follow_Pose_Wheel_Target_Limit:
-        return 1.0
-    return Follow_Pose_Wheel_Target_Limit / max_abs
+    return max_abs
+
+
+def limit_pose_twist_for_wheels(vx, vy, vz):
+    if Follow_Pose_Wheel_Target_Limit <= 0.0:
+        return vx, vy, vz
+
+    wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
+    pos_max = max_wheel_abs(wheel_fr, wheel_fl, wheel_b)
+    if pos_max > Follow_Pose_Wheel_Target_Limit:
+        pos_scale = Follow_Pose_Wheel_Target_Limit / pos_max
+        vx *= pos_scale
+        vy *= pos_scale
+        wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
+
+    if -0.001 < vz < 0.001:
+        return vx, vy, 0.0
+
+    if vz > 0.0:
+        remain = Follow_Pose_Wheel_Target_Limit - wheel_fr
+        tmp = Follow_Pose_Wheel_Target_Limit - wheel_fl
+        if tmp < remain:
+            remain = tmp
+        tmp = Follow_Pose_Wheel_Target_Limit - wheel_b
+        if tmp < remain:
+            remain = tmp
+        if remain < 0.0:
+            remain = 0.0
+        if vz > remain:
+            vz = remain
+    else:
+        remain = Follow_Pose_Wheel_Target_Limit + wheel_fr
+        tmp = Follow_Pose_Wheel_Target_Limit + wheel_fl
+        if tmp < remain:
+            remain = tmp
+        tmp = Follow_Pose_Wheel_Target_Limit + wheel_b
+        if tmp < remain:
+            remain = tmp
+        if remain < 0.0:
+            remain = 0.0
+        if -vz > remain:
+            vz = -remain
+
+    return vx, vy, vz
 
 
 def reset_turn_loop_state():
@@ -554,6 +620,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     turn_rate_cmd = 0.0
     use_motion_feedforward = False
     angle_priority_active = False
+    position_priority_active = False
     back_priority_active = False
     prev_angle_priority_active = last_angle_priority_active
 
@@ -570,6 +637,7 @@ def update_follow_targets(yaw_deg, gyro_z):
             body_vx,
             body_vy,
             angle_priority_active,
+            position_priority_active,
         ) = solve_follow_pose_twist(
             cam_error_x,
             cam_error_y,
@@ -633,8 +701,14 @@ def update_follow_targets(yaw_deg, gyro_z):
             -Follow_Distance_Back_Vy_Limit,
             Follow_Distance_Back_Vy_Limit,
         )
-    vx = ramp_value(vx, last_cmd_vx, Follow_Command_Ramp_Vx)
-    vy = ramp_value(vy, last_cmd_vy, Follow_Command_Ramp_Vy)
+    if position_priority_active:
+        vx_ramp = Follow_Orbit_Command_Ramp_Vx
+        vy_ramp = Follow_Orbit_Command_Ramp_Vy
+    else:
+        vx_ramp = Follow_Command_Ramp_Vx
+        vy_ramp = Follow_Command_Ramp_Vy
+    vx = ramp_value(vx, last_cmd_vx, vx_ramp)
+    vy = ramp_value(vy, last_cmd_vy, vy_ramp)
     last_cmd_vx = vx
     last_cmd_vy = vy
     cam_target_vx = vx
@@ -687,15 +761,15 @@ def update_follow_targets(yaw_deg, gyro_z):
         last_ap_vz_cmd = 0.0
         vz_cmd = turn_rate_cmd
 
-    pose_scale = pose_wheel_target_scale(cam_target_vx, cam_target_vy, vz_cmd)
-    if pose_scale < 1.0:
-        cam_target_vx *= pose_scale
-        cam_target_vy *= pose_scale
-        last_cmd_vx = cam_target_vx
-        last_cmd_vy = cam_target_vy
-        vz_cmd *= pose_scale
-        if ENABLE_GYRO_LOOP and gyro_pid is not None:
-            gyro_pid.output = vz_cmd
+    cam_target_vx, cam_target_vy, vz_cmd = limit_pose_twist_for_wheels(
+        cam_target_vx,
+        cam_target_vy,
+        vz_cmd,
+    )
+    last_cmd_vx = cam_target_vx
+    last_cmd_vy = cam_target_vy
+    if ENABLE_GYRO_LOOP and gyro_pid is not None:
+        gyro_pid.output = vz_cmd
 
     last_turn_rate_cmd = turn_rate_cmd
     last_vz_cmd = vz_cmd

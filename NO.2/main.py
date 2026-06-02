@@ -129,8 +129,8 @@ Follow_Feedforward_Lateral_Limit = 3.0
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Wz_Feedforward_Gain = 1.60
 Follow_Wz_Feedforward_Limit = 9.0
-Follow_Wz_Forward_Gain = 0.0
-Follow_Wz_Lateral_Gain = -0.18
+Follow_Target_Point_Wz_To_Vx = 0.0
+Follow_Target_Point_Wz_To_Vy = -0.18
 Follow_Pose_Angle_Gain = -0.70
 Follow_Pose_Angle_Limit = 42.0
 Follow_Pose_Angle_Deadband = 4
@@ -438,20 +438,20 @@ def solve_follow_pose_twist(error_x, error_y, error_angle, ff_vx, ff_vy, ff_wz, 
     vy = body_vy
     wz = vision_wz
     if use_ff:
+        target_ff_vx = ff_vx + ff_wz * Follow_Target_Point_Wz_To_Vx
+        target_ff_vy = ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
         vx = add_feedforward_assist(
             vx,
-            ff_vx,
+            target_ff_vx,
             Follow_Feedforward_Forward_Gain,
             Follow_Feedforward_Forward_Limit,
         )
         vy = add_feedforward_assist(
             vy,
-            ff_vy,
+            target_ff_vy,
             Follow_Feedforward_Lateral_Gain,
             Follow_Feedforward_Lateral_Limit,
         )
-        vx += ff_wz * Follow_Wz_Forward_Gain
-        vy += ff_wz * Follow_Wz_Lateral_Gain
         wz = add_feedforward_assist(
             wz,
             ff_wz,

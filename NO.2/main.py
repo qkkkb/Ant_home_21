@@ -122,9 +122,13 @@ Follow_Distance_Approach_Slow_Error = 4
 Follow_Distance_Approach_Vx_Limit = 0.0
 Follow_Distance_Lock_Error = 4
 Follow_Distance_Lock_Hold_Ms = 450
-Follow_Feedforward_Gain = 2.25
+Follow_Feedforward_Forward_Gain = 1.35
+Follow_Feedforward_Lateral_Gain = 0.60
+Follow_Feedforward_Forward_Limit = 8.0
+Follow_Feedforward_Lateral_Limit = 5.0
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Wz_Feedforward_Gain = 1.60
+Follow_Wz_Feedforward_Limit = 9.0
 Follow_Wz_Forward_Gain = 0.0
 Follow_Wz_Lateral_Gain = -0.18
 Follow_Pose_Angle_Gain = -0.52
@@ -411,6 +415,15 @@ def calc_follow_angle(error_angle):
     )
 
 
+def add_feedforward_assist(base, feedforward, gain, limit):
+    assist = clamp(feedforward * gain, -limit, limit)
+    if base > 0.001 and assist < -0.001:
+        return base
+    if base < -0.001 and assist > 0.001:
+        return base
+    return base + assist
+
+
 def solve_follow_pose_twist(error_x, error_y, error_angle, ff_vx, ff_vy, ff_wz, use_ff):
     vision_wz = calc_follow_angle(error_angle)
     angle_active = (
@@ -425,11 +438,26 @@ def solve_follow_pose_twist(error_x, error_y, error_angle, ff_vx, ff_vy, ff_wz, 
     vy = body_vy
     wz = vision_wz
     if use_ff:
-        vx += ff_vx * Follow_Feedforward_Gain
-        vy += ff_vy * Follow_Feedforward_Gain
+        vx = add_feedforward_assist(
+            vx,
+            ff_vx,
+            Follow_Feedforward_Forward_Gain,
+            Follow_Feedforward_Forward_Limit,
+        )
+        vy = add_feedforward_assist(
+            vy,
+            ff_vy,
+            Follow_Feedforward_Lateral_Gain,
+            Follow_Feedforward_Lateral_Limit,
+        )
         vx += ff_wz * Follow_Wz_Forward_Gain
         vy += ff_wz * Follow_Wz_Lateral_Gain
-        wz += ff_wz * Follow_Wz_Feedforward_Gain
+        wz = add_feedforward_assist(
+            wz,
+            ff_wz,
+            Follow_Wz_Feedforward_Gain,
+            Follow_Wz_Feedforward_Limit,
+        )
     return vx, vy, wz, body_vx, body_vy, angle_active, position_priority
 
 

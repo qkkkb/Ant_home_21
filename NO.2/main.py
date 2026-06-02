@@ -117,6 +117,7 @@ Follow_Distance_Back_Vy_Limit = 5.0
 Follow_Distance_No_Forward_Error = 0
 Follow_Distance_Feedforward_Enable_Error = 20
 Follow_Distance_Min_Chase_Vx = 4.2
+Follow_Orbit_Min_Chase_Vx = 6.0
 Follow_Distance_Approach_Slow_Error = 4
 Follow_Distance_Approach_Vx_Limit = 0.0
 Follow_Distance_Lock_Error = 4
@@ -337,6 +338,7 @@ def position_priority_needed(error_x, error_y, angle_active):
 
 def calc_follow_forward(error_y, position_priority=False):
     deadband = Follow_Orbit_Forward_Deadband if position_priority else Follow_Forward_Deadband
+    min_chase_vx = Follow_Orbit_Min_Chase_Vx if position_priority else Follow_Distance_Min_Chase_Vx
     if -deadband <= error_y <= deadband:
         return 0.0
 
@@ -349,11 +351,11 @@ def calc_follow_forward(error_y, position_priority=False):
             ) * Follow_Distance_Far_Boost_Gain
         out *= Follow_Forward_Error_Sign
         if Follow_Forward_Error_Sign >= 0:
-            if 0.0 < out < Follow_Distance_Min_Chase_Vx:
-                out = Follow_Distance_Min_Chase_Vx
+            if 0.0 < out < min_chase_vx:
+                out = min_chase_vx
             return clamp(out, 0.0, Follow_Forward_Limit)
-        if -Follow_Distance_Min_Chase_Vx < out < 0.0:
-            out = -Follow_Distance_Min_Chase_Vx
+        if -min_chase_vx < out < 0.0:
+            out = -min_chase_vx
         return clamp(out, -Follow_Forward_Limit, 0.0)
 
     out = error_y * Follow_Distance_Close_Gain * Follow_Forward_Error_Sign
@@ -366,8 +368,11 @@ def calc_follow_forward(error_y, position_priority=False):
     return clamp(out, 0.0, Follow_Distance_Close_Limit)
 
 
-def apply_distance_guard(vx, visual_vx, error_y):
-    if 0 < error_y <= Follow_Distance_Approach_Slow_Error:
+def apply_distance_guard(vx, visual_vx, error_y, position_priority=False):
+    if (
+        (not position_priority)
+        and 0 < error_y <= Follow_Distance_Approach_Slow_Error
+    ):
         if visual_vx > Follow_Distance_Approach_Vx_Limit:
             visual_vx = Follow_Distance_Approach_Vx_Limit
         elif visual_vx < -Follow_Distance_Approach_Vx_Limit:
@@ -665,7 +670,12 @@ def update_follow_targets(yaw_deg, gyro_z):
         last_back_priority_active = False
 
     if seen:
-        vx = apply_distance_guard(vx, body_vx, cam_error_y)
+        vx = apply_distance_guard(
+            vx,
+            body_vx,
+            cam_error_y,
+            position_priority_active,
+        )
         if back_priority_active:
             if Follow_Forward_Error_Sign >= 0:
                 if vx > -Follow_Distance_Back_Min_Vx:

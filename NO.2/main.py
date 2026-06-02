@@ -136,6 +136,12 @@ Follow_Orbit_Wz_Feedforward_Limit = 64.0
 Follow_Orbit_Turn_Rate_Limit = 88.0
 Follow_Target_Point_Wz_To_Vx = -0.18
 Follow_Target_Point_Wz_To_Vy = -0.45
+Follow_Orbit_Target_Point_Wz_To_Vx = -0.22
+Follow_Orbit_Target_Point_Wz_To_Vy = -0.68
+Follow_Orbit_Feedforward_Forward_Gain = 1.30
+Follow_Orbit_Feedforward_Lateral_Gain = 1.05
+Follow_Orbit_Feedforward_Forward_Limit = 28.0
+Follow_Orbit_Feedforward_Lateral_Limit = 38.0
 Follow_Pose_Angle_Gain = -0.82
 Follow_Pose_Angle_Limit = 46.0
 Follow_Orbit_Pose_Angle_Gain = -1.35
@@ -149,8 +155,8 @@ Follow_Angle_Priority_Position_Scale = 0.75
 Follow_Pose_Wheel_Target_Limit = 46.0
 Follow_Command_Ramp_Vx = 8.0
 Follow_Command_Ramp_Vy = 5.0
-Follow_Orbit_Command_Ramp_Vx = 16.0
-Follow_Orbit_Command_Ramp_Vy = 13.0
+Follow_Orbit_Command_Ramp_Vx = 22.0
+Follow_Orbit_Command_Ramp_Vy = 24.0
 Follow_Command_Ramp_Wz = 11.0
 Follow_Orbit_Command_Ramp_Wz = 18.0
 Follow_Pose_Gyro_Output_Ramp = 8.0
@@ -165,7 +171,7 @@ Follow_Orbit_Mode_Angle_Off = 4
 Follow_Orbit_Mode_Gyro_Off = 6.0
 Follow_Orbit_Mode_Exit_Ms = 120
 Follow_Orbit_Mode_FfWz_Filter = 0.35
-Follow_Orbit_Mode_Position_Scale = 0.54
+Follow_Orbit_Mode_Position_Scale = 0.74
 Follow_Normal_Wz_Feedforward_Limit = 4.0
 Follow_Orbit_Brake_Gyro_Threshold = 4.0
 Follow_Orbit_Brake_Output_Limit = 8.0
@@ -532,6 +538,10 @@ def add_feedforward_assist(base, feedforward, gain, limit):
     return base + assist
 
 
+def add_feedforward_direct(base, feedforward, gain, limit):
+    return base + clamp(feedforward * gain, -limit, limit)
+
+
 def solve_follow_pose_twist(
     error_x,
     error_y,
@@ -555,21 +565,21 @@ def solve_follow_pose_twist(
     vy = body_vy
     wz = vision_wz
     if use_ff:
-        target_ff_vx = ff_vx + ff_wz * Follow_Target_Point_Wz_To_Vx
-        target_ff_vy = ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
-        vx = add_feedforward_assist(
-            vx,
-            target_ff_vx,
-            Follow_Feedforward_Forward_Gain,
-            Follow_Feedforward_Forward_Limit,
-        )
-        vy = add_feedforward_assist(
-            vy,
-            target_ff_vy,
-            Follow_Feedforward_Lateral_Gain,
-            Follow_Feedforward_Lateral_Limit,
-        )
         if orbit_mode:
+            target_ff_vx = ff_vx + ff_wz * Follow_Orbit_Target_Point_Wz_To_Vx
+            target_ff_vy = ff_vy + ff_wz * Follow_Orbit_Target_Point_Wz_To_Vy
+            vx = add_feedforward_direct(
+                vx,
+                target_ff_vx,
+                Follow_Orbit_Feedforward_Forward_Gain,
+                Follow_Orbit_Feedforward_Forward_Limit,
+            )
+            vy = add_feedforward_direct(
+                vy,
+                target_ff_vy,
+                Follow_Orbit_Feedforward_Lateral_Gain,
+                Follow_Orbit_Feedforward_Lateral_Limit,
+            )
             wz = add_feedforward_assist(
                 wz,
                 ff_wz,
@@ -577,6 +587,20 @@ def solve_follow_pose_twist(
                 Follow_Orbit_Wz_Feedforward_Limit,
             )
         else:
+            target_ff_vx = ff_vx + ff_wz * Follow_Target_Point_Wz_To_Vx
+            target_ff_vy = ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
+            vx = add_feedforward_assist(
+                vx,
+                target_ff_vx,
+                Follow_Feedforward_Forward_Gain,
+                Follow_Feedforward_Forward_Limit,
+            )
+            vy = add_feedforward_assist(
+                vy,
+                target_ff_vy,
+                Follow_Feedforward_Lateral_Gain,
+                Follow_Feedforward_Lateral_Limit,
+            )
             wz = add_feedforward_assist(
                 wz,
                 ff_wz,

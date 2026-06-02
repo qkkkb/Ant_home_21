@@ -40,21 +40,21 @@ GYRO_SCALE = -1.0 / 16.54052
 GYRO_DEADBAND_DPS = 0.8
 GYRO_KP = 0.24
 GYRO_KI = 0.0005
-GYRO_PRIORITY_KP = 0.58
+GYRO_PRIORITY_KP = 1.05
 GYRO_PRIORITY_KI = 0.0
 GYRO_OUTPUT_LIMIT = 14.0
 GYRO_OUTPUT_BASE_LIMIT = 6.0
 GYRO_OUTPUT_TARGET_GAIN = 2.2
 GYRO_OUTPUT_MAX_LIMIT = 22.0
-GYRO_PRIORITY_OUTPUT_BASE_LIMIT = 4.5
-GYRO_PRIORITY_OUTPUT_TARGET_GAIN = 0.85
-GYRO_PRIORITY_OUTPUT_MAX_LIMIT = 18.0
-GYRO_PRIORITY_MIN_OUTPUT = 4.2
-GYRO_PRIORITY_MIN_RATE_RATIO = 0.35
+GYRO_PRIORITY_OUTPUT_BASE_LIMIT = 8.0
+GYRO_PRIORITY_OUTPUT_TARGET_GAIN = 1.25
+GYRO_PRIORITY_OUTPUT_MAX_LIMIT = 34.0
+GYRO_PRIORITY_MIN_OUTPUT = 7.5
+GYRO_PRIORITY_MIN_RATE_RATIO = 0.55
 GYRO_PRIORITY_MIN_CMD = 6.5
-GYRO_PRIORITY_OVERSPEED_RATIO = 1.20
-GYRO_PRIORITY_BRAKE_KP = 0.22
-GYRO_PRIORITY_BRAKE_LIMIT = 5.0
+GYRO_PRIORITY_OVERSPEED_RATIO = 2.20
+GYRO_PRIORITY_BRAKE_KP = 0.10
+GYRO_PRIORITY_BRAKE_LIMIT = 2.5
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True
 GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
@@ -130,20 +130,22 @@ Follow_Feedforward_Forward_Limit = 18.0
 Follow_Feedforward_Lateral_Limit = 12.0
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Wz_Feedforward_Gain = 1.60
-Follow_Wz_Feedforward_Limit = 9.0
+Follow_Wz_Feedforward_Limit = 24.0
 Follow_Target_Point_Wz_To_Vx = -0.18
 Follow_Target_Point_Wz_To_Vy = -0.45
-Follow_Pose_Angle_Gain = -0.70
-Follow_Pose_Angle_Limit = 42.0
+Follow_Pose_Angle_Gain = -1.05
+Follow_Pose_Angle_Limit = 62.0
 Follow_Pose_Angle_Deadband = 4
 Follow_Pose_Angle_Active_Error = 6
+Follow_Angle_Priority_Scale_Error = 10
+Follow_Angle_Priority_Position_Scale = 0.65
 Follow_Pose_Wheel_Target_Limit = 46.0
 Follow_Command_Ramp_Vx = 8.0
 Follow_Command_Ramp_Vy = 5.0
 Follow_Orbit_Command_Ramp_Vx = 16.0
 Follow_Orbit_Command_Ramp_Vy = 13.0
-Follow_Command_Ramp_Wz = 9.0
-Follow_Pose_Gyro_Output_Ramp = 2.4
+Follow_Command_Ramp_Wz = 18.0
+Follow_Pose_Gyro_Output_Ramp = 8.0
 Follow_Yaw_Enable = False
 Follow_Yaw_Gain = 0.08
 Follow_Yaw_Limit = 15.0
@@ -731,6 +733,15 @@ def update_follow_targets(yaw_deg, gyro_z):
                 -Follow_Distance_Back_Vy_Limit,
                 Follow_Distance_Back_Vy_Limit,
             )
+        elif (
+            angle_priority_active
+            and (
+                cam_error_angle >= Follow_Angle_Priority_Scale_Error
+                or cam_error_angle <= -Follow_Angle_Priority_Scale_Error
+            )
+        ):
+            vx *= Follow_Angle_Priority_Position_Scale
+            vy *= Follow_Angle_Priority_Position_Scale
 
     vx_limit = Follow_Forward_Limit
     vy_limit = Follow_Lateral_Limit

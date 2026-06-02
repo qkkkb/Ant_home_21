@@ -4,7 +4,7 @@ import utime
 from smartcar import ticker, encoder
 from imu_runtime import IMUYawRuntime
 from models import AnglePID, MoveBase, SpeedPID
-from move_base import calc_wheel_spd
+from move_base import calc_wheel_spd, get_car_spd
 import pid as _pid_mod
 import config as cfg
 from hardware import Motor
@@ -17,6 +17,9 @@ MASTER_MOTION_FRAME_LEN = 15
 MASTER_MOTION_FLAG_STARTED = 0x01
 MASTER_MOTION_FLAG_TARGET = 0x02
 MASTER_MOTION_FLAG_CLOSED_LOOP = 0x04
+MASTER_MOTION_FILTER = 0.35
+MASTER_MOTION_LINEAR_DEADBAND = 0.5
+MASTER_MOTION_WZ_DEADBAND = 0.8
 
 # 设置 PID 最大 PWM 值
 _pid_mod.PWM_MAX = cfg.PWM_MAX
@@ -1410,9 +1413,9 @@ def send_master_motion(now):
     wz = 0.0
     if car_started:
         flags = MASTER_MOTION_FLAG_STARTED | MASTER_MOTION_FLAG_CLOSED_LOOP
-        vx = cam_target_vx
-        vy = cam_target_vy
-        wz = last_vz_cmd
+        vx = master_motion_vx
+        vy = master_motion_vy
+        wz = master_motion_wz
     if cam_target_seen():
         flags |= MASTER_MOTION_FLAG_TARGET
     yaw_deg = imu_runtime.read_yaw() if (ENABLE_IMU and imu_runtime is not None) else 0.0
@@ -1469,6 +1472,7 @@ pit1.start(TICK_PERIOD_MS)
 
 # ---------------------- Controller state ----------------------
 move_cmd = MoveBase()
+master_motion_est = MoveBase()
 
 pid_fl = SpeedPID()
 pid_fr = SpeedPID()
@@ -1500,8 +1504,32 @@ last_status_ms = start_time
 loop_count = 0
 last_vz_cmd = 0.0
 last_turn_rate_cmd = 0.0
+master_motion_vx = 0.0
+master_motion_vy = 0.0
+master_motion_wz = 0.0
 yaw_ref_deg = 0.0
 debug_log_last_ms = start_time
+
+
+def master_motion_deadband(value, deadband):
+    if -deadband < value < deadband:
+        return 0.0
+    return value
+
+
+def update_master_motion_estimate(e_fl, e_fr, e_b, gyro_z):
+    global master_motion_vx, master_motion_vy, master_motion_wz
+
+    get_car_spd(master_motion_est, e_fr, e_fl, e_b)
+    vx = master_motion_deadband(master_motion_est.speed_x, MASTER_MOTION_LINEAR_DEADBAND)
+    vy = master_motion_deadband(master_motion_est.speed_y, MASTER_MOTION_LINEAR_DEADBAND)
+    if ENABLE_IMU:
+        wz = master_motion_deadband(gyro_z, MASTER_MOTION_WZ_DEADBAND)
+    else:
+        wz = master_motion_deadband(master_motion_est.speed_z, MASTER_MOTION_WZ_DEADBAND)
+    master_motion_vx += (vx - master_motion_vx) * MASTER_MOTION_FILTER
+    master_motion_vy += (vy - master_motion_vy) * MASTER_MOTION_FILTER
+    master_motion_wz += (wz - master_motion_wz) * MASTER_MOTION_FILTER
 
 # ====================== 速度闭环主函数（含发车判断） ======================
 def calc_speed_closed_loop():
@@ -1528,6 +1556,7 @@ def calc_speed_closed_loop():
     e_fl = enc_fl.get()
     e_fr = enc_fr.get()
     e_b = enc_b.get()
+    update_master_motion_estimate(e_fl, e_fr, e_b, gyro_z)
     low_speed = abs(e_fl) <= Nav_Low_Speed_Th and abs(e_fr) <= Nav_Low_Speed_Th and abs(e_b) <= Nav_Low_Speed_Th
     update_nav_state_and_targets(yaw_deg, low_speed, gyro_z)
 

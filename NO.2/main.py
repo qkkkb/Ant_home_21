@@ -129,7 +129,7 @@ Follow_Feedforward_Lateral_Limit = 3.0
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Wz_Feedforward_Gain = 1.60
 Follow_Wz_Feedforward_Limit = 9.0
-Follow_Target_Point_Wz_To_Vx = 0.0
+Follow_Target_Point_Wz_To_Vx = -0.08
 Follow_Target_Point_Wz_To_Vy = -0.18
 Follow_Pose_Angle_Gain = -0.70
 Follow_Pose_Angle_Limit = 42.0
@@ -389,7 +389,8 @@ def apply_distance_guard(vx, visual_vx, error_y, position_priority=False):
         if vx > 0.0:
             vx = 0.0
     elif error_y <= Follow_Distance_Feedforward_Enable_Error and vx > visual_vx:
-        vx = visual_vx
+        if (not position_priority) or error_y <= Follow_Distance_Lock_Error:
+            vx = visual_vx
     return vx
 
 

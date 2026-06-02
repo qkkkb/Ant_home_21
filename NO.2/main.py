@@ -96,7 +96,7 @@ ART_MODE_IDLE_CMD = b"IDLE\n"
 Follow_Forward_Gain = 0.50
 Follow_Lateral_Gain = 0.22
 Follow_Orbit_Forward_Gain = 0.76
-Follow_Orbit_Lateral_Gain = 0.52
+Follow_Orbit_Lateral_Gain = 0.64
 Follow_Forward_Error_Sign = 1.0
 Follow_Lateral_Error_Sign = -1.0
 Follow_Forward_Limit = 58.0
@@ -105,6 +105,8 @@ Follow_Forward_Deadband = 4
 Follow_Lateral_Deadband = 6
 Follow_Orbit_Forward_Deadband = 3
 Follow_Orbit_Lateral_Deadband = 2
+Follow_Orbit_Lateral_Min_Error = 8
+Follow_Orbit_Lateral_Min_Vy = 9.0
 Follow_Orbit_Position_X_Error = 4
 Follow_Orbit_Position_Y_Error = 4
 Follow_Distance_Far_Boost_Error = 6
@@ -123,14 +125,14 @@ Follow_Distance_Approach_Vx_Limit = 0.0
 Follow_Distance_Lock_Error = 4
 Follow_Distance_Lock_Hold_Ms = 450
 Follow_Feedforward_Forward_Gain = 0.95
-Follow_Feedforward_Lateral_Gain = 0.45
+Follow_Feedforward_Lateral_Gain = 0.55
 Follow_Feedforward_Forward_Limit = 6.0
-Follow_Feedforward_Lateral_Limit = 4.5
+Follow_Feedforward_Lateral_Limit = 6.0
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Wz_Feedforward_Gain = 1.60
 Follow_Wz_Feedforward_Limit = 9.0
 Follow_Target_Point_Wz_To_Vx = -0.08
-Follow_Target_Point_Wz_To_Vy = -0.24
+Follow_Target_Point_Wz_To_Vy = -0.30
 Follow_Pose_Angle_Gain = -0.70
 Follow_Pose_Angle_Limit = 42.0
 Follow_Pose_Angle_Deadband = 4
@@ -139,7 +141,7 @@ Follow_Pose_Wheel_Target_Limit = 34.0
 Follow_Command_Ramp_Vx = 5.0
 Follow_Command_Ramp_Vy = 2.4
 Follow_Orbit_Command_Ramp_Vx = 8.0
-Follow_Orbit_Command_Ramp_Vy = 5.0
+Follow_Orbit_Command_Ramp_Vy = 8.0
 Follow_Command_Ramp_Wz = 9.0
 Follow_Pose_Gyro_Output_Ramp = 2.4
 Follow_Yaw_Enable = False
@@ -399,11 +401,19 @@ def calc_follow_lateral(error_x, position_priority=False):
     if -deadband <= error_x <= deadband:
         return 0.0
     gain = Follow_Orbit_Lateral_Gain if position_priority else Follow_Lateral_Gain
-    return clamp(
-        -error_x * gain * Follow_Lateral_Error_Sign,
-        -Follow_Lateral_Limit,
-        Follow_Lateral_Limit,
-    )
+    out = -error_x * gain * Follow_Lateral_Error_Sign
+    if (
+        position_priority
+        and (
+            error_x >= Follow_Orbit_Lateral_Min_Error
+            or error_x <= -Follow_Orbit_Lateral_Min_Error
+        )
+    ):
+        if 0.0 < out < Follow_Orbit_Lateral_Min_Vy:
+            out = Follow_Orbit_Lateral_Min_Vy
+        elif -Follow_Orbit_Lateral_Min_Vy < out < 0.0:
+            out = -Follow_Orbit_Lateral_Min_Vy
+    return clamp(out, -Follow_Lateral_Limit, Follow_Lateral_Limit)
 
 
 def calc_follow_angle(error_angle):

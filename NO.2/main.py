@@ -48,7 +48,7 @@ GYRO_OUTPUT_TARGET_GAIN = 2.2
 GYRO_OUTPUT_MAX_LIMIT = 22.0
 GYRO_PRIORITY_OUTPUT_BASE_LIMIT = 6.5
 GYRO_PRIORITY_OUTPUT_TARGET_GAIN = 0.90
-GYRO_PRIORITY_OUTPUT_MAX_LIMIT = 32.0
+GYRO_PRIORITY_OUTPUT_MAX_LIMIT = 38.0
 GYRO_PRIORITY_MIN_OUTPUT = 5.5
 GYRO_PRIORITY_MIN_RATE_RATIO = 0.45
 GYRO_PRIORITY_MIN_CMD = 6.5
@@ -131,12 +131,17 @@ Follow_Feedforward_Lateral_Limit = 12.0
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Wz_Feedforward_Gain = 1.60
 Follow_Wz_Feedforward_Limit = 15.0
-Follow_Orbit_Wz_Feedforward_Gain = 0.95
-Follow_Orbit_Wz_Feedforward_Limit = 38.0
+Follow_Orbit_Wz_Feedforward_Gain = 1.05
+Follow_Orbit_Wz_Feedforward_Limit = 64.0
+Follow_Orbit_Turn_Rate_Limit = 88.0
 Follow_Target_Point_Wz_To_Vx = -0.18
 Follow_Target_Point_Wz_To_Vy = -0.45
 Follow_Pose_Angle_Gain = -0.82
 Follow_Pose_Angle_Limit = 46.0
+Follow_Orbit_Pose_Angle_Gain = -1.35
+Follow_Orbit_Pose_Angle_Limit = 74.0
+Follow_Orbit_Pose_Angle_Min_Error = 14
+Follow_Orbit_Pose_Angle_Min_Turn = 30.0
 Follow_Pose_Angle_Deadband = 4
 Follow_Pose_Angle_Active_Error = 6
 Follow_Angle_Priority_Scale_Error = 12
@@ -147,7 +152,8 @@ Follow_Command_Ramp_Vy = 5.0
 Follow_Orbit_Command_Ramp_Vx = 16.0
 Follow_Orbit_Command_Ramp_Vy = 13.0
 Follow_Command_Ramp_Wz = 11.0
-Follow_Pose_Gyro_Output_Ramp = 6.5
+Follow_Orbit_Command_Ramp_Wz = 18.0
+Follow_Pose_Gyro_Output_Ramp = 8.0
 Follow_Yaw_Enable = False
 Follow_Yaw_Gain = 0.08
 Follow_Yaw_Limit = 15.0
@@ -159,7 +165,7 @@ Follow_Orbit_Mode_Angle_Off = 4
 Follow_Orbit_Mode_Gyro_Off = 6.0
 Follow_Orbit_Mode_Exit_Ms = 120
 Follow_Orbit_Mode_FfWz_Filter = 0.35
-Follow_Orbit_Mode_Position_Scale = 0.60
+Follow_Orbit_Mode_Position_Scale = 0.54
 Follow_Normal_Wz_Feedforward_Limit = 4.0
 Follow_Orbit_Brake_Gyro_Threshold = 4.0
 Follow_Orbit_Brake_Output_Limit = 8.0
@@ -492,9 +498,24 @@ def calc_follow_lateral(error_x, position_priority=False):
     return clamp(out, -Follow_Lateral_Limit, Follow_Lateral_Limit)
 
 
-def calc_follow_angle(error_angle):
+def calc_follow_angle(error_angle, orbit_mode=False):
     if -Follow_Pose_Angle_Deadband <= error_angle <= Follow_Pose_Angle_Deadband:
         return 0.0
+    if orbit_mode:
+        out = clamp(
+            error_angle * Follow_Orbit_Pose_Angle_Gain,
+            -Follow_Orbit_Pose_Angle_Limit,
+            Follow_Orbit_Pose_Angle_Limit,
+        )
+        if (
+            error_angle >= Follow_Orbit_Pose_Angle_Min_Error
+            or error_angle <= -Follow_Orbit_Pose_Angle_Min_Error
+        ):
+            if 0.0 < out < Follow_Orbit_Pose_Angle_Min_Turn:
+                out = Follow_Orbit_Pose_Angle_Min_Turn
+            elif -Follow_Orbit_Pose_Angle_Min_Turn < out < 0.0:
+                out = -Follow_Orbit_Pose_Angle_Min_Turn
+        return out
     return clamp(
         error_angle * Follow_Pose_Angle_Gain,
         -Follow_Pose_Angle_Limit,
@@ -521,7 +542,7 @@ def solve_follow_pose_twist(
     use_ff,
     orbit_mode=False,
 ):
-    vision_wz = calc_follow_angle(error_angle)
+    vision_wz = calc_follow_angle(error_angle, orbit_mode)
     angle_active = (
         error_angle >= Follow_Pose_Angle_Active_Error
         or error_angle <= -Follow_Pose_Angle_Active_Error
@@ -562,6 +583,12 @@ def solve_follow_pose_twist(
                 Follow_Wz_Feedforward_Gain,
                 Follow_Wz_Feedforward_Limit,
             )
+    if orbit_mode and Follow_Orbit_Turn_Rate_Limit > 0.0:
+        wz = clamp(
+            wz,
+            -Follow_Orbit_Turn_Rate_Limit,
+            Follow_Orbit_Turn_Rate_Limit,
+        )
     return vx, vy, wz, body_vx, body_vy, angle_active, position_priority
 
 
@@ -918,7 +945,18 @@ def update_follow_targets(yaw_deg, gyro_z):
         else:
             reset_turn_loop_state()
     else:
-        turn_rate_cmd = ramp_value(turn_rate_cmd, last_cmd_wz, Follow_Command_Ramp_Wz)
+        if orbit_mode_active:
+            turn_rate_cmd = ramp_value(
+                turn_rate_cmd,
+                last_cmd_wz,
+                Follow_Orbit_Command_Ramp_Wz,
+            )
+        else:
+            turn_rate_cmd = ramp_value(
+                turn_rate_cmd,
+                last_cmd_wz,
+                Follow_Command_Ramp_Wz,
+            )
         last_cmd_wz = turn_rate_cmd
     if (
         orbit_mode_active

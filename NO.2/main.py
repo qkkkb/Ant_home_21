@@ -150,6 +150,17 @@ Follow_Yaw_Enable = False
 Follow_Yaw_Gain = 0.08
 Follow_Yaw_Limit = 15.0
 Follow_Target_Lost_Hold_Ms = 250
+Follow_Orbit_Mode_FfWz_On = 18.0
+Follow_Orbit_Mode_FfWz_Off = 7.0
+Follow_Orbit_Mode_Angle_On = 10
+Follow_Orbit_Mode_Angle_Off = 4
+Follow_Orbit_Mode_Gyro_Off = 6.0
+Follow_Orbit_Mode_Exit_Ms = 120
+Follow_Orbit_Mode_FfWz_Filter = 0.35
+Follow_Orbit_Mode_Position_Scale = 0.70
+Follow_Normal_Wz_Feedforward_Limit = 4.0
+Follow_Orbit_Brake_Gyro_Threshold = 4.0
+Follow_Orbit_Brake_Output_Limit = 8.0
 Master_Motion_Timeout_Ms = 250
 Follow_Master_Extra_Vx = 10.0
 Follow_Master_Extra_Vy = 8.0
@@ -209,6 +220,9 @@ last_ap_vz_cmd = 0.0
 last_distance_lock_ms = 0
 last_angle_priority_active = False
 last_back_priority_active = False
+orbit_follow_active = False
+orbit_follow_exit_since_ms = 0
+filtered_ff_wz = 0.0
 last_tune_log_ms = 0
 last_hard_stop = False
 last_stall_count = 0
@@ -279,6 +293,7 @@ def clear_cam_target_state():
     global last_cmd_vx, last_cmd_vy, last_cmd_wz, last_ap_vz_cmd
     global last_distance_lock_ms, last_angle_priority_active
     global last_back_priority_active
+    global orbit_follow_active, orbit_follow_exit_since_ms, filtered_ff_wz
 
     cam_error_x = 0
     cam_error_y = 0
@@ -290,6 +305,9 @@ def clear_cam_target_state():
     last_distance_lock_ms = 0
     last_angle_priority_active = False
     last_back_priority_active = False
+    orbit_follow_active = False
+    orbit_follow_exit_since_ms = 0
+    filtered_ff_wz = 0.0
     cam_has_target = False
     cam_valid_target_since_ms = 0
     target_lost_since_ms = 0
@@ -318,6 +336,60 @@ def master_motion_rx_fresh():
 
 def master_started():
     return master_motion_fresh() and ((master_flags & MASTER_MOTION_FLAG_STARTED) != 0)
+
+
+def update_filtered_ff_wz(ff_wz, fresh_motion):
+    global filtered_ff_wz
+
+    target = ff_wz if fresh_motion else 0.0
+    filtered_ff_wz += (target - filtered_ff_wz) * Follow_Orbit_Mode_FfWz_Filter
+    if -0.05 < filtered_ff_wz < 0.05:
+        filtered_ff_wz = 0.0
+    return filtered_ff_wz
+
+
+def update_orbit_follow_mode(now, seen, error_angle, ff_wz, gyro_z, fresh_motion):
+    global orbit_follow_active, orbit_follow_exit_since_ms
+
+    enter = (
+        seen
+        and fresh_motion
+        and (
+            ff_wz >= Follow_Orbit_Mode_FfWz_On
+            or ff_wz <= -Follow_Orbit_Mode_FfWz_On
+            or error_angle >= Follow_Orbit_Mode_Angle_On
+            or error_angle <= -Follow_Orbit_Mode_Angle_On
+        )
+    )
+    if enter:
+        orbit_follow_active = True
+        orbit_follow_exit_since_ms = 0
+        return True
+
+    if not orbit_follow_active:
+        orbit_follow_exit_since_ms = 0
+        return False
+
+    stable = (
+        (not seen)
+        or (
+            (
+                (not fresh_motion)
+                or (-Follow_Orbit_Mode_FfWz_Off <= ff_wz <= Follow_Orbit_Mode_FfWz_Off)
+            )
+            and (-Follow_Orbit_Mode_Angle_Off <= error_angle <= Follow_Orbit_Mode_Angle_Off)
+            and (-Follow_Orbit_Mode_Gyro_Off <= gyro_z <= Follow_Orbit_Mode_Gyro_Off)
+        )
+    )
+    if stable:
+        if orbit_follow_exit_since_ms == 0:
+            orbit_follow_exit_since_ms = now
+        elif utime.ticks_diff(now, orbit_follow_exit_since_ms) >= Follow_Orbit_Mode_Exit_Ms:
+            orbit_follow_active = False
+            orbit_follow_exit_since_ms = 0
+    else:
+        orbit_follow_exit_since_ms = 0
+    return orbit_follow_active
 
 
 def rotate_camera_velocity_to_body(cam_vx, cam_vy):
@@ -661,6 +733,23 @@ def update_follow_targets(yaw_deg, gyro_z):
     ff_vx = master_vx if fresh_motion else 0.0
     ff_vy = master_vy if fresh_motion else 0.0
     ff_wz = master_wz if fresh_motion else 0.0
+    filtered_wz = update_filtered_ff_wz(ff_wz, fresh_motion)
+    orbit_mode_active = update_orbit_follow_mode(
+        now,
+        seen,
+        cam_error_angle,
+        ff_wz,
+        gyro_z,
+        fresh_motion,
+    )
+    if orbit_mode_active:
+        follow_ff_wz = filtered_wz
+    else:
+        follow_ff_wz = clamp(
+            filtered_wz,
+            -Follow_Normal_Wz_Feedforward_Limit,
+            Follow_Normal_Wz_Feedforward_Limit,
+        )
     body_vx = 0.0
     body_vy = 0.0
     turn_rate_cmd = 0.0
@@ -690,7 +779,7 @@ def update_follow_targets(yaw_deg, gyro_z):
             cam_error_angle,
             ff_vx,
             ff_vy,
-            ff_wz,
+            follow_ff_wz,
             use_motion_feedforward,
         )
         last_angle_priority_active = angle_priority_active
@@ -733,12 +822,12 @@ def update_follow_targets(yaw_deg, gyro_z):
                 -Follow_Distance_Back_Vy_Limit,
                 Follow_Distance_Back_Vy_Limit,
             )
-        elif (
-            angle_priority_active
-            and (
-                cam_error_angle >= Follow_Angle_Priority_Scale_Error
-                or cam_error_angle <= -Follow_Angle_Priority_Scale_Error
-            )
+        elif orbit_mode_active:
+            vx *= Follow_Orbit_Mode_Position_Scale
+            vy *= Follow_Orbit_Mode_Position_Scale
+        elif angle_priority_active and (
+            cam_error_angle >= Follow_Angle_Priority_Scale_Error
+            or cam_error_angle <= -Follow_Angle_Priority_Scale_Error
         ):
             vx *= Follow_Angle_Priority_Position_Scale
             vy *= Follow_Angle_Priority_Position_Scale
@@ -775,10 +864,20 @@ def update_follow_targets(yaw_deg, gyro_z):
     cam_target_vy = vy
 
     if (not seen) and use_motion_feedforward:
-        turn_rate_cmd = ff_wz * Follow_Wz_Feedforward_Gain
+        turn_rate_cmd = follow_ff_wz * Follow_Wz_Feedforward_Gain
+    orbit_brake_active = (
+        orbit_mode_active
+        and (
+            gyro_z >= Follow_Orbit_Brake_Gyro_Threshold
+            or gyro_z <= -Follow_Orbit_Brake_Gyro_Threshold
+        )
+    )
     if -0.001 < turn_rate_cmd < 0.001:
-        reset_turn_loop_state()
         turn_rate_cmd = 0.0
+        if orbit_brake_active:
+            last_cmd_wz = 0.0
+        else:
+            reset_turn_loop_state()
     else:
         turn_rate_cmd = ramp_value(turn_rate_cmd, last_cmd_wz, Follow_Command_Ramp_Wz)
         last_cmd_wz = turn_rate_cmd
@@ -791,7 +890,7 @@ def update_follow_targets(yaw_deg, gyro_z):
         turn_rate_cmd += yaw_correction
 
     if ENABLE_GYRO_LOOP and gyro_pid is not None:
-        if FOLLOW_GYRO_HOLD_ENABLE or abs(turn_rate_cmd) > 0.001:
+        if FOLLOW_GYRO_HOLD_ENABLE or abs(turn_rate_cmd) > 0.001 or orbit_brake_active:
             if angle_priority_active:
                 gyro_pid.gyro_kp = GYRO_PRIORITY_KP
                 gyro_pid.gyro_ki = GYRO_PRIORITY_KI
@@ -806,7 +905,10 @@ def update_follow_targets(yaw_deg, gyro_z):
                 last_ap_vz_cmd = 0.0
                 gyro_pid.gyro_kp = GYRO_KP
                 gyro_pid.gyro_ki = GYRO_KI
-                gyro_pid.gyro_output_limit = gyro_limit_for_turn(turn_rate_cmd)
+                if orbit_brake_active:
+                    gyro_pid.gyro_output_limit = Follow_Orbit_Brake_Output_Limit
+                else:
+                    gyro_pid.gyro_output_limit = gyro_limit_for_turn(turn_rate_cmd)
                 vz_cmd = gyro_ctrl(gyro_pid, turn_rate_cmd - gyro_z)
         else:
             gyro_pid.gyro_kp = GYRO_KP
@@ -838,7 +940,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     last_visual_vy = body_vy
     last_ff_vx = ff_vx
     last_ff_vy = ff_vy
-    last_ff_wz = ff_wz
+    last_ff_wz = follow_ff_wz
     return vz_cmd
 
 
@@ -854,6 +956,7 @@ def reset_speed_outputs():
     global last_stall_count, last_stall_boost
     global last_cmd_vx, last_cmd_vy, last_cmd_wz, last_ap_vz_cmd
     global last_angle_priority_active, last_back_priority_active
+    global orbit_follow_active, orbit_follow_exit_since_ms, filtered_ff_wz
 
     speed_reset(pid_fl)
     speed_reset(pid_fr)
@@ -869,6 +972,9 @@ def reset_speed_outputs():
     last_ap_vz_cmd = 0.0
     last_angle_priority_active = False
     last_back_priority_active = False
+    orbit_follow_active = False
+    orbit_follow_exit_since_ms = 0
+    filtered_ff_wz = 0.0
 
 
 def clamp_duty(value):

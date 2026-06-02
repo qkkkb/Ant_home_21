@@ -48,13 +48,13 @@ GYRO_OUTPUT_TARGET_GAIN = 2.2
 GYRO_OUTPUT_MAX_LIMIT = 22.0
 GYRO_PRIORITY_OUTPUT_BASE_LIMIT = 6.5
 GYRO_PRIORITY_OUTPUT_TARGET_GAIN = 0.90
-GYRO_PRIORITY_OUTPUT_MAX_LIMIT = 26.0
+GYRO_PRIORITY_OUTPUT_MAX_LIMIT = 32.0
 GYRO_PRIORITY_MIN_OUTPUT = 5.5
 GYRO_PRIORITY_MIN_RATE_RATIO = 0.45
 GYRO_PRIORITY_MIN_CMD = 6.5
-GYRO_PRIORITY_OVERSPEED_RATIO = 1.75
-GYRO_PRIORITY_BRAKE_KP = 0.0
-GYRO_PRIORITY_BRAKE_LIMIT = 0.0
+GYRO_PRIORITY_OVERSPEED_RATIO = 2.60
+GYRO_PRIORITY_BRAKE_KP = 0.16
+GYRO_PRIORITY_BRAKE_LIMIT = 8.0
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True
 GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
@@ -131,6 +131,8 @@ Follow_Feedforward_Lateral_Limit = 12.0
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Wz_Feedforward_Gain = 1.60
 Follow_Wz_Feedforward_Limit = 15.0
+Follow_Orbit_Wz_Feedforward_Gain = 0.95
+Follow_Orbit_Wz_Feedforward_Limit = 38.0
 Follow_Target_Point_Wz_To_Vx = -0.18
 Follow_Target_Point_Wz_To_Vy = -0.45
 Follow_Pose_Angle_Gain = -0.82
@@ -145,7 +147,7 @@ Follow_Command_Ramp_Vy = 5.0
 Follow_Orbit_Command_Ramp_Vx = 16.0
 Follow_Orbit_Command_Ramp_Vy = 13.0
 Follow_Command_Ramp_Wz = 11.0
-Follow_Pose_Gyro_Output_Ramp = 5.0
+Follow_Pose_Gyro_Output_Ramp = 6.5
 Follow_Yaw_Enable = False
 Follow_Yaw_Gain = 0.08
 Follow_Yaw_Limit = 15.0
@@ -157,7 +159,7 @@ Follow_Orbit_Mode_Angle_Off = 4
 Follow_Orbit_Mode_Gyro_Off = 6.0
 Follow_Orbit_Mode_Exit_Ms = 120
 Follow_Orbit_Mode_FfWz_Filter = 0.35
-Follow_Orbit_Mode_Position_Scale = 0.70
+Follow_Orbit_Mode_Position_Scale = 0.60
 Follow_Normal_Wz_Feedforward_Limit = 4.0
 Follow_Orbit_Brake_Gyro_Threshold = 4.0
 Follow_Orbit_Brake_Output_Limit = 8.0
@@ -509,7 +511,16 @@ def add_feedforward_assist(base, feedforward, gain, limit):
     return base + assist
 
 
-def solve_follow_pose_twist(error_x, error_y, error_angle, ff_vx, ff_vy, ff_wz, use_ff):
+def solve_follow_pose_twist(
+    error_x,
+    error_y,
+    error_angle,
+    ff_vx,
+    ff_vy,
+    ff_wz,
+    use_ff,
+    orbit_mode=False,
+):
     vision_wz = calc_follow_angle(error_angle)
     angle_active = (
         error_angle >= Follow_Pose_Angle_Active_Error
@@ -537,12 +548,20 @@ def solve_follow_pose_twist(error_x, error_y, error_angle, ff_vx, ff_vy, ff_wz, 
             Follow_Feedforward_Lateral_Gain,
             Follow_Feedforward_Lateral_Limit,
         )
-        wz = add_feedforward_assist(
-            wz,
-            ff_wz,
-            Follow_Wz_Feedforward_Gain,
-            Follow_Wz_Feedforward_Limit,
-        )
+        if orbit_mode:
+            wz = add_feedforward_assist(
+                wz,
+                ff_wz,
+                Follow_Orbit_Wz_Feedforward_Gain,
+                Follow_Orbit_Wz_Feedforward_Limit,
+            )
+        else:
+            wz = add_feedforward_assist(
+                wz,
+                ff_wz,
+                Follow_Wz_Feedforward_Gain,
+                Follow_Wz_Feedforward_Limit,
+            )
     return vx, vy, wz, body_vx, body_vy, angle_active, position_priority
 
 
@@ -564,8 +583,18 @@ def max_wheel_abs(wheel_fr, wheel_fl, wheel_b):
     return max_abs
 
 
-def limit_pose_twist_for_wheels(vx, vy, vz):
+def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False):
     if Follow_Pose_Wheel_Target_Limit <= 0.0:
+        return vx, vy, vz
+
+    if preserve_pose_ratio:
+        wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, vz)
+        target_max = max_wheel_abs(wheel_fr, wheel_fl, wheel_b)
+        if target_max > Follow_Pose_Wheel_Target_Limit:
+            scale = Follow_Pose_Wheel_Target_Limit / target_max
+            vx *= scale
+            vy *= scale
+            vz *= scale
         return vx, vy, vz
 
     wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
@@ -781,7 +810,10 @@ def update_follow_targets(yaw_deg, gyro_z):
             ff_vy,
             follow_ff_wz,
             use_motion_feedforward,
+            orbit_mode_active,
         )
+        if orbit_mode_active:
+            position_priority_active = True
         last_angle_priority_active = angle_priority_active
         last_back_priority_active = back_priority_active
     else:
@@ -864,7 +896,14 @@ def update_follow_targets(yaw_deg, gyro_z):
     cam_target_vy = vy
 
     if (not seen) and use_motion_feedforward:
-        turn_rate_cmd = follow_ff_wz * Follow_Wz_Feedforward_Gain
+        if orbit_mode_active:
+            turn_rate_cmd = clamp(
+                follow_ff_wz * Follow_Orbit_Wz_Feedforward_Gain,
+                -Follow_Orbit_Wz_Feedforward_Limit,
+                Follow_Orbit_Wz_Feedforward_Limit,
+            )
+        else:
+            turn_rate_cmd = follow_ff_wz * Follow_Wz_Feedforward_Gain
     orbit_brake_active = (
         orbit_mode_active
         and (
@@ -881,6 +920,15 @@ def update_follow_targets(yaw_deg, gyro_z):
     else:
         turn_rate_cmd = ramp_value(turn_rate_cmd, last_cmd_wz, Follow_Command_Ramp_Wz)
         last_cmd_wz = turn_rate_cmd
+    if (
+        orbit_mode_active
+        and (
+            turn_rate_cmd >= GYRO_PRIORITY_MIN_CMD
+            or turn_rate_cmd <= -GYRO_PRIORITY_MIN_CMD
+        )
+    ):
+        angle_priority_active = True
+        last_angle_priority_active = True
     yaw_err = 0.0
     yaw_correction = 0.0
     if Follow_Yaw_Enable and fresh_motion and ENABLE_IMU:
@@ -927,6 +975,7 @@ def update_follow_targets(yaw_deg, gyro_z):
         cam_target_vx,
         cam_target_vy,
         vz_cmd,
+        orbit_mode_active,
     )
     last_cmd_vx = cam_target_vx
     last_cmd_vy = cam_target_vy

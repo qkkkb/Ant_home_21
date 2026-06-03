@@ -153,6 +153,7 @@ Nav_Push_Orbit_Brake_Max_Ms = 1000
 Nav_Push_Orbit_Vy_Sign_Right = -1
 Nav_Push_Orbit_Vy_Sign_Up = 0
 Nav_Push_Orbit_Vy_Sign_Left = 1
+Nav_Push_Orbit_Forced_Dir = -1
 Nav_Push_Prepare_Reorient_Yaw = 10.0
 Nav_Push_Prepare_Forward_Gain = 0.038
 Nav_Push_Prepare_Lateral_Gain = 0.115
@@ -184,6 +185,7 @@ Nav_Push_Turn_Gyro_Limit = 16.0
 Nav_Push_Turn_Ok_Yaw = 6.0
 Nav_Push_Turn_Recover_Yaw = 12.0
 Nav_Push_Turn_Ok_Ms = 150
+Nav_Push_Turn_Forced_Dir = 1
 Nav_Post_Turn_No_Target_Ms = 100
 Nav_Post_Turn_Forward_Ms = 1500
 Nav_Post_Turn_Forward_Speed = 9
@@ -329,22 +331,12 @@ def push_yaw_error_deg(yaw_deg):
     return -wrapped_yaw_error(push_yaw_target, yaw_deg)
 
 
-def orbit_turn_dir_from_dir(dir_code):
-    if dir_code == Push_Dir_Right:
-        return 1
-    if dir_code == Push_Dir_Left:
-        return -1
-    return 0
-
-
-def orbit_vy_sign_from_dir(dir_code):
-    if dir_code == Push_Dir_Right:
-        return Nav_Push_Orbit_Vy_Sign_Right
-    if dir_code == Push_Dir_Up:
-        return Nav_Push_Orbit_Vy_Sign_Up
-    if dir_code == Push_Dir_Left:
-        return Nav_Push_Orbit_Vy_Sign_Left
-    return 0
+def yaw_delta_in_turn_dir(target_yaw, now_yaw, turn_dir):
+    if turn_dir > 0:
+        return normalize_yaw_deg(target_yaw - now_yaw)
+    if turn_dir < 0:
+        return normalize_yaw_deg(now_yaw - target_yaw)
+    return abs(-wrapped_yaw_error(target_yaw, now_yaw))
 
 
 def reset_gyro_pid_state():
@@ -911,18 +903,18 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         cam_target_vy = 0.0
         if push_dir_code in (Push_Dir_Right, Push_Dir_Up, Push_Dir_Left, Push_Dir_Down):
             push_yaw_target = yaw_from_field_dir(push_dir_code)
-            push_orbit_dir = orbit_turn_dir_from_dir(push_dir_code)
-            push_orbit_vy_sign = orbit_vy_sign_from_dir(push_dir_code)
-            orbit_yaw_err = -wrapped_yaw_error(push_yaw_target, push_face_obj_yaw)
-            push_orbit_target_delta = abs(orbit_yaw_err)
-            if push_orbit_target_delta <= Nav_Push_Orbit_Skip_Yaw:
+            short_orbit_delta = abs(-wrapped_yaw_error(push_yaw_target, push_face_obj_yaw))
+            if short_orbit_delta <= Nav_Push_Orbit_Skip_Yaw:
                 push_orbit_dir = 0
                 push_orbit_vy_sign = 0
+                push_orbit_target_delta = short_orbit_delta
             else:
-                if orbit_yaw_err >= 0.0:
-                    push_orbit_dir = 1
-                else:
-                    push_orbit_dir = -1
+                push_orbit_dir = Nav_Push_Orbit_Forced_Dir
+                push_orbit_target_delta = yaw_delta_in_turn_dir(
+                    push_yaw_target,
+                    push_face_obj_yaw,
+                    push_orbit_dir,
+                )
                 push_orbit_vy_sign = -push_orbit_dir
             push_orbit_progress_deg = 0.0
             push_orbit_reached = False
@@ -1699,12 +1691,14 @@ def calc_speed_closed_loop():
         if push_turn_settle:
             turn_rate_cmd = 0.0
         else:
-            push_turn_rate_mag = get_push_turn_rate(abs(yaw_err_deg))
+            push_turn_remaining = yaw_delta_in_turn_dir(
+                push_return_yaw_target,
+                yaw_deg,
+                Nav_Push_Turn_Forced_Dir,
+            )
+            push_turn_rate_mag = get_push_turn_rate(push_turn_remaining)
             if push_turn_rate_mag > 0.0:
-                if yaw_err_deg > 0.0:
-                    turn_rate_cmd = push_turn_rate_mag
-                else:
-                    turn_rate_cmd = -push_turn_rate_mag
+                turn_rate_cmd = Nav_Push_Turn_Forced_Dir * push_turn_rate_mag
             else:
                 turn_rate_cmd = 0.0
         gyro_rate_mode = True

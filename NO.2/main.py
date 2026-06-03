@@ -121,6 +121,9 @@ Follow_Distance_Far_Boost_Gain = 1.05
 Follow_Distance_Close_Gain = 0.62
 Follow_Distance_Close_Limit = 28.0
 Follow_Distance_Emergency_Close_Error = 32
+Follow_Orbit_Close_Back_Min_Vx = 8.0
+Follow_Orbit_Close_Back_Max_Vx = 22.0
+Follow_Orbit_Close_Vy_Limit = 8.0
 Follow_Feedforward_Forward_Gain = 3.20
 Follow_Feedforward_Lateral_Gain = 1.25
 Follow_Feedforward_Forward_Limit = 26.0
@@ -1050,12 +1053,20 @@ def update_follow_targets(yaw_deg, gyro_z):
     angle_priority_active = False
     position_priority_active = False
     back_priority_active = False
+    orbit_close_guard_active = False
     prev_angle_priority_active = last_angle_priority_active
 
     if seen:
         target_lost_since_ms = 0
         use_motion_feedforward = fresh_motion
-        back_priority_active = cam_error_y < -Follow_Distance_Emergency_Close_Error
+        orbit_close_guard_active = (
+            orbit_mode_active
+            and cam_error_y < -Follow_Forward_Deadband
+        )
+        back_priority_active = (
+            orbit_close_guard_active
+            or cam_error_y < -Follow_Distance_Emergency_Close_Error
+        )
         (
             vx,
             vy,
@@ -1099,7 +1110,17 @@ def update_follow_targets(yaw_deg, gyro_z):
 
     if seen:
         if back_priority_active:
-            if vx > 0.0:
+            if orbit_close_guard_active:
+                if vx > -Follow_Orbit_Close_Back_Min_Vx:
+                    vx = -Follow_Orbit_Close_Back_Min_Vx
+                elif vx < -Follow_Orbit_Close_Back_Max_Vx:
+                    vx = -Follow_Orbit_Close_Back_Max_Vx
+                vy = clamp(
+                    vy,
+                    -Follow_Orbit_Close_Vy_Limit,
+                    Follow_Orbit_Close_Vy_Limit,
+                )
+            elif vx > 0.0:
                 vx = 0.0
         elif angle_pose_mode_active:
             xy_scale = angle_xy_lock_scale(
@@ -1119,6 +1140,12 @@ def update_follow_targets(yaw_deg, gyro_z):
     vy = clamp(vy, -vy_limit, vy_limit)
     if back_priority_active and vx <= 0.0 and last_cmd_vx > 0.0:
         last_cmd_vx = 0.0
+    if orbit_close_guard_active:
+        last_cmd_vy = clamp(
+            last_cmd_vy,
+            -Follow_Orbit_Close_Vy_Limit,
+            Follow_Orbit_Close_Vy_Limit,
+        )
     if push_mode_active:
         vx_ramp = Follow_Push_Command_Ramp_Vx
         vy_ramp = Follow_Push_Command_Ramp_Vy

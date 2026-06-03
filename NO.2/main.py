@@ -12,7 +12,9 @@ import config as cfg
 from hardware import Motor
 from coop_protocol import (
     CoopFrameParser,
+    MASTER_MOTION_FLAG_ORBIT,
     MASTER_MOTION_FLAG_STARTED,
+    MASTER_MOTION_FLAG_SPIN,
     MSG_MASTER_MOTION,
     decode_master_motion,
 )
@@ -148,6 +150,11 @@ Follow_Orbit_Pose_Angle_Gain = -1.35
 Follow_Orbit_Pose_Angle_Limit = 74.0
 Follow_Orbit_Pose_Angle_Min_Error = 14
 Follow_Orbit_Pose_Angle_Min_Turn = 30.0
+Follow_Normal_Pose_Angle_Deadband = 10
+Follow_Normal_Pose_Angle_Active_Error = 18
+Follow_Spin_Wz_Feedforward_Gain = 1.05
+Follow_Spin_Wz_Feedforward_Limit = 64.0
+Follow_Spin_Turn_Rate_Limit = 88.0
 Follow_Pose_Angle_Deadband = 4
 Follow_Pose_Angle_Active_Error = 6
 Follow_Angle_Priority_Scale_Error = 12
@@ -352,6 +359,14 @@ def master_started():
     return master_motion_fresh() and ((master_flags & MASTER_MOTION_FLAG_STARTED) != 0)
 
 
+def master_orbit_mode(fresh_motion):
+    return fresh_motion and ((master_flags & MASTER_MOTION_FLAG_ORBIT) != 0)
+
+
+def master_spin_mode(fresh_motion):
+    return fresh_motion and ((master_flags & MASTER_MOTION_FLAG_SPIN) != 0)
+
+
 def update_filtered_ff_wz(ff_wz, fresh_motion):
     global filtered_ff_wz
 
@@ -362,17 +377,30 @@ def update_filtered_ff_wz(ff_wz, fresh_motion):
     return filtered_ff_wz
 
 
-def update_orbit_follow_mode(now, seen, error_angle, ff_wz, gyro_z, fresh_motion):
+def update_orbit_follow_mode(
+    now,
+    seen,
+    error_angle,
+    ff_wz,
+    gyro_z,
+    fresh_motion,
+    explicit_orbit,
+    explicit_spin,
+):
     global orbit_follow_active, orbit_follow_exit_since_ms
+
+    if explicit_spin:
+        orbit_follow_active = False
+        orbit_follow_exit_since_ms = 0
+        return False
 
     enter = (
         seen
         and fresh_motion
         and (
-            ff_wz >= Follow_Orbit_Mode_FfWz_On
+            explicit_orbit
+            or ff_wz >= Follow_Orbit_Mode_FfWz_On
             or ff_wz <= -Follow_Orbit_Mode_FfWz_On
-            or error_angle >= Follow_Orbit_Mode_Angle_On
-            or error_angle <= -Follow_Orbit_Mode_Angle_On
         )
     )
     if enter:
@@ -504,8 +532,12 @@ def calc_follow_lateral(error_x, position_priority=False):
     return clamp(out, -Follow_Lateral_Limit, Follow_Lateral_Limit)
 
 
-def calc_follow_angle(error_angle, orbit_mode=False):
-    if -Follow_Pose_Angle_Deadband <= error_angle <= Follow_Pose_Angle_Deadband:
+def calc_follow_angle(error_angle, orbit_mode=False, spin_mode=False):
+    if orbit_mode or spin_mode:
+        deadband = Follow_Pose_Angle_Deadband
+    else:
+        deadband = Follow_Normal_Pose_Angle_Deadband
+    if -deadband <= error_angle <= deadband:
         return 0.0
     if orbit_mode:
         out = clamp(
@@ -551,11 +583,17 @@ def solve_follow_pose_twist(
     ff_wz,
     use_ff,
     orbit_mode=False,
+    spin_mode=False,
 ):
-    vision_wz = calc_follow_angle(error_angle, orbit_mode)
+    vision_wz = calc_follow_angle(error_angle, orbit_mode, spin_mode)
+    active_error = (
+        Follow_Pose_Angle_Active_Error
+        if (orbit_mode or spin_mode)
+        else Follow_Normal_Pose_Angle_Active_Error
+    )
     angle_active = (
-        error_angle >= Follow_Pose_Angle_Active_Error
-        or error_angle <= -Follow_Pose_Angle_Active_Error
+        error_angle >= active_error
+        or error_angle <= -active_error
     )
     position_priority = position_priority_needed(error_x, error_y, angle_active)
     cam_vx = calc_follow_forward(error_y, position_priority)
@@ -586,6 +624,25 @@ def solve_follow_pose_twist(
                 Follow_Orbit_Wz_Feedforward_Gain,
                 Follow_Orbit_Wz_Feedforward_Limit,
             )
+        elif spin_mode:
+            vx = add_feedforward_assist(
+                vx,
+                ff_vx,
+                Follow_Feedforward_Forward_Gain,
+                Follow_Feedforward_Forward_Limit,
+            )
+            vy = add_feedforward_assist(
+                vy,
+                ff_vy,
+                Follow_Feedforward_Lateral_Gain,
+                Follow_Feedforward_Lateral_Limit,
+            )
+            wz = add_feedforward_direct(
+                wz,
+                ff_wz,
+                Follow_Spin_Wz_Feedforward_Gain,
+                Follow_Spin_Wz_Feedforward_Limit,
+            )
         else:
             target_ff_vx = ff_vx + ff_wz * Follow_Target_Point_Wz_To_Vx
             target_ff_vy = ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
@@ -612,6 +669,12 @@ def solve_follow_pose_twist(
             wz,
             -Follow_Orbit_Turn_Rate_Limit,
             Follow_Orbit_Turn_Rate_Limit,
+        )
+    elif spin_mode and Follow_Spin_Turn_Rate_Limit > 0.0:
+        wz = clamp(
+            wz,
+            -Follow_Spin_Turn_Rate_Limit,
+            Follow_Spin_Turn_Rate_Limit,
         )
     return vx, vy, wz, body_vx, body_vy, angle_active, position_priority
 
@@ -813,6 +876,8 @@ def update_follow_targets(yaw_deg, gyro_z):
     ff_vx = master_vx if fresh_motion else 0.0
     ff_vy = master_vy if fresh_motion else 0.0
     ff_wz = master_wz if fresh_motion else 0.0
+    explicit_orbit = master_orbit_mode(fresh_motion)
+    explicit_spin = master_spin_mode(fresh_motion)
     filtered_wz = update_filtered_ff_wz(ff_wz, fresh_motion)
     orbit_mode_active = update_orbit_follow_mode(
         now,
@@ -821,9 +886,14 @@ def update_follow_targets(yaw_deg, gyro_z):
         ff_wz,
         gyro_z,
         fresh_motion,
+        explicit_orbit,
+        explicit_spin,
     )
+    spin_mode_active = explicit_spin
     if orbit_mode_active:
         follow_ff_wz = filtered_wz
+    elif spin_mode_active:
+        follow_ff_wz = ff_wz
     else:
         follow_ff_wz = clamp(
             filtered_wz,
@@ -862,6 +932,7 @@ def update_follow_targets(yaw_deg, gyro_z):
             follow_ff_wz,
             use_motion_feedforward,
             orbit_mode_active,
+            spin_mode_active,
         )
         if orbit_mode_active:
             position_priority_active = True
@@ -953,10 +1024,17 @@ def update_follow_targets(yaw_deg, gyro_z):
                 -Follow_Orbit_Wz_Feedforward_Limit,
                 Follow_Orbit_Wz_Feedforward_Limit,
             )
+        elif spin_mode_active:
+            turn_rate_cmd = clamp(
+                follow_ff_wz * Follow_Spin_Wz_Feedforward_Gain,
+                -Follow_Spin_Wz_Feedforward_Limit,
+                Follow_Spin_Wz_Feedforward_Limit,
+            )
         else:
             turn_rate_cmd = follow_ff_wz * Follow_Wz_Feedforward_Gain
+    priority_turn_mode = orbit_mode_active or spin_mode_active
     orbit_brake_active = (
-        orbit_mode_active
+        priority_turn_mode
         and (
             gyro_z >= Follow_Orbit_Brake_Gyro_Threshold
             or gyro_z <= -Follow_Orbit_Brake_Gyro_Threshold
@@ -969,7 +1047,7 @@ def update_follow_targets(yaw_deg, gyro_z):
         else:
             reset_turn_loop_state()
     else:
-        if orbit_mode_active:
+        if priority_turn_mode:
             turn_rate_cmd = ramp_value(
                 turn_rate_cmd,
                 last_cmd_wz,
@@ -983,7 +1061,7 @@ def update_follow_targets(yaw_deg, gyro_z):
             )
         last_cmd_wz = turn_rate_cmd
     if (
-        orbit_mode_active
+        priority_turn_mode
         and (
             turn_rate_cmd >= GYRO_PRIORITY_MIN_CMD
             or turn_rate_cmd <= -GYRO_PRIORITY_MIN_CMD
@@ -1037,7 +1115,7 @@ def update_follow_targets(yaw_deg, gyro_z):
         cam_target_vx,
         cam_target_vy,
         vz_cmd,
-        orbit_mode_active,
+        priority_turn_mode,
     )
     last_cmd_vx = cam_target_vx
     last_cmd_vy = cam_target_vy

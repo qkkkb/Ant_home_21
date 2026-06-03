@@ -134,6 +134,8 @@ Follow_Push_Feedforward_Lateral_Gain = 1.55
 Follow_Push_Feedforward_Forward_Limit = 32.0
 Follow_Push_Feedforward_Lateral_Limit = 22.0
 Follow_Push_Angle_Priority_Error = 24
+Follow_Push_Feedforward_Fade_Error = 8
+Follow_Push_Enter_Soft_Ms = 220
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Wz_Feedforward_Gain = 1.60
 Follow_Wz_Feedforward_Limit = 15.0
@@ -265,6 +267,8 @@ orbit_follow_exit_since_ms = 0
 filtered_ff_wz = 0.0
 spin_latched_wz = 0.0
 spin_latch_until_ms = 0
+last_push_mode_active = False
+push_enter_ms = 0
 last_tune_log_ms = 0
 last_hard_stop = False
 last_stall_count = 0
@@ -359,6 +363,25 @@ def orbit_close_lateral_limit(error_y):
     )
 
 
+def push_forward_ff_scale(error_y):
+    if error_y <= 0:
+        return 0.0
+    if error_y >= Follow_Push_Feedforward_Fade_Error:
+        return 1.0
+    return error_y / Follow_Push_Feedforward_Fade_Error
+
+
+def push_enter_soft_scale(now):
+    if Follow_Push_Enter_Soft_Ms <= 0 or push_enter_ms == 0:
+        return 1.0
+    elapsed = utime.ticks_diff(now, push_enter_ms)
+    if elapsed <= 0:
+        return 0.0
+    if elapsed >= Follow_Push_Enter_Soft_Ms:
+        return 1.0
+    return elapsed / Follow_Push_Enter_Soft_Ms
+
+
 def gyro_limit_for_turn(turn_rate_cmd, priority=False, spin_priority=False):
     if spin_priority:
         base_limit = GYRO_SPIN_PRIORITY_OUTPUT_BASE_LIMIT
@@ -407,6 +430,7 @@ def clear_cam_target_state():
     global last_back_priority_active
     global orbit_follow_active, orbit_follow_exit_since_ms, filtered_ff_wz
     global spin_latched_wz, spin_latch_until_ms
+    global last_push_mode_active, push_enter_ms
 
     cam_error_x = 0
     cam_error_y = 0
@@ -422,6 +446,8 @@ def clear_cam_target_state():
     filtered_ff_wz = 0.0
     spin_latched_wz = 0.0
     spin_latch_until_ms = 0
+    last_push_mode_active = False
+    push_enter_ms = 0
     cam_has_target = False
     cam_valid_target_since_ms = 0
     target_lost_since_ms = 0
@@ -1025,6 +1051,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     global last_ap_vz_cmd
     global last_angle_priority_active
     global last_back_priority_active
+    global last_push_mode_active, push_enter_ms
 
     now = utime.ticks_ms()
     seen = cam_target_seen()
@@ -1076,6 +1103,13 @@ def update_follow_targets(yaw_deg, gyro_z):
             Follow_Normal_Wz_Feedforward_Limit,
         )
     push_mode_active = explicit_push and (not orbit_mode_active) and (not spin_mode_active)
+    if push_mode_active:
+        if not last_push_mode_active:
+            push_enter_ms = now
+        last_push_mode_active = True
+    else:
+        last_push_mode_active = False
+        push_enter_ms = 0
     if (
         spin_mode_active
         and (follow_ff_wz >= 0.001 or follow_ff_wz <= -0.001)
@@ -1107,6 +1141,11 @@ def update_follow_targets(yaw_deg, gyro_z):
     if seen:
         target_lost_since_ms = 0
         use_motion_feedforward = fresh_motion
+        if push_mode_active and ff_vx > 0.0:
+            ff_vx *= (
+                push_forward_ff_scale(cam_error_y)
+                * push_enter_soft_scale(now)
+            )
         orbit_close_guard_active = (
             orbit_mode_active
             and cam_error_y < -Follow_Forward_Deadband
@@ -1188,6 +1227,14 @@ def update_follow_targets(yaw_deg, gyro_z):
     vx = clamp(vx, -vx_limit, vx_limit)
     vy = clamp(vy, -vy_limit, vy_limit)
     if back_priority_active and vx <= 0.0 and last_cmd_vx > 0.0:
+        last_cmd_vx = 0.0
+    if (
+        push_mode_active
+        and seen
+        and cam_error_y <= 0
+        and vx <= 0.0
+        and last_cmd_vx > 0.0
+    ):
         last_cmd_vx = 0.0
     if orbit_close_guard_active:
         last_cmd_vy = clamp(
@@ -1361,6 +1408,7 @@ def reset_speed_outputs():
     global last_angle_priority_active, last_back_priority_active
     global orbit_follow_active, orbit_follow_exit_since_ms, filtered_ff_wz
     global spin_latched_wz, spin_latch_until_ms
+    global last_push_mode_active, push_enter_ms
 
     speed_reset(pid_fl)
     speed_reset(pid_fr)
@@ -1381,6 +1429,8 @@ def reset_speed_outputs():
     filtered_ff_wz = 0.0
     spin_latched_wz = 0.0
     spin_latch_until_ms = 0
+    last_push_mode_active = False
+    push_enter_ms = 0
 
 
 def clamp_duty(value):

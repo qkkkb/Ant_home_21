@@ -126,16 +126,16 @@ Follow_Distance_Approach_Slow_Error = 4
 Follow_Distance_Approach_Vx_Limit = 0.0
 Follow_Distance_Lock_Error = 4
 Follow_Distance_Lock_Hold_Ms = 450
-Follow_Feedforward_Forward_Gain = 2.40
-Follow_Feedforward_Lateral_Gain = 0.95
-Follow_Feedforward_Forward_Limit = 18.0
-Follow_Feedforward_Lateral_Limit = 12.0
+Follow_Feedforward_Forward_Gain = 3.20
+Follow_Feedforward_Lateral_Gain = 1.25
+Follow_Feedforward_Forward_Limit = 26.0
+Follow_Feedforward_Lateral_Limit = 18.0
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Wz_Feedforward_Gain = 1.60
 Follow_Wz_Feedforward_Limit = 15.0
-Follow_Orbit_Wz_Feedforward_Gain = 1.05
-Follow_Orbit_Wz_Feedforward_Limit = 64.0
-Follow_Orbit_Turn_Rate_Limit = 88.0
+Follow_Orbit_Wz_Feedforward_Gain = 0.82
+Follow_Orbit_Wz_Feedforward_Limit = 52.0
+Follow_Orbit_Turn_Rate_Limit = 72.0
 Follow_Target_Point_Wz_To_Vx = -0.18
 Follow_Target_Point_Wz_To_Vy = -0.45
 Follow_Orbit_Target_Point_Wz_To_Vx = -0.22
@@ -153,19 +153,20 @@ Follow_Orbit_Pose_Angle_Min_Turn = 30.0
 Follow_Normal_Pose_Angle_Deadband = 10
 Follow_Normal_Pose_Angle_Active_Error = 18
 Follow_Spin_Wz_Feedforward_Gain = 1.05
-Follow_Spin_Wz_Feedforward_Limit = 64.0
+Follow_Spin_Wz_Feedforward_Limit = 88.0
 Follow_Spin_Turn_Rate_Limit = 88.0
 Follow_Pose_Angle_Deadband = 4
 Follow_Pose_Angle_Active_Error = 6
 Follow_Angle_Priority_Scale_Error = 12
 Follow_Angle_Priority_Position_Scale = 0.75
 Follow_Pose_Wheel_Target_Limit = 46.0
-Follow_Command_Ramp_Vx = 8.0
-Follow_Command_Ramp_Vy = 5.0
+Follow_Command_Ramp_Vx = 12.0
+Follow_Command_Ramp_Vy = 7.0
 Follow_Orbit_Command_Ramp_Vx = 22.0
 Follow_Orbit_Command_Ramp_Vy = 24.0
 Follow_Command_Ramp_Wz = 11.0
-Follow_Orbit_Command_Ramp_Wz = 18.0
+Follow_Orbit_Command_Ramp_Wz = 12.0
+Follow_Spin_Command_Ramp_Wz = 24.0
 Follow_Pose_Gyro_Output_Ramp = 8.0
 Follow_Yaw_Enable = False
 Follow_Yaw_Gain = 0.08
@@ -177,9 +178,10 @@ Follow_Orbit_Mode_Angle_On = 10
 Follow_Orbit_Mode_Angle_Off = 4
 Follow_Orbit_Mode_Gyro_Off = 6.0
 Follow_Orbit_Mode_Exit_Ms = 120
-Follow_Orbit_Mode_FfWz_Filter = 0.35
+Follow_Orbit_Mode_FfWz_Filter = 0.22
 Follow_Orbit_Mode_Position_Scale = 0.74
 Follow_Normal_Wz_Feedforward_Limit = 4.0
+Follow_Spin_Mode_FfWz_On = 48.0
 Follow_Orbit_Brake_Gyro_Threshold = 4.0
 Follow_Orbit_Brake_Output_Limit = 8.0
 Master_Motion_Timeout_Ms = 250
@@ -595,7 +597,11 @@ def solve_follow_pose_twist(
         error_angle >= active_error
         or error_angle <= -active_error
     )
-    position_priority = position_priority_needed(error_x, error_y, angle_active)
+    position_priority = position_priority_needed(
+        error_x,
+        error_y,
+        angle_active and (not spin_mode),
+    )
     cam_vx = calc_follow_forward(error_y, position_priority)
     cam_vy = calc_follow_lateral(error_x, position_priority)
     body_vx, body_vy = rotate_camera_velocity_to_body(cam_vx, cam_vy)
@@ -878,6 +884,17 @@ def update_follow_targets(yaw_deg, gyro_z):
     ff_wz = master_wz if fresh_motion else 0.0
     explicit_orbit = master_orbit_mode(fresh_motion)
     explicit_spin = master_spin_mode(fresh_motion)
+    spin_mode_active = (
+        explicit_spin
+        or (
+            fresh_motion
+            and (not explicit_orbit)
+            and (
+                ff_wz >= Follow_Spin_Mode_FfWz_On
+                or ff_wz <= -Follow_Spin_Mode_FfWz_On
+            )
+        )
+    )
     filtered_wz = update_filtered_ff_wz(ff_wz, fresh_motion)
     orbit_mode_active = update_orbit_follow_mode(
         now,
@@ -887,9 +904,8 @@ def update_follow_targets(yaw_deg, gyro_z):
         gyro_z,
         fresh_motion,
         explicit_orbit,
-        explicit_spin,
+        spin_mode_active,
     )
-    spin_mode_active = explicit_spin
     if orbit_mode_active:
         follow_ff_wz = filtered_wz
     elif spin_mode_active:
@@ -1047,7 +1063,13 @@ def update_follow_targets(yaw_deg, gyro_z):
         else:
             reset_turn_loop_state()
     else:
-        if priority_turn_mode:
+        if spin_mode_active:
+            turn_rate_cmd = ramp_value(
+                turn_rate_cmd,
+                last_cmd_wz,
+                Follow_Spin_Command_Ramp_Wz,
+            )
+        elif priority_turn_mode:
             turn_rate_cmd = ramp_value(
                 turn_rate_cmd,
                 last_cmd_wz,
@@ -1360,7 +1382,7 @@ def wireless_tune_log(snap):
                 snap["gyro_z"],
                 snap["gyro_limit"],
                 snap["yaw_deg"],
-                1 if USE_MASTER_MOTION_FEEDFORWARD else 0,
+                int(master_flags),
                 1 if master_motion_rx_fresh() else 0,
             )
         )

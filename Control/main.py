@@ -19,6 +19,7 @@ MASTER_MOTION_FLAG_TARGET = 0x02
 MASTER_MOTION_FLAG_CLOSED_LOOP = 0x04
 MASTER_MOTION_FLAG_ORBIT = 0x08
 MASTER_MOTION_FLAG_SPIN = 0x10
+MASTER_MOTION_FLAG_PUSH = 0x20
 MASTER_MOTION_FILTER = 0.35
 MASTER_MOTION_LINEAR_DEADBAND = 0.5
 MASTER_MOTION_WZ_DEADBAND = 0.8
@@ -1420,8 +1421,19 @@ def send_master_motion(now):
         wz = master_motion_wz
         if nav_state == NAV_STATE_PUSH_ORIENT:
             flags |= MASTER_MOTION_FLAG_ORBIT
+            vx = cam_target_vx
+            vy = cam_target_vy
+            wz = last_turn_rate_cmd
+        elif nav_state == NAV_STATE_PUSH:
+            flags |= MASTER_MOTION_FLAG_PUSH
+            vx = cam_target_vx
+            vy = cam_target_vy
+            wz = last_turn_rate_cmd
         elif nav_state == NAV_STATE_PUSH_TURN:
             flags |= MASTER_MOTION_FLAG_SPIN
+            vx = cam_target_vx
+            vy = cam_target_vy
+            wz = last_turn_rate_cmd
     if cam_target_seen():
         flags |= MASTER_MOTION_FLAG_TARGET
     yaw_deg = imu_runtime.read_yaw() if (ENABLE_IMU and imu_runtime is not None) else 0.0

@@ -13,6 +13,7 @@ from hardware import Motor
 from coop_protocol import (
     CoopFrameParser,
     MASTER_MOTION_FLAG_ORBIT,
+    MASTER_MOTION_FLAG_PUSH,
     MASTER_MOTION_FLAG_STARTED,
     MASTER_MOTION_FLAG_SPIN,
     MSG_MASTER_MOTION,
@@ -130,6 +131,10 @@ Follow_Feedforward_Forward_Gain = 3.20
 Follow_Feedforward_Lateral_Gain = 1.25
 Follow_Feedforward_Forward_Limit = 26.0
 Follow_Feedforward_Lateral_Limit = 18.0
+Follow_Push_Feedforward_Forward_Gain = 4.40
+Follow_Push_Feedforward_Lateral_Gain = 1.35
+Follow_Push_Feedforward_Forward_Limit = 36.0
+Follow_Push_Feedforward_Lateral_Limit = 22.0
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Wz_Feedforward_Gain = 1.60
 Follow_Wz_Feedforward_Limit = 15.0
@@ -162,6 +167,8 @@ Follow_Angle_Priority_Position_Scale = 0.75
 Follow_Pose_Wheel_Target_Limit = 46.0
 Follow_Command_Ramp_Vx = 12.0
 Follow_Command_Ramp_Vy = 7.0
+Follow_Push_Command_Ramp_Vx = 26.0
+Follow_Push_Command_Ramp_Vy = 10.0
 Follow_Orbit_Command_Ramp_Vx = 22.0
 Follow_Orbit_Command_Ramp_Vy = 24.0
 Follow_Command_Ramp_Wz = 11.0
@@ -365,6 +372,10 @@ def master_orbit_mode(fresh_motion):
     return fresh_motion and ((master_flags & MASTER_MOTION_FLAG_ORBIT) != 0)
 
 
+def master_push_mode(fresh_motion):
+    return fresh_motion and ((master_flags & MASTER_MOTION_FLAG_PUSH) != 0)
+
+
 def master_spin_mode(fresh_motion):
     return fresh_motion and ((master_flags & MASTER_MOTION_FLAG_SPIN) != 0)
 
@@ -514,6 +525,15 @@ def apply_distance_guard(vx, visual_vx, error_y, position_priority=False):
     return vx
 
 
+def apply_push_distance_guard(vx, visual_vx, error_y):
+    if error_y < -Follow_Distance_Lock_Error:
+        if vx > visual_vx:
+            vx = visual_vx
+        if vx > 0.0:
+            vx = 0.0
+    return vx
+
+
 def calc_follow_lateral(error_x, position_priority=False):
     deadband = Follow_Orbit_Lateral_Deadband if position_priority else Follow_Lateral_Deadband
     if -deadband <= error_x <= deadband:
@@ -585,6 +605,7 @@ def solve_follow_pose_twist(
     ff_wz,
     use_ff,
     orbit_mode=False,
+    push_mode=False,
     spin_mode=False,
 ):
     vision_wz = calc_follow_angle(error_angle, orbit_mode, spin_mode)
@@ -629,6 +650,25 @@ def solve_follow_pose_twist(
                 ff_wz,
                 Follow_Orbit_Wz_Feedforward_Gain,
                 Follow_Orbit_Wz_Feedforward_Limit,
+            )
+        elif push_mode:
+            vx = add_feedforward_direct(
+                vx,
+                ff_vx,
+                Follow_Push_Feedforward_Forward_Gain,
+                Follow_Push_Feedforward_Forward_Limit,
+            )
+            vy = add_feedforward_direct(
+                vy,
+                ff_vy,
+                Follow_Push_Feedforward_Lateral_Gain,
+                Follow_Push_Feedforward_Lateral_Limit,
+            )
+            wz = add_feedforward_assist(
+                wz,
+                ff_wz,
+                Follow_Wz_Feedforward_Gain,
+                Follow_Wz_Feedforward_Limit,
             )
         elif spin_mode:
             vx = add_feedforward_assist(
@@ -883,6 +923,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     ff_vy = master_vy if fresh_motion else 0.0
     ff_wz = master_wz if fresh_motion else 0.0
     explicit_orbit = master_orbit_mode(fresh_motion)
+    explicit_push = master_push_mode(fresh_motion)
     explicit_spin = master_spin_mode(fresh_motion)
     spin_mode_active = (
         explicit_spin
@@ -916,6 +957,16 @@ def update_follow_targets(yaw_deg, gyro_z):
             -Follow_Normal_Wz_Feedforward_Limit,
             Follow_Normal_Wz_Feedforward_Limit,
         )
+    push_mode_active = explicit_push and (not orbit_mode_active) and (not spin_mode_active)
+    if (
+        spin_mode_active
+        and (follow_ff_wz >= 0.001 or follow_ff_wz <= -0.001)
+        and (
+            last_cmd_wz * follow_ff_wz < 0.0
+            or last_ap_vz_cmd * follow_ff_wz < 0.0
+        )
+    ):
+        reset_turn_loop_state()
     body_vx = 0.0
     body_vy = 0.0
     turn_rate_cmd = 0.0
@@ -948,6 +999,7 @@ def update_follow_targets(yaw_deg, gyro_z):
             follow_ff_wz,
             use_motion_feedforward,
             orbit_mode_active,
+            push_mode_active,
             spin_mode_active,
         )
         if orbit_mode_active:
@@ -970,12 +1022,15 @@ def update_follow_targets(yaw_deg, gyro_z):
         last_back_priority_active = False
 
     if seen:
-        vx = apply_distance_guard(
-            vx,
-            body_vx,
-            cam_error_y,
-            position_priority_active,
-        )
+        if push_mode_active:
+            vx = apply_push_distance_guard(vx, body_vx, cam_error_y)
+        else:
+            vx = apply_distance_guard(
+                vx,
+                body_vx,
+                cam_error_y,
+                position_priority_active,
+            )
         if back_priority_active:
             if Follow_Forward_Error_Sign >= 0:
                 if vx > -Follow_Distance_Back_Min_Vx:
@@ -1020,7 +1075,10 @@ def update_follow_targets(yaw_deg, gyro_z):
             -Follow_Distance_Back_Vy_Limit,
             Follow_Distance_Back_Vy_Limit,
         )
-    if position_priority_active:
+    if push_mode_active:
+        vx_ramp = Follow_Push_Command_Ramp_Vx
+        vy_ramp = Follow_Push_Command_Ramp_Vy
+    elif position_priority_active:
         vx_ramp = Follow_Orbit_Command_Ramp_Vx
         vy_ramp = Follow_Orbit_Command_Ramp_Vy
     else:

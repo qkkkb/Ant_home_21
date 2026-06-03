@@ -58,6 +58,10 @@ GYRO_PRIORITY_MIN_CMD = 6.5
 GYRO_PRIORITY_OVERSPEED_RATIO = 2.60
 GYRO_PRIORITY_BRAKE_KP = 0.16
 GYRO_PRIORITY_BRAKE_LIMIT = 8.0
+GYRO_SPIN_PRIORITY_OUTPUT_BASE_LIMIT = 10.0
+GYRO_SPIN_PRIORITY_OUTPUT_TARGET_GAIN = 0.45
+GYRO_SPIN_PRIORITY_OUTPUT_MAX_LIMIT = 58.0
+GYRO_SPIN_PRIORITY_OVERSPEED_RATIO = 1.25
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True
 GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
@@ -135,6 +139,9 @@ Follow_Push_Feedforward_Forward_Gain = 4.40
 Follow_Push_Feedforward_Lateral_Gain = 1.35
 Follow_Push_Feedforward_Forward_Limit = 36.0
 Follow_Push_Feedforward_Lateral_Limit = 22.0
+Follow_Push_Close_Brake_Error = 14
+Follow_Push_Min_Forward_Gain = 2.0
+Follow_Push_Min_Forward_Limit = 18.0
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Wz_Feedforward_Gain = 1.60
 Follow_Wz_Feedforward_Limit = 15.0
@@ -158,8 +165,8 @@ Follow_Orbit_Pose_Angle_Min_Turn = 30.0
 Follow_Normal_Pose_Angle_Deadband = 10
 Follow_Normal_Pose_Angle_Active_Error = 18
 Follow_Spin_Wz_Feedforward_Gain = 1.05
-Follow_Spin_Wz_Feedforward_Limit = 88.0
-Follow_Spin_Turn_Rate_Limit = 88.0
+Follow_Spin_Wz_Feedforward_Limit = 170.0
+Follow_Spin_Turn_Rate_Limit = 170.0
 Follow_Pose_Angle_Deadband = 4
 Follow_Pose_Angle_Active_Error = 6
 Follow_Angle_Priority_Scale_Error = 12
@@ -173,7 +180,8 @@ Follow_Orbit_Command_Ramp_Vx = 22.0
 Follow_Orbit_Command_Ramp_Vy = 24.0
 Follow_Command_Ramp_Wz = 11.0
 Follow_Orbit_Command_Ramp_Wz = 12.0
-Follow_Spin_Command_Ramp_Wz = 24.0
+Follow_Spin_Command_Ramp_Wz = 170.0
+Follow_Spin_Gyro_Output_Ramp = 18.0
 Follow_Pose_Gyro_Output_Ramp = 8.0
 Follow_Yaw_Enable = False
 Follow_Yaw_Gain = 0.08
@@ -189,6 +197,9 @@ Follow_Orbit_Mode_FfWz_Filter = 0.22
 Follow_Orbit_Mode_Position_Scale = 0.74
 Follow_Normal_Wz_Feedforward_Limit = 4.0
 Follow_Spin_Mode_FfWz_On = 48.0
+Follow_Spin_Latch_Min_Wz = 35.0
+Follow_Spin_Command_Hold_Ms = 900
+Follow_Spin_Latch_Release_Angle = 6
 Follow_Orbit_Brake_Gyro_Threshold = 4.0
 Follow_Orbit_Brake_Output_Limit = 8.0
 Master_Motion_Timeout_Ms = 250
@@ -253,6 +264,8 @@ last_back_priority_active = False
 orbit_follow_active = False
 orbit_follow_exit_since_ms = 0
 filtered_ff_wz = 0.0
+spin_latched_wz = 0.0
+spin_latch_until_ms = 0
 last_tune_log_ms = 0
 last_hard_stop = False
 last_stall_count = 0
@@ -281,8 +294,12 @@ def ramp_value(target, last, step):
     return target
 
 
-def gyro_limit_for_turn(turn_rate_cmd, priority=False):
-    if priority:
+def gyro_limit_for_turn(turn_rate_cmd, priority=False, spin_priority=False):
+    if spin_priority:
+        base_limit = GYRO_SPIN_PRIORITY_OUTPUT_BASE_LIMIT
+        target_gain = GYRO_SPIN_PRIORITY_OUTPUT_TARGET_GAIN
+        max_limit = GYRO_SPIN_PRIORITY_OUTPUT_MAX_LIMIT
+    elif priority:
         base_limit = GYRO_PRIORITY_OUTPUT_BASE_LIMIT
         target_gain = GYRO_PRIORITY_OUTPUT_TARGET_GAIN
         max_limit = GYRO_PRIORITY_OUTPUT_MAX_LIMIT
@@ -324,6 +341,7 @@ def clear_cam_target_state():
     global last_distance_lock_ms, last_angle_priority_active
     global last_back_priority_active
     global orbit_follow_active, orbit_follow_exit_since_ms, filtered_ff_wz
+    global spin_latched_wz, spin_latch_until_ms
 
     cam_error_x = 0
     cam_error_y = 0
@@ -338,6 +356,8 @@ def clear_cam_target_state():
     orbit_follow_active = False
     orbit_follow_exit_since_ms = 0
     filtered_ff_wz = 0.0
+    spin_latched_wz = 0.0
+    spin_latch_until_ms = 0
     cam_has_target = False
     cam_valid_target_since_ms = 0
     target_lost_since_ms = 0
@@ -378,6 +398,30 @@ def master_push_mode(fresh_motion):
 
 def master_spin_mode(fresh_motion):
     return fresh_motion and ((master_flags & MASTER_MOTION_FLAG_SPIN) != 0)
+
+
+def update_spin_feedforward_latch(now, fresh_motion, explicit_spin, ff_wz, seen, error_angle):
+    global spin_latched_wz, spin_latch_until_ms
+
+    if explicit_spin and fresh_motion and (
+        ff_wz >= Follow_Spin_Latch_Min_Wz
+        or ff_wz <= -Follow_Spin_Latch_Min_Wz
+    ):
+        spin_latched_wz = ff_wz
+        spin_latch_until_ms = utime.ticks_add(now, Follow_Spin_Command_Hold_Ms)
+        return ff_wz
+
+    if spin_latched_wz != 0.0 and utime.ticks_diff(spin_latch_until_ms, now) > 0:
+        if (not seen) or (
+            error_angle >= Follow_Spin_Latch_Release_Angle
+            or error_angle <= -Follow_Spin_Latch_Release_Angle
+        ):
+            return spin_latched_wz
+
+    if not explicit_spin:
+        spin_latched_wz = 0.0
+        spin_latch_until_ms = 0
+    return ff_wz
 
 
 def update_filtered_ff_wz(ff_wz, fresh_motion):
@@ -526,11 +570,29 @@ def apply_distance_guard(vx, visual_vx, error_y, position_priority=False):
 
 
 def apply_push_distance_guard(vx, visual_vx, error_y):
-    if error_y < -Follow_Distance_Lock_Error:
+    if error_y < -Follow_Push_Close_Brake_Error:
         if vx > visual_vx:
             vx = visual_vx
         if vx > 0.0:
             vx = 0.0
+    return vx
+
+
+def apply_push_forward_floor(vx, ff_vx, close_brake):
+    if close_brake:
+        return vx
+    if ff_vx > 0.001:
+        floor = ff_vx * Follow_Push_Min_Forward_Gain
+        if floor > Follow_Push_Min_Forward_Limit:
+            floor = Follow_Push_Min_Forward_Limit
+        if vx < floor:
+            return floor
+    elif ff_vx < -0.001:
+        floor = ff_vx * Follow_Push_Min_Forward_Gain
+        if floor < -Follow_Push_Min_Forward_Limit:
+            floor = -Follow_Push_Min_Forward_Limit
+        if vx > floor:
+            return floor
     return vx
 
 
@@ -743,8 +805,43 @@ def max_wheel_abs(wheel_fr, wheel_fl, wheel_b):
     return max_abs
 
 
-def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False):
+def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_turn=False):
     if Follow_Pose_Wheel_Target_Limit <= 0.0:
+        return vx, vy, vz
+
+    if preserve_turn:
+        limit = Follow_Pose_Wheel_Target_Limit
+        if vz > limit:
+            vz = limit
+        elif vz < -limit:
+            vz = -limit
+        wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
+        scale = 1.0
+        if wheel_fr > 0.001 and wheel_fr + vz > limit:
+            scale = (limit - vz) / wheel_fr
+        elif wheel_fr < -0.001 and wheel_fr + vz < -limit:
+            scale = (-limit - vz) / wheel_fr
+        if wheel_fl > 0.001 and wheel_fl + vz > limit:
+            tmp = (limit - vz) / wheel_fl
+            if tmp < scale:
+                scale = tmp
+        elif wheel_fl < -0.001 and wheel_fl + vz < -limit:
+            tmp = (-limit - vz) / wheel_fl
+            if tmp < scale:
+                scale = tmp
+        if wheel_b > 0.001 and wheel_b + vz > limit:
+            tmp = (limit - vz) / wheel_b
+            if tmp < scale:
+                scale = tmp
+        elif wheel_b < -0.001 and wheel_b + vz < -limit:
+            tmp = (-limit - vz) / wheel_b
+            if tmp < scale:
+                scale = tmp
+        if scale < 0.0:
+            scale = 0.0
+        if scale < 1.0:
+            vx *= scale
+            vy *= scale
         return vx, vy, vz
 
     if preserve_pose_ratio:
@@ -807,16 +904,21 @@ def reset_turn_loop_state():
         gyro_pid.err_last = 0.0
 
 
-def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z):
+def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z, spin_priority=False):
     err = turn_rate_cmd - gyro_z
-    limit = gyro_limit_for_turn(turn_rate_cmd, True)
+    limit = gyro_limit_for_turn(turn_rate_cmd, True, spin_priority)
     turn_abs = abs(turn_rate_cmd)
     gyro_abs = abs(gyro_z)
+    overspeed_ratio = (
+        GYRO_SPIN_PRIORITY_OVERSPEED_RATIO
+        if spin_priority
+        else GYRO_PRIORITY_OVERSPEED_RATIO
+    )
     same_dir = (
         (turn_rate_cmd > 0.0 and gyro_z > 0.0)
         or (turn_rate_cmd < 0.0 and gyro_z < 0.0)
     )
-    if same_dir and gyro_abs > turn_abs * GYRO_PRIORITY_OVERSPEED_RATIO:
+    if same_dir and gyro_abs > turn_abs * overspeed_ratio:
         out = err * GYRO_PRIORITY_BRAKE_KP
         return clamp(out, -GYRO_PRIORITY_BRAKE_LIMIT, GYRO_PRIORITY_BRAKE_LIMIT)
 
@@ -925,18 +1027,26 @@ def update_follow_targets(yaw_deg, gyro_z):
     explicit_orbit = master_orbit_mode(fresh_motion)
     explicit_push = master_push_mode(fresh_motion)
     explicit_spin = master_spin_mode(fresh_motion)
+    spin_ff_wz = update_spin_feedforward_latch(
+        now,
+        fresh_motion,
+        explicit_spin,
+        ff_wz,
+        seen,
+        cam_error_angle,
+    )
     spin_mode_active = (
         explicit_spin
         or (
             fresh_motion
             and (not explicit_orbit)
             and (
-                ff_wz >= Follow_Spin_Mode_FfWz_On
-                or ff_wz <= -Follow_Spin_Mode_FfWz_On
+                spin_ff_wz >= Follow_Spin_Mode_FfWz_On
+                or spin_ff_wz <= -Follow_Spin_Mode_FfWz_On
             )
         )
     )
-    filtered_wz = update_filtered_ff_wz(ff_wz, fresh_motion)
+    filtered_wz = update_filtered_ff_wz(spin_ff_wz if spin_mode_active else ff_wz, fresh_motion)
     orbit_mode_active = update_orbit_follow_mode(
         now,
         seen,
@@ -950,7 +1060,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     if orbit_mode_active:
         follow_ff_wz = filtered_wz
     elif spin_mode_active:
-        follow_ff_wz = ff_wz
+        follow_ff_wz = spin_ff_wz
     else:
         follow_ff_wz = clamp(
             filtered_wz,
@@ -961,10 +1071,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     if (
         spin_mode_active
         and (follow_ff_wz >= 0.001 or follow_ff_wz <= -0.001)
-        and (
-            last_cmd_wz * follow_ff_wz < 0.0
-            or last_ap_vz_cmd * follow_ff_wz < 0.0
-        )
+        and last_cmd_wz * follow_ff_wz < 0.0
     ):
         reset_turn_loop_state()
     body_vx = 0.0
@@ -979,7 +1086,10 @@ def update_follow_targets(yaw_deg, gyro_z):
     if seen:
         target_lost_since_ms = 0
         use_motion_feedforward = fresh_motion
-        back_priority_active = cam_error_y < -Follow_Forward_Deadband
+        if push_mode_active:
+            back_priority_active = cam_error_y < -Follow_Push_Close_Brake_Error
+        else:
+            back_priority_active = cam_error_y < -Follow_Forward_Deadband
         if -Follow_Distance_Lock_Error <= cam_error_y <= Follow_Distance_Lock_Error:
             last_distance_lock_ms = now
         (
@@ -1024,6 +1134,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     if seen:
         if push_mode_active:
             vx = apply_push_distance_guard(vx, body_vx, cam_error_y)
+            vx = apply_push_forward_floor(vx, ff_vx, back_priority_active)
         else:
             vx = apply_distance_guard(
                 vx,
@@ -1162,10 +1273,23 @@ def update_follow_targets(yaw_deg, gyro_z):
             if angle_priority_active:
                 gyro_pid.gyro_kp = GYRO_PRIORITY_KP
                 gyro_pid.gyro_ki = GYRO_PRIORITY_KI
-                gyro_pid.gyro_output_limit = gyro_limit_for_turn(turn_rate_cmd, True)
+                gyro_pid.gyro_output_limit = gyro_limit_for_turn(
+                    turn_rate_cmd,
+                    True,
+                    spin_mode_active,
+                )
                 gyro_pid.err = turn_rate_cmd - gyro_z
-                vz_cmd = priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z)
-                vz_cmd = ramp_value(vz_cmd, last_ap_vz_cmd, Follow_Pose_Gyro_Output_Ramp)
+                vz_cmd = priority_gyro_rate_ctrl(
+                    turn_rate_cmd,
+                    gyro_z,
+                    spin_mode_active,
+                )
+                output_ramp = (
+                    Follow_Spin_Gyro_Output_Ramp
+                    if spin_mode_active
+                    else Follow_Pose_Gyro_Output_Ramp
+                )
+                vz_cmd = ramp_value(vz_cmd, last_ap_vz_cmd, output_ramp)
                 last_ap_vz_cmd = vz_cmd
                 gyro_pid.output = vz_cmd
                 gyro_pid.err_last = gyro_pid.err
@@ -1195,6 +1319,7 @@ def update_follow_targets(yaw_deg, gyro_z):
         cam_target_vx,
         cam_target_vy,
         vz_cmd,
+        priority_turn_mode,
         priority_turn_mode,
     )
     last_cmd_vx = cam_target_vx
@@ -1226,6 +1351,7 @@ def reset_speed_outputs():
     global last_cmd_vx, last_cmd_vy, last_cmd_wz, last_ap_vz_cmd
     global last_angle_priority_active, last_back_priority_active
     global orbit_follow_active, orbit_follow_exit_since_ms, filtered_ff_wz
+    global spin_latched_wz, spin_latch_until_ms
 
     speed_reset(pid_fl)
     speed_reset(pid_fr)
@@ -1244,6 +1370,8 @@ def reset_speed_outputs():
     orbit_follow_active = False
     orbit_follow_exit_since_ms = 0
     filtered_ff_wz = 0.0
+    spin_latched_wz = 0.0
+    spin_latch_until_ms = 0
 
 
 def clamp_duty(value):

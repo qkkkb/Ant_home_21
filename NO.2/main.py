@@ -268,6 +268,7 @@ last_cmd_wz = 0.0
 last_ap_vz_cmd = 0.0
 last_angle_priority_active = False
 last_back_priority_active = False
+orbit_close_guard_latched = False
 orbit_follow_active = False
 orbit_follow_exit_since_ms = 0
 filtered_ff_wz = 0.0
@@ -373,7 +374,7 @@ def orbit_feedforward_position_scale(error_x, error_y):
 
 
 def orbit_close_depth(error_y):
-    depth = -error_y - Follow_Forward_Deadband
+    depth = -error_y
     if depth < 0:
         return 0.0
     return depth
@@ -468,6 +469,7 @@ def clear_cam_target_state():
     global last_cmd_vx, last_cmd_vy, last_cmd_wz, last_ap_vz_cmd
     global last_angle_priority_active
     global last_back_priority_active
+    global orbit_close_guard_latched
     global orbit_follow_active, orbit_follow_exit_since_ms, filtered_ff_wz
     global spin_latched_wz, spin_latch_until_ms
     global last_push_mode_active, push_enter_ms
@@ -481,6 +483,7 @@ def clear_cam_target_state():
     last_ap_vz_cmd = 0.0
     last_angle_priority_active = False
     last_back_priority_active = False
+    orbit_close_guard_latched = False
     orbit_follow_active = False
     orbit_follow_exit_since_ms = 0
     filtered_ff_wz = 0.0
@@ -1094,6 +1097,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     global last_ap_vz_cmd
     global last_angle_priority_active
     global last_back_priority_active
+    global orbit_close_guard_latched
     global last_push_mode_active, push_enter_ms
 
     now = utime.ticks_ms()
@@ -1189,10 +1193,14 @@ def update_follow_targets(yaw_deg, gyro_z):
                 push_forward_ff_scale(cam_error_y)
                 * push_enter_soft_scale(now)
             )
-        orbit_close_guard_active = (
-            orbit_mode_active
-            and cam_error_y < -Follow_Forward_Deadband
-        )
+        if orbit_mode_active:
+            if cam_error_y < -Follow_Forward_Deadband:
+                orbit_close_guard_latched = True
+            elif cam_error_y >= 0:
+                orbit_close_guard_latched = False
+            orbit_close_guard_active = orbit_close_guard_latched
+        else:
+            orbit_close_guard_latched = False
         back_priority_active = (
             orbit_close_guard_active
             or cam_error_y < -Follow_Distance_Emergency_Close_Error
@@ -1239,6 +1247,7 @@ def update_follow_targets(yaw_deg, gyro_z):
             reset_turn_loop_state()
         last_angle_priority_active = False
         last_back_priority_active = False
+        orbit_close_guard_latched = False
 
     if seen:
         if back_priority_active:
@@ -1449,6 +1458,7 @@ def reset_speed_outputs():
     global last_stall_count, last_stall_boost
     global last_cmd_vx, last_cmd_vy, last_cmd_wz, last_ap_vz_cmd
     global last_angle_priority_active, last_back_priority_active
+    global orbit_close_guard_latched
     global orbit_follow_active, orbit_follow_exit_since_ms, filtered_ff_wz
     global spin_latched_wz, spin_latch_until_ms
     global last_push_mode_active, push_enter_ms
@@ -1467,6 +1477,7 @@ def reset_speed_outputs():
     last_ap_vz_cmd = 0.0
     last_angle_priority_active = False
     last_back_priority_active = False
+    orbit_close_guard_latched = False
     orbit_follow_active = False
     orbit_follow_exit_since_ms = 0
     filtered_ff_wz = 0.0

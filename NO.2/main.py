@@ -121,17 +121,19 @@ Follow_Distance_Far_Boost_Gain = 1.05
 Follow_Distance_Close_Gain = 0.62
 Follow_Distance_Close_Limit = 28.0
 Follow_Distance_Emergency_Close_Error = 32
-Follow_Orbit_Close_Back_Min_Vx = 8.0
 Follow_Orbit_Close_Back_Max_Vx = 22.0
+Follow_Orbit_Close_Back_Gain = 1.0
+Follow_Orbit_Close_Full_Error = 18
 Follow_Orbit_Close_Vy_Limit = 8.0
 Follow_Feedforward_Forward_Gain = 3.20
 Follow_Feedforward_Lateral_Gain = 1.25
 Follow_Feedforward_Forward_Limit = 26.0
 Follow_Feedforward_Lateral_Limit = 18.0
-Follow_Push_Feedforward_Forward_Gain = 2.05
+Follow_Push_Feedforward_Forward_Gain = 2.70
 Follow_Push_Feedforward_Lateral_Gain = 1.55
-Follow_Push_Feedforward_Forward_Limit = 24.0
+Follow_Push_Feedforward_Forward_Limit = 32.0
 Follow_Push_Feedforward_Lateral_Limit = 22.0
+Follow_Push_Angle_Priority_Error = 24
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Wz_Feedforward_Gain = 1.60
 Follow_Wz_Feedforward_Limit = 15.0
@@ -154,27 +156,33 @@ Follow_Orbit_Pose_Angle_Min_Error = 14
 Follow_Orbit_Pose_Angle_Min_Turn = 30.0
 Follow_Normal_Pose_Angle_Deadband = 10
 Follow_Normal_Pose_Angle_Active_Error = 18
-Follow_Spin_Wz_Feedforward_Gain = 1.05
-Follow_Spin_Wz_Feedforward_Limit = 170.0
-Follow_Spin_Turn_Rate_Limit = 170.0
+Follow_Spin_Target_Point_Wz_To_Vx = -0.10
+Follow_Spin_Target_Point_Wz_To_Vy = -0.38
+Follow_Spin_Feedforward_Forward_Gain = 0.95
+Follow_Spin_Feedforward_Lateral_Gain = 0.85
+Follow_Spin_Feedforward_Forward_Limit = 20.0
+Follow_Spin_Feedforward_Lateral_Limit = 30.0
+Follow_Spin_Wz_Feedforward_Gain = 0.35
+Follow_Spin_Wz_Feedforward_Limit = 68.0
+Follow_Spin_Turn_Rate_Limit = 96.0
 Follow_Pose_Angle_Deadband = 4
 Follow_Pose_Angle_Active_Error = 6
 Follow_Angle_XY_Mode_On_Error = 12
 Follow_Angle_XY_Mode_Full_Error = 42
 Follow_Angle_XY_Min_Scale = 0.38
 Follow_Orbit_XY_Max_Scale = 0.58
-Follow_Spin_XY_Max_Scale = 0.42
+Follow_Spin_XY_Max_Scale = 0.72
 Follow_Pose_Wheel_Target_Limit = 46.0
 Follow_Command_Ramp_Vx = 16.0
 Follow_Command_Ramp_Vy = 14.0
-Follow_Push_Command_Ramp_Vx = 20.0
+Follow_Push_Command_Ramp_Vx = 26.0
 Follow_Push_Command_Ramp_Vy = 16.0
 Follow_Orbit_Command_Ramp_Vx = 22.0
 Follow_Orbit_Command_Ramp_Vy = 24.0
 Follow_Command_Ramp_Wz = 11.0
 Follow_Orbit_Command_Ramp_Wz = 12.0
-Follow_Spin_Command_Ramp_Wz = 170.0
-Follow_Spin_Gyro_Output_Ramp = 18.0
+Follow_Spin_Command_Ramp_Wz = 42.0
+Follow_Spin_Gyro_Output_Ramp = 12.0
 Follow_Pose_Gyro_Output_Ramp = 8.0
 Follow_Yaw_Enable = False
 Follow_Yaw_Gain = 0.08
@@ -318,6 +326,37 @@ def angle_xy_lock_scale(error_angle, orbit_mode=False, spin_mode=False):
     elif orbit_mode and scale > Follow_Orbit_XY_Max_Scale:
         scale = Follow_Orbit_XY_Max_Scale
     return scale
+
+
+def orbit_close_depth(error_y):
+    depth = -error_y - Follow_Forward_Deadband
+    if depth < 0:
+        return 0.0
+    return depth
+
+
+def orbit_close_back_target(error_y):
+    depth = orbit_close_depth(error_y)
+    if depth <= 0.0:
+        return 0.0
+    return -clamp(
+        depth * Follow_Orbit_Close_Back_Gain,
+        0.0,
+        Follow_Orbit_Close_Back_Max_Vx,
+    )
+
+
+def orbit_close_lateral_limit(error_y):
+    depth = orbit_close_depth(error_y)
+    if depth <= 0.0:
+        return Follow_Lateral_Limit
+    if depth >= Follow_Orbit_Close_Full_Error:
+        return Follow_Orbit_Close_Vy_Limit
+    return Follow_Lateral_Limit - (
+        (Follow_Lateral_Limit - Follow_Orbit_Close_Vy_Limit)
+        * depth
+        / Follow_Orbit_Close_Full_Error
+    )
 
 
 def gyro_limit_for_turn(turn_rate_cmd, priority=False, spin_priority=False):
@@ -700,19 +739,21 @@ def solve_follow_pose_twist(
                 Follow_Wz_Feedforward_Limit,
             )
         elif spin_mode:
+            target_ff_vx = ff_vx + ff_wz * Follow_Spin_Target_Point_Wz_To_Vx
+            target_ff_vy = ff_vy + ff_wz * Follow_Spin_Target_Point_Wz_To_Vy
             vx = add_feedforward_direct(
                 vx,
-                ff_vx,
-                Follow_Feedforward_Forward_Gain,
-                Follow_Feedforward_Forward_Limit,
+                target_ff_vx,
+                Follow_Spin_Feedforward_Forward_Gain,
+                Follow_Spin_Feedforward_Forward_Limit,
             )
             vy = add_feedforward_direct(
                 vy,
-                ff_vy,
-                Follow_Feedforward_Lateral_Gain,
-                Follow_Feedforward_Lateral_Limit,
+                target_ff_vy,
+                Follow_Spin_Feedforward_Lateral_Gain,
+                Follow_Spin_Feedforward_Lateral_Limit,
             )
-            wz = add_feedforward_direct(
+            wz = add_feedforward_assist(
                 wz,
                 ff_wz,
                 Follow_Spin_Wz_Feedforward_Gain,
@@ -1046,6 +1087,12 @@ def update_follow_targets(yaw_deg, gyro_z):
         orbit_mode_active,
         spin_mode_active,
     ) if seen else (orbit_mode_active or spin_mode_active)
+    if (
+        push_mode_active
+        and cam_error_angle < Follow_Push_Angle_Priority_Error
+        and cam_error_angle > -Follow_Push_Angle_Priority_Error
+    ):
+        angle_pose_mode_active = False
     body_vx = 0.0
     body_vy = 0.0
     turn_rate_cmd = 0.0
@@ -1054,6 +1101,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     position_priority_active = False
     back_priority_active = False
     orbit_close_guard_active = False
+    orbit_close_vy_limit = Follow_Lateral_Limit
     prev_angle_priority_active = last_angle_priority_active
 
     if seen:
@@ -1067,6 +1115,8 @@ def update_follow_targets(yaw_deg, gyro_z):
             orbit_close_guard_active
             or cam_error_y < -Follow_Distance_Emergency_Close_Error
         )
+        if orbit_close_guard_active:
+            orbit_close_vy_limit = orbit_close_lateral_limit(cam_error_y)
         (
             vx,
             vy,
@@ -1111,14 +1161,13 @@ def update_follow_targets(yaw_deg, gyro_z):
     if seen:
         if back_priority_active:
             if orbit_close_guard_active:
-                if vx > -Follow_Orbit_Close_Back_Min_Vx:
-                    vx = -Follow_Orbit_Close_Back_Min_Vx
-                elif vx < -Follow_Orbit_Close_Back_Max_Vx:
-                    vx = -Follow_Orbit_Close_Back_Max_Vx
+                back_vx = orbit_close_back_target(cam_error_y)
+                if vx > back_vx:
+                    vx = back_vx
                 vy = clamp(
                     vy,
-                    -Follow_Orbit_Close_Vy_Limit,
-                    Follow_Orbit_Close_Vy_Limit,
+                    -orbit_close_vy_limit,
+                    orbit_close_vy_limit,
                 )
             elif vx > 0.0:
                 vx = 0.0
@@ -1143,8 +1192,8 @@ def update_follow_targets(yaw_deg, gyro_z):
     if orbit_close_guard_active:
         last_cmd_vy = clamp(
             last_cmd_vy,
-            -Follow_Orbit_Close_Vy_Limit,
-            Follow_Orbit_Close_Vy_Limit,
+            -orbit_close_vy_limit,
+            orbit_close_vy_limit,
         )
     if push_mode_active:
         vx_ramp = Follow_Push_Command_Ramp_Vx

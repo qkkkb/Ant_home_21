@@ -156,8 +156,11 @@ Follow_Spin_Wz_Feedforward_Limit = 170.0
 Follow_Spin_Turn_Rate_Limit = 170.0
 Follow_Pose_Angle_Deadband = 4
 Follow_Pose_Angle_Active_Error = 6
-Follow_Angle_Priority_Scale_Error = 12
-Follow_Angle_Priority_Position_Scale = 0.90
+Follow_Angle_XY_Mode_On_Error = 12
+Follow_Angle_XY_Mode_Full_Error = 42
+Follow_Angle_XY_Min_Scale = 0.38
+Follow_Orbit_XY_Max_Scale = 0.58
+Follow_Spin_XY_Max_Scale = 0.42
 Follow_Pose_Wheel_Target_Limit = 46.0
 Follow_Command_Ramp_Vx = 16.0
 Follow_Command_Ramp_Vy = 14.0
@@ -181,7 +184,6 @@ Follow_Orbit_Mode_Angle_Off = 4
 Follow_Orbit_Mode_Gyro_Off = 6.0
 Follow_Orbit_Mode_Exit_Ms = 120
 Follow_Orbit_Mode_FfWz_Filter = 0.22
-Follow_Orbit_Mode_Position_Scale = 1.00
 Follow_Normal_Wz_Feedforward_Limit = 4.0
 Follow_Spin_Mode_FfWz_On = 48.0
 Follow_Spin_Latch_Min_Wz = 35.0
@@ -278,6 +280,41 @@ def ramp_value(target, last, step):
     if delta < -step:
         return last - step
     return target
+
+
+def angle_abs_value(error_angle):
+    if error_angle < 0:
+        return -error_angle
+    return error_angle
+
+
+def angle_pose_mode_needed(error_angle, orbit_mode=False, spin_mode=False):
+    return (
+        orbit_mode
+        or spin_mode
+        or error_angle >= Follow_Angle_XY_Mode_On_Error
+        or error_angle <= -Follow_Angle_XY_Mode_On_Error
+    )
+
+
+def angle_xy_lock_scale(error_angle, orbit_mode=False, spin_mode=False):
+    angle_abs = angle_abs_value(error_angle)
+    if angle_abs <= Follow_Angle_XY_Mode_On_Error:
+        scale = 1.0
+    elif angle_abs >= Follow_Angle_XY_Mode_Full_Error:
+        scale = Follow_Angle_XY_Min_Scale
+    else:
+        span = Follow_Angle_XY_Mode_Full_Error - Follow_Angle_XY_Mode_On_Error
+        scale = 1.0 - (
+            (angle_abs - Follow_Angle_XY_Mode_On_Error)
+            * (1.0 - Follow_Angle_XY_Min_Scale)
+            / span
+        )
+    if spin_mode and scale > Follow_Spin_XY_Max_Scale:
+        scale = Follow_Spin_XY_Max_Scale
+    elif orbit_mode and scale > Follow_Orbit_XY_Max_Scale:
+        scale = Follow_Orbit_XY_Max_Scale
+    return scale
 
 
 def gyro_limit_for_turn(turn_rate_cmd, priority=False, spin_priority=False):
@@ -1001,6 +1038,11 @@ def update_follow_targets(yaw_deg, gyro_z):
         and last_cmd_wz * follow_ff_wz < 0.0
     ):
         reset_turn_loop_state()
+    angle_pose_mode_active = angle_pose_mode_needed(
+        cam_error_angle,
+        orbit_mode_active,
+        spin_mode_active,
+    ) if seen else (orbit_mode_active or spin_mode_active)
     body_vx = 0.0
     body_vy = 0.0
     turn_rate_cmd = 0.0
@@ -1036,7 +1078,9 @@ def update_follow_targets(yaw_deg, gyro_z):
         )
         if orbit_mode_active:
             position_priority_active = True
-        last_angle_priority_active = angle_priority_active
+        if angle_pose_mode_active:
+            position_priority_active = True
+        last_angle_priority_active = angle_priority_active or angle_pose_mode_active
         last_back_priority_active = back_priority_active
     else:
         if target_lost_since_ms == 0:
@@ -1057,15 +1101,14 @@ def update_follow_targets(yaw_deg, gyro_z):
         if back_priority_active:
             if vx > 0.0:
                 vx = 0.0
-        elif orbit_mode_active:
-            vx *= Follow_Orbit_Mode_Position_Scale
-            vy *= Follow_Orbit_Mode_Position_Scale
-        elif angle_priority_active and (
-            cam_error_angle >= Follow_Angle_Priority_Scale_Error
-            or cam_error_angle <= -Follow_Angle_Priority_Scale_Error
-        ):
-            vx *= Follow_Angle_Priority_Position_Scale
-            vy *= Follow_Angle_Priority_Position_Scale
+        elif angle_pose_mode_active:
+            xy_scale = angle_xy_lock_scale(
+                cam_error_angle,
+                orbit_mode_active,
+                spin_mode_active,
+            )
+            vx *= xy_scale
+            vy *= xy_scale
 
     vx_limit = Follow_Forward_Limit
     vy_limit = Follow_Lateral_Limit
@@ -1107,7 +1150,7 @@ def update_follow_targets(yaw_deg, gyro_z):
             )
         else:
             turn_rate_cmd = follow_ff_wz * Follow_Wz_Feedforward_Gain
-    priority_turn_mode = orbit_mode_active or spin_mode_active
+    priority_turn_mode = orbit_mode_active or spin_mode_active or angle_pose_mode_active
     orbit_brake_active = (
         priority_turn_mode
         and (

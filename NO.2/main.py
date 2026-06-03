@@ -145,11 +145,14 @@ Follow_Orbit_Turn_Rate_Limit = 72.0
 Follow_Target_Point_Wz_To_Vx = -0.18
 Follow_Target_Point_Wz_To_Vy = -0.45
 Follow_Orbit_Target_Point_Wz_To_Vx = -0.22
-Follow_Orbit_Target_Point_Wz_To_Vy = -0.68
+Follow_Orbit_Target_Point_Wz_To_Vy = -0.62
 Follow_Orbit_Feedforward_Forward_Gain = 1.30
 Follow_Orbit_Feedforward_Lateral_Gain = 1.05
 Follow_Orbit_Feedforward_Forward_Limit = 28.0
-Follow_Orbit_Feedforward_Lateral_Limit = 38.0
+Follow_Orbit_Feedforward_Lateral_Limit = 34.0
+Follow_Orbit_Feedforward_Close_Error = 6
+Follow_Orbit_Feedforward_Full_Error = 22
+Follow_Orbit_Feedforward_Close_Scale = 0.78
 Follow_Pose_Angle_Gain = -0.82
 Follow_Pose_Angle_Limit = 46.0
 Follow_Orbit_Pose_Angle_Gain = -1.35
@@ -158,12 +161,12 @@ Follow_Orbit_Pose_Angle_Min_Error = 14
 Follow_Orbit_Pose_Angle_Min_Turn = 30.0
 Follow_Normal_Pose_Angle_Deadband = 10
 Follow_Normal_Pose_Angle_Active_Error = 18
-Follow_Spin_Target_Point_Wz_To_Vx = -0.10
-Follow_Spin_Target_Point_Wz_To_Vy = -0.38
+Follow_Spin_Target_Point_Wz_To_Vx = -0.12
+Follow_Spin_Target_Point_Wz_To_Vy = -0.48
 Follow_Spin_Feedforward_Forward_Gain = 0.95
-Follow_Spin_Feedforward_Lateral_Gain = 0.85
+Follow_Spin_Feedforward_Lateral_Gain = 0.95
 Follow_Spin_Feedforward_Forward_Limit = 20.0
-Follow_Spin_Feedforward_Lateral_Limit = 30.0
+Follow_Spin_Feedforward_Lateral_Limit = 34.0
 Follow_Spin_Wz_Feedforward_Gain = 0.35
 Follow_Spin_Wz_Feedforward_Limit = 68.0
 Follow_Spin_Turn_Rate_Limit = 96.0
@@ -172,8 +175,9 @@ Follow_Pose_Angle_Active_Error = 6
 Follow_Angle_XY_Mode_On_Error = 12
 Follow_Angle_XY_Mode_Full_Error = 42
 Follow_Angle_XY_Min_Scale = 0.38
+Follow_Spin_XY_Min_Scale = 0.60
 Follow_Orbit_XY_Max_Scale = 0.58
-Follow_Spin_XY_Max_Scale = 0.72
+Follow_Spin_XY_Max_Scale = 0.90
 Follow_Pose_Wheel_Target_Limit = 46.0
 Follow_Command_Ramp_Vx = 16.0
 Follow_Command_Ramp_Vy = 14.0
@@ -325,11 +329,31 @@ def angle_xy_lock_scale(error_angle, orbit_mode=False, spin_mode=False):
             * (1.0 - Follow_Angle_XY_Min_Scale)
             / span
         )
-    if spin_mode and scale > Follow_Spin_XY_Max_Scale:
-        scale = Follow_Spin_XY_Max_Scale
+    if spin_mode:
+        if scale < Follow_Spin_XY_Min_Scale:
+            scale = Follow_Spin_XY_Min_Scale
+        if scale > Follow_Spin_XY_Max_Scale:
+            scale = Follow_Spin_XY_Max_Scale
     elif orbit_mode and scale > Follow_Orbit_XY_Max_Scale:
         scale = Follow_Orbit_XY_Max_Scale
     return scale
+
+
+def orbit_feedforward_position_scale(error_x, error_y):
+    err_abs = error_x if error_x >= 0 else -error_x
+    tmp = error_y if error_y >= 0 else -error_y
+    if tmp > err_abs:
+        err_abs = tmp
+    if err_abs <= Follow_Orbit_Feedforward_Close_Error:
+        return Follow_Orbit_Feedforward_Close_Scale
+    if err_abs >= Follow_Orbit_Feedforward_Full_Error:
+        return 1.0
+    span = Follow_Orbit_Feedforward_Full_Error - Follow_Orbit_Feedforward_Close_Error
+    return Follow_Orbit_Feedforward_Close_Scale + (
+        (err_abs - Follow_Orbit_Feedforward_Close_Error)
+        * (1.0 - Follow_Orbit_Feedforward_Close_Scale)
+        / span
+    )
 
 
 def orbit_close_depth(error_y):
@@ -725,8 +749,11 @@ def solve_follow_pose_twist(
     wz = vision_wz
     if use_ff:
         if orbit_mode:
+            orbit_ff_scale = orbit_feedforward_position_scale(error_x, error_y)
             target_ff_vx = ff_vx + ff_wz * Follow_Orbit_Target_Point_Wz_To_Vx
             target_ff_vy = ff_vy + ff_wz * Follow_Orbit_Target_Point_Wz_To_Vy
+            target_ff_vx *= orbit_ff_scale
+            target_ff_vy *= orbit_ff_scale
             vx = add_feedforward_direct(
                 vx,
                 target_ff_vx,

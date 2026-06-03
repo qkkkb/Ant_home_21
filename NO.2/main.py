@@ -121,10 +121,10 @@ Follow_Distance_Far_Boost_Gain = 1.05
 Follow_Distance_Close_Gain = 0.62
 Follow_Distance_Close_Limit = 28.0
 Follow_Distance_Emergency_Close_Error = 32
-Follow_Orbit_Close_Back_Max_Vx = 22.0
-Follow_Orbit_Close_Back_Gain = 1.0
-Follow_Orbit_Close_Full_Error = 18
-Follow_Orbit_Close_Vy_Limit = 8.0
+Follow_Orbit_Close_Back_Max_Vx = 26.0
+Follow_Orbit_Close_Back_Gain = 1.25
+Follow_Orbit_Close_Full_Error = 10
+Follow_Orbit_Close_Vy_Limit = 7.0
 Follow_Feedforward_Forward_Gain = 3.20
 Follow_Feedforward_Lateral_Gain = 1.25
 Follow_Feedforward_Forward_Limit = 26.0
@@ -153,6 +153,8 @@ Follow_Orbit_Feedforward_Lateral_Limit = 34.0
 Follow_Orbit_Feedforward_Close_Error = 6
 Follow_Orbit_Feedforward_Full_Error = 22
 Follow_Orbit_Feedforward_Close_Scale = 0.78
+Follow_Orbit_Close_Feedforward_Full_Error = 14
+Follow_Orbit_Close_Feedforward_Min_Scale = 0.35
 Follow_Pose_Angle_Gain = -0.82
 Follow_Pose_Angle_Limit = 46.0
 Follow_Orbit_Pose_Angle_Gain = -1.35
@@ -162,11 +164,11 @@ Follow_Orbit_Pose_Angle_Min_Turn = 30.0
 Follow_Normal_Pose_Angle_Deadband = 10
 Follow_Normal_Pose_Angle_Active_Error = 18
 Follow_Spin_Target_Point_Wz_To_Vx = -0.12
-Follow_Spin_Target_Point_Wz_To_Vy = -0.48
+Follow_Spin_Target_Point_Wz_To_Vy = -0.54
 Follow_Spin_Feedforward_Forward_Gain = 0.95
-Follow_Spin_Feedforward_Lateral_Gain = 0.95
+Follow_Spin_Feedforward_Lateral_Gain = 1.05
 Follow_Spin_Feedforward_Forward_Limit = 20.0
-Follow_Spin_Feedforward_Lateral_Limit = 34.0
+Follow_Spin_Feedforward_Lateral_Limit = 38.0
 Follow_Spin_Wz_Feedforward_Gain = 0.35
 Follow_Spin_Wz_Feedforward_Limit = 68.0
 Follow_Spin_Turn_Rate_Limit = 96.0
@@ -175,7 +177,7 @@ Follow_Pose_Angle_Active_Error = 6
 Follow_Angle_XY_Mode_On_Error = 12
 Follow_Angle_XY_Mode_Full_Error = 42
 Follow_Angle_XY_Min_Scale = 0.38
-Follow_Spin_XY_Min_Scale = 0.60
+Follow_Spin_XY_Min_Scale = 0.72
 Follow_Orbit_XY_Max_Scale = 0.58
 Follow_Spin_XY_Max_Scale = 0.90
 Follow_Pose_Wheel_Target_Limit = 46.0
@@ -345,15 +347,29 @@ def orbit_feedforward_position_scale(error_x, error_y):
     if tmp > err_abs:
         err_abs = tmp
     if err_abs <= Follow_Orbit_Feedforward_Close_Error:
-        return Follow_Orbit_Feedforward_Close_Scale
-    if err_abs >= Follow_Orbit_Feedforward_Full_Error:
-        return 1.0
-    span = Follow_Orbit_Feedforward_Full_Error - Follow_Orbit_Feedforward_Close_Error
-    return Follow_Orbit_Feedforward_Close_Scale + (
-        (err_abs - Follow_Orbit_Feedforward_Close_Error)
-        * (1.0 - Follow_Orbit_Feedforward_Close_Scale)
-        / span
+        scale = Follow_Orbit_Feedforward_Close_Scale
+    elif err_abs >= Follow_Orbit_Feedforward_Full_Error:
+        scale = 1.0
+    else:
+        span = Follow_Orbit_Feedforward_Full_Error - Follow_Orbit_Feedforward_Close_Error
+        scale = Follow_Orbit_Feedforward_Close_Scale + (
+            (err_abs - Follow_Orbit_Feedforward_Close_Error)
+            * (1.0 - Follow_Orbit_Feedforward_Close_Scale)
+            / span
+        )
+    depth = orbit_close_depth(error_y)
+    if depth <= 0.0:
+        return scale
+    if depth >= Follow_Orbit_Close_Feedforward_Full_Error:
+        return Follow_Orbit_Close_Feedforward_Min_Scale
+    close_scale = 1.0 - (
+        (1.0 - Follow_Orbit_Close_Feedforward_Min_Scale)
+        * depth
+        / Follow_Orbit_Close_Feedforward_Full_Error
     )
+    if close_scale < scale:
+        return close_scale
+    return scale
 
 
 def orbit_close_depth(error_y):

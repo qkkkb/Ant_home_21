@@ -121,12 +121,10 @@ Follow_Distance_Far_Boost_Gain = 1.05
 Follow_Distance_Close_Gain = 0.62
 Follow_Distance_Close_Limit = 28.0
 Follow_Distance_Emergency_Close_Error = 32
-Follow_Orbit_Close_Back_Max_Vx = 30.0
-Follow_Orbit_Close_Back_Gain = 1.45
+Follow_Orbit_Close_Back_Max_Vx = 26.0
+Follow_Orbit_Close_Back_Gain = 1.25
 Follow_Orbit_Close_Full_Error = 10
-Follow_Orbit_Close_Vy_Start_Limit = 18.0
-Follow_Orbit_Close_Vy_Limit = 6.0
-Follow_Orbit_Close_Turn_Rate_Limit = 40.0
+Follow_Orbit_Close_Vy_Limit = 7.0
 Follow_Feedforward_Forward_Gain = 3.20
 Follow_Feedforward_Lateral_Gain = 1.25
 Follow_Feedforward_Forward_Limit = 26.0
@@ -155,8 +153,8 @@ Follow_Orbit_Feedforward_Lateral_Limit = 34.0
 Follow_Orbit_Feedforward_Close_Error = 6
 Follow_Orbit_Feedforward_Full_Error = 22
 Follow_Orbit_Feedforward_Close_Scale = 0.78
-Follow_Orbit_Close_Feedforward_Full_Error = 10
-Follow_Orbit_Close_Feedforward_Min_Scale = 0.22
+Follow_Orbit_Close_Feedforward_Full_Error = 14
+Follow_Orbit_Close_Feedforward_Min_Scale = 0.35
 Follow_Pose_Angle_Gain = -0.82
 Follow_Pose_Angle_Limit = 46.0
 Follow_Orbit_Pose_Angle_Gain = -1.35
@@ -398,8 +396,8 @@ def orbit_close_lateral_limit(error_y):
         return Follow_Lateral_Limit
     if depth >= Follow_Orbit_Close_Full_Error:
         return Follow_Orbit_Close_Vy_Limit
-    return Follow_Orbit_Close_Vy_Start_Limit - (
-        (Follow_Orbit_Close_Vy_Start_Limit - Follow_Orbit_Close_Vy_Limit)
+    return Follow_Lateral_Limit - (
+        (Follow_Lateral_Limit - Follow_Orbit_Close_Vy_Limit)
         * depth
         / Follow_Orbit_Close_Full_Error
     )
@@ -1326,17 +1324,6 @@ def update_follow_targets(yaw_deg, gyro_z):
             or gyro_z <= -Follow_Orbit_Brake_Gyro_Threshold
         )
     )
-    if orbit_close_guard_active:
-        turn_rate_cmd = clamp(
-            turn_rate_cmd,
-            -Follow_Orbit_Close_Turn_Rate_Limit,
-            Follow_Orbit_Close_Turn_Rate_Limit,
-        )
-        last_cmd_wz = clamp(
-            last_cmd_wz,
-            -Follow_Orbit_Close_Turn_Rate_Limit,
-            Follow_Orbit_Close_Turn_Rate_Limit,
-        )
     if -0.001 < turn_rate_cmd < 0.001:
         turn_rate_cmd = 0.0
         if orbit_brake_active:

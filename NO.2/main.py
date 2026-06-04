@@ -123,7 +123,7 @@ Follow_Distance_Close_Limit = 28.0
 Follow_Distance_Emergency_Close_Error = 32
 Follow_Orbit_Close_Back_Max_Vx = 28.0
 Follow_Orbit_Close_Back_Gain = 1.45
-Follow_Orbit_Close_Full_Error = 4
+Follow_Orbit_Close_Full_Error = 14
 Follow_Orbit_Close_Vy_Limit = 9.5
 Follow_Feedforward_Forward_Gain = 3.20
 Follow_Feedforward_Lateral_Gain = 1.25
@@ -1195,7 +1195,7 @@ def update_follow_targets(yaw_deg, gyro_z):
                 * push_enter_soft_scale(now)
             )
         orbit_close_guard_active = (
-            orbit_mode_active
+            (orbit_mode_active or spin_mode_active)
             and cam_error_y <= -Follow_Forward_Deadband
         )
         back_priority_active = (
@@ -1423,8 +1423,8 @@ def update_follow_targets(yaw_deg, gyro_z):
         cam_target_vx,
         cam_target_vy,
         vz_cmd,
-        priority_turn_mode,
-        priority_turn_mode and (not spin_mode_active),
+        priority_turn_mode and (not back_priority_active),
+        priority_turn_mode and (not spin_mode_active) and (not back_priority_active),
     )
     last_cmd_vx = cam_target_vx
     last_cmd_vy = cam_target_vy

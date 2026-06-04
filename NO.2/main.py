@@ -119,14 +119,12 @@ Follow_Orbit_Position_Y_Error = 4
 Follow_Distance_Far_Boost_Error = 6
 Follow_Distance_Far_Boost_Gain = 1.20
 Follow_Distance_Close_Gain = 0.62
-Follow_Distance_Close_Limit = 28.0
+Follow_Distance_Close_Limit = 20.0
 Follow_Distance_Emergency_Close_Error = 32
 Follow_Orbit_Close_Back_Max_Vx = 28.0
 Follow_Orbit_Close_Back_Gain = 1.45
 Follow_Orbit_Close_Full_Error = 10
 Follow_Orbit_Close_Vy_Limit = 9.5
-Follow_Back_Lateral_Guard_X_Error = 8
-Follow_Back_Lateral_Guard_Max_Vx = 8.0
 Follow_Feedforward_Forward_Gain = 3.20
 Follow_Feedforward_Lateral_Gain = 1.25
 Follow_Feedforward_Forward_Limit = 26.0
@@ -1268,16 +1266,6 @@ def update_follow_targets(yaw_deg, gyro_z):
             )
             vx *= xy_scale
             vy *= xy_scale
-        if (
-            cam_error_y <= -Follow_Forward_Deadband
-            and (
-                cam_error_x >= Follow_Back_Lateral_Guard_X_Error
-                or cam_error_x <= -Follow_Back_Lateral_Guard_X_Error
-            )
-            and vx < -Follow_Back_Lateral_Guard_Max_Vx
-        ):
-            vx = -Follow_Back_Lateral_Guard_Max_Vx
-
     vx_limit = Follow_Forward_Limit
     vy_limit = Follow_Lateral_Limit
     if fresh_motion:

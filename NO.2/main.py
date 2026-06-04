@@ -1266,6 +1266,7 @@ def update_follow_targets(yaw_deg, gyro_z):
             )
             vx *= xy_scale
             vy *= xy_scale
+
     vx_limit = Follow_Forward_Limit
     vy_limit = Follow_Lateral_Limit
     if fresh_motion:
@@ -1422,8 +1423,8 @@ def update_follow_targets(yaw_deg, gyro_z):
         cam_target_vx,
         cam_target_vy,
         vz_cmd,
-        priority_turn_mode and (not back_priority_active),
-        priority_turn_mode and (not spin_mode_active) and (not back_priority_active),
+        priority_turn_mode,
+        priority_turn_mode and (not spin_mode_active),
     )
     last_cmd_vx = cam_target_vx
     last_cmd_vy = cam_target_vy

@@ -9,8 +9,6 @@ import pid as _pid_mod
 import config as cfg
 from hardware import Motor
 from seekfree import WIRELESS_UART
-# DEBUG_WIRELESS_LOG_ENABLE = True
-# DEBUG_WIRELESS_BAUD = 460800
 
 MASTER_MOTION_TX_PERIOD_MS = cfg.MASTER_MOTION_TX_PERIOD_MS
 MASTER_MOTION_FRAME_LEN = 15
@@ -142,7 +140,6 @@ Nav_Push_Orbit_Skip_Yaw = 15.0
 Nav_Push_Orient_Max_Ms = 15000
 Nav_Push_Orbit_Slow_Yaw = 40.0
 Nav_Push_Orbit_Fast_Vy = 4.5
-Nav_Push_Orbit_Slow_Vy = 2.5
 Nav_Push_Orbit_Fast_Rate = 75.0
 Nav_Push_Orbit_Slow_Rate = 35.0
 Nav_Push_Orbit_Gyro_Limit = 10.0
@@ -150,9 +147,6 @@ Nav_Push_Orbit_Radius_Base = 1.45   #orbit 基础半径系数，实际轨迹半�
 Nav_Push_Orbit_Radius_Gain = 0.01
 Nav_Push_Orbit_Stop_Gyro_Th = 3.0   #orbit 过程中如果陀螺仪读数小于该值则认为已经接近目标角度，可以停止转向加速前进
 Nav_Push_Orbit_Brake_Max_Ms = 1000
-Nav_Push_Orbit_Vy_Sign_Right = -1
-Nav_Push_Orbit_Vy_Sign_Up = 0
-Nav_Push_Orbit_Vy_Sign_Left = 1
 Nav_Push_Prepare_Reorient_Yaw = 10.0
 Nav_Push_Prepare_Forward_Gain = 0.038
 Nav_Push_Prepare_Lateral_Gain = 0.115
@@ -1206,12 +1200,6 @@ try:
 except Exception:
     motion_wireless = None
 
-# debug_wireless = None
-# if DEBUG_WIRELESS_LOG_ENABLE:
-#     try:
-#         debug_wireless = WIRELESS_UART(DEBUG_WIRELESS_BAUD)
-#     except Exception:
-#         debug_wireless = None
 cam_uart = UART(cfg.CAM_UART_ID, cfg.CAM_UART_BAUD)
 cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
 
@@ -1304,14 +1292,6 @@ def check_c8_exit():
 # 日志输出
 def log(msg):
     print(msg)
-    # if debug_wireless is not None:
-    #     try:
-    #         debug_wireless.send_str(msg)
-    #         debug_wireless.send_str("\r\n")
-    #     except Exception:
-    #         pass
-
-
 # 停止所有电机
 def stop_all():
     motor_fl.duty(0)

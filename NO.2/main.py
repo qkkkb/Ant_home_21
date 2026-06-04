@@ -65,12 +65,10 @@ AUTO_CALIBRATE_GYRO_ON_LAUNCH = True
 GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
 
-EXIT_CHECK_DIV = 5
 GC_DIV = 50
 USE_MASTER_MOTION_FEEDFORWARD = True
 FOLLOW_WIRELESS_TUNE_LOG_ENABLE = True
 FOLLOW_TUNE_LOG_INTERVAL_MS = 100
-FORCE_MOTOR_OFF = False
 AUTO_START_ON_BOOT = False
 AUTO_START_DELAY_MS = 2000
 WHEEL_TARGET_STOP_EPS = 0.05
@@ -247,7 +245,6 @@ COOP_LED_PULSE_MS = 40
 coop_rx_led_until_ms = 0
 
 pit_flag = False
-pit_count = 0
 start_time = utime.ticks_ms()
 last_status_ms = start_time
 loop_count = 0
@@ -280,10 +277,6 @@ last_hard_stop = False
 last_stall_count = 0
 last_stall_boost = False
 yaw_ref_deg = 0.0
-
-
-def log(msg):
-    pass
 
 
 def clamp(value, low, high):
@@ -1476,7 +1469,6 @@ def stop_all():
     motor_fl.duty(0)
     motor_fr.duty(0)
     motor_b.duty(0)
-    log("[STOP] motors off")
 
 
 def reset_speed_outputs():
@@ -1709,7 +1701,7 @@ def calibrate_gyro_before_launch():
             imu_runtime.calibrate_offset(
                 samples=GYRO_CALIBRATE_SAMPLES,
                 delay_ms=GYRO_CALIBRATE_DELAY_MS,
-                logger=log,
+                logger=None,
             )
             imu_runtime.reset_yaw(0.0)
         finally:
@@ -1731,7 +1723,6 @@ def start_follow(reason):
     auto_start_done = True
     start_time = utime.ticks_ms()
     cam_uart.write(ART_MODE_TRACK_CMD)
-    log("[FOLLOW] started: %s" % reason)
 
 
 def check_c9_start():
@@ -1752,19 +1743,13 @@ def check_c8_exit():
     if current_c8 == 0 and last_c8_state == 1:
         utime.sleep_ms(10)
         if key_exit.value() == 0:
-            log("[C8] exit")
             raise KeyboardInterrupt
     last_c8_state = current_c8
 
 
-def check_upper_exit():
-    return False
-
-
 def time_pit_handler(_):
-    global pit_flag, pit_count
+    global pit_flag
     pit_flag = True
-    pit_count += 1
 
 
 def calc_speed_closed_loop():
@@ -1816,14 +1801,9 @@ def calc_speed_closed_loop():
         u_fr = speed_ctrl_follow(pid_fr, e_fr, t_fr)
         u_b = speed_ctrl_follow(pid_b, e_b, t_b)
 
-        if FORCE_MOTOR_OFF:
-            reset_speed_outputs()
-            s_fl, s_fr, s_b = set_three_pwm_zero()
-            last_hard_stop = True
-        else:
-            s_fl, s_fr, s_b = set_three_pwm_follow(
-                u_fl, u_fr, u_b, t_fl, t_fr, t_b, last_stall_boost
-            )
+        s_fl, s_fr, s_b = set_three_pwm_follow(
+            u_fl, u_fr, u_b, t_fl, t_fr, t_b, last_stall_boost
+        )
 
     return {
         "enc_fl": e_fl,
@@ -1907,9 +1887,6 @@ if ENABLE_GYRO_LOOP:
     gyro_pid.gyro_ki = GYRO_KI
     gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
 
-log("[INIT] follower IR follow ready")
-log("[INIT] camera=%d@%d wireless=%d" % (cfg.CAM_UART_ID, cfg.CAM_UART_BAUD, cfg.COOP_WIRELESS_BAUD))
-
 try:
     while True:
         loop_count += 1
@@ -1937,8 +1914,6 @@ try:
             led.toggle()
             last_status_ms = now
 
-        if loop_count % EXIT_CHECK_DIV == 0 and check_upper_exit():
-            break
         if loop_count % GC_DIV == 0:
             gc.collect()
 
@@ -1952,4 +1927,3 @@ finally:
     led_straight.value(0)
     led_translate.value(0)
     led_rotate.value(0)
-    log("[EXIT] follower stopped")

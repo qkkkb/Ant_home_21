@@ -181,8 +181,6 @@ Follow_Angle_XY_Min_Scale = 0.38
 Follow_Spin_XY_Min_Scale = 0.72
 Follow_Orbit_XY_Max_Scale = 0.58
 Follow_Spin_XY_Max_Scale = 0.88
-Follow_Rotate_Reserve_Y = 5.0
-Follow_Rotate_Reserve_Ramp = 1.2
 Follow_Pose_Wheel_Target_Limit = 46.0
 Follow_Command_Ramp_Vx = 16.0
 Follow_Command_Ramp_Vy = 14.0
@@ -278,7 +276,6 @@ spin_latched_wz = 0.0
 spin_latch_until_ms = 0
 last_push_mode_active = False
 push_enter_ms = 0
-current_rotate_reserve_y = 0.0
 last_tune_log_ms = 0
 last_hard_stop = False
 last_stall_count = 0
@@ -485,7 +482,6 @@ def clear_cam_target_state():
     global orbit_follow_active, orbit_follow_exit_since_ms, filtered_ff_wz
     global spin_latched_wz, spin_latch_until_ms
     global last_push_mode_active, push_enter_ms
-    global current_rotate_reserve_y
 
     cam_error_x = 0
     cam_error_y = 0
@@ -503,7 +499,6 @@ def clear_cam_target_state():
     spin_latch_until_ms = 0
     last_push_mode_active = False
     push_enter_ms = 0
-    current_rotate_reserve_y = 0.0
     cam_has_target = False
     cam_valid_target_since_ms = 0
     target_lost_since_ms = 0
@@ -1112,7 +1107,6 @@ def update_follow_targets(yaw_deg, gyro_z):
     global last_angle_priority_active
     global last_back_priority_active
     global last_push_mode_active, push_enter_ms
-    global current_rotate_reserve_y
 
     now = utime.ticks_ms()
     seen = cam_target_seen()
@@ -1165,15 +1159,6 @@ def update_follow_targets(yaw_deg, gyro_z):
             Follow_Normal_Wz_Feedforward_Limit,
         )
     push_mode_active = explicit_push and (not orbit_mode_active) and (not spin_mode_active)
-    if orbit_mode_active or spin_mode_active:
-        target_rotate_reserve_y = Follow_Rotate_Reserve_Y
-    else:
-        target_rotate_reserve_y = 0.0
-    current_rotate_reserve_y = ramp_value(
-        target_rotate_reserve_y,
-        current_rotate_reserve_y,
-        Follow_Rotate_Reserve_Ramp,
-    )
     if push_mode_active:
         if not last_push_mode_active:
             push_enter_ms = now
@@ -1212,10 +1197,6 @@ def update_follow_targets(yaw_deg, gyro_z):
     if seen:
         target_lost_since_ms = 0
         use_motion_feedforward = fresh_motion
-        if push_mode_active:
-            follow_error_y = cam_error_y
-        else:
-            follow_error_y = cam_error_y - current_rotate_reserve_y
         if push_mode_active and ff_vx > 0.0:
             ff_vx *= (
                 push_forward_ff_scale(cam_error_y)
@@ -1223,14 +1204,14 @@ def update_follow_targets(yaw_deg, gyro_z):
             )
         orbit_close_guard_active = (
             orbit_mode_active
-            and follow_error_y <= -Follow_Forward_Deadband
+            and cam_error_y <= -Follow_Forward_Deadband
         )
         back_priority_active = (
             orbit_close_guard_active
-            or follow_error_y < -Follow_Distance_Emergency_Close_Error
+            or cam_error_y < -Follow_Distance_Emergency_Close_Error
         )
         if orbit_close_guard_active:
-            orbit_close_vy_limit = orbit_close_lateral_limit(follow_error_y)
+            orbit_close_vy_limit = orbit_close_lateral_limit(cam_error_y)
         (
             vx,
             vy,
@@ -1241,7 +1222,7 @@ def update_follow_targets(yaw_deg, gyro_z):
             position_priority_active,
         ) = solve_follow_pose_twist(
             cam_error_x,
-            follow_error_y,
+            cam_error_y,
             cam_error_angle,
             ff_vx,
             ff_vy,
@@ -1275,7 +1256,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     if seen:
         if back_priority_active:
             if orbit_close_guard_active:
-                back_vx = orbit_close_back_target(follow_error_y)
+                back_vx = orbit_close_back_target(cam_error_y)
                 if vx > back_vx:
                     vx = back_vx
                 vy = clamp(
@@ -1484,7 +1465,6 @@ def reset_speed_outputs():
     global orbit_follow_active, orbit_follow_exit_since_ms, filtered_ff_wz
     global spin_latched_wz, spin_latch_until_ms
     global last_push_mode_active, push_enter_ms
-    global current_rotate_reserve_y
 
     speed_reset(pid_fl)
     speed_reset(pid_fr)
@@ -1507,7 +1487,6 @@ def reset_speed_outputs():
     spin_latch_until_ms = 0
     last_push_mode_active = False
     push_enter_ms = 0
-    current_rotate_reserve_y = 0.0
 
 
 def clamp_duty(value):

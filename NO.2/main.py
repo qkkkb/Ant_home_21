@@ -404,11 +404,14 @@ def orbit_close_lateral_limit(error_y):
 
 
 def push_forward_ff_scale(error_y):
-    if error_y <= 0:
+    if error_y <= Follow_Forward_Deadband:
         return 0.0
     if error_y >= Follow_Push_Feedforward_Fade_Error:
         return 1.0
-    return error_y / Follow_Push_Feedforward_Fade_Error
+    return (
+        (error_y - Follow_Forward_Deadband)
+        / (Follow_Push_Feedforward_Fade_Error - Follow_Forward_Deadband)
+    )
 
 
 def push_enter_soft_scale(now):
@@ -572,11 +575,12 @@ def update_orbit_follow_mode(
     gyro_z,
     fresh_motion,
     explicit_orbit,
+    explicit_push,
     explicit_spin,
 ):
     global orbit_follow_active, orbit_follow_exit_since_ms
 
-    if explicit_spin:
+    if explicit_spin or explicit_push:
         orbit_follow_active = False
         orbit_follow_exit_since_ms = 0
         return False
@@ -1133,6 +1137,7 @@ def update_follow_targets(yaw_deg, gyro_z):
         gyro_z,
         fresh_motion,
         explicit_orbit,
+        explicit_push,
         spin_mode_active,
     )
     if orbit_mode_active:

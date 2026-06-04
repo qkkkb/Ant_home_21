@@ -382,7 +382,7 @@ def orbit_close_depth(error_y):
 def orbit_close_back_target(error_y):
     depth = orbit_close_depth(error_y)
     if depth <= 0.0:
-        return 0.0
+        depth = 1.0
     return -clamp(
         depth * Follow_Orbit_Close_Back_Gain,
         0.0,

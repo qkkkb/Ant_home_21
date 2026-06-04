@@ -134,6 +134,9 @@ Follow_Push_Angle_Priority_Error = 56
 Follow_Push_Feedforward_Fade_Error = 8
 Follow_Push_Feedforward_Min_Scale = 0.48
 Follow_Push_Enter_Soft_Ms = 160
+Follow_Push_Close_Positive_Vx_Error = 4
+Follow_Push_Close_Positive_Vx_Open_Error = 12
+Follow_Push_Close_Positive_Vx_Limit = 6.0
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Wz_Feedforward_Gain = 1.60
 Follow_Wz_Feedforward_Limit = 15.0
@@ -175,9 +178,9 @@ Follow_Pose_Angle_Active_Error = 6
 Follow_Angle_XY_Mode_On_Error = 12
 Follow_Angle_XY_Mode_Full_Error = 42
 Follow_Angle_XY_Min_Scale = 0.38
-Follow_Spin_XY_Min_Scale = 0.72
+Follow_Spin_XY_Min_Scale = 0.62
 Follow_Orbit_XY_Max_Scale = 0.58
-Follow_Spin_XY_Max_Scale = 0.88
+Follow_Spin_XY_Max_Scale = 0.80
 Follow_Pose_Wheel_Target_Limit = 46.0
 Follow_Command_Ramp_Vx = 16.0
 Follow_Command_Ramp_Vy = 14.0
@@ -1265,6 +1268,25 @@ def update_follow_targets(yaw_deg, gyro_z):
         vy_limit = follow_limit(vy_limit, ff_vy, Follow_Master_Extra_Vy)
     vx = clamp(vx, -vx_limit, vx_limit)
     vy = clamp(vy, -vy_limit, vy_limit)
+    if (
+        push_mode_active
+        and seen
+        and vx > Follow_Push_Close_Positive_Vx_Limit
+        and cam_error_y < Follow_Push_Close_Positive_Vx_Open_Error
+    ):
+        if cam_error_y <= Follow_Push_Close_Positive_Vx_Error:
+            vx = Follow_Push_Close_Positive_Vx_Limit
+        else:
+            vx_limit = Follow_Push_Close_Positive_Vx_Limit + (
+                (cam_error_y - Follow_Push_Close_Positive_Vx_Error)
+                * (Follow_Forward_Limit - Follow_Push_Close_Positive_Vx_Limit)
+                / (
+                    Follow_Push_Close_Positive_Vx_Open_Error
+                    - Follow_Push_Close_Positive_Vx_Error
+                )
+            )
+            if vx > vx_limit:
+                vx = vx_limit
     if back_priority_active and vx <= 0.0 and last_cmd_vx > 0.0:
         last_cmd_vx = 0.0
     if (

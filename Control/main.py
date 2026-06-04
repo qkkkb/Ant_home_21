@@ -153,7 +153,6 @@ Nav_Push_Orbit_Brake_Max_Ms = 1000
 Nav_Push_Orbit_Vy_Sign_Right = -1
 Nav_Push_Orbit_Vy_Sign_Up = 0
 Nav_Push_Orbit_Vy_Sign_Left = 1
-Nav_Push_Orbit_Forced_Dir = -1
 Nav_Push_Prepare_Reorient_Yaw = 10.0
 Nav_Push_Prepare_Forward_Gain = 0.038
 Nav_Push_Prepare_Lateral_Gain = 0.115
@@ -903,18 +902,16 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         cam_target_vy = 0.0
         if push_dir_code in (Push_Dir_Right, Push_Dir_Up, Push_Dir_Left, Push_Dir_Down):
             push_yaw_target = yaw_from_field_dir(push_dir_code)
-            short_orbit_delta = abs(-wrapped_yaw_error(push_yaw_target, push_face_obj_yaw))
-            if short_orbit_delta <= Nav_Push_Orbit_Skip_Yaw:
+            orbit_yaw_err = -wrapped_yaw_error(push_yaw_target, push_face_obj_yaw)
+            push_orbit_target_delta = abs(orbit_yaw_err)
+            if push_orbit_target_delta <= Nav_Push_Orbit_Skip_Yaw:
                 push_orbit_dir = 0
                 push_orbit_vy_sign = 0
-                push_orbit_target_delta = short_orbit_delta
             else:
-                push_orbit_dir = Nav_Push_Orbit_Forced_Dir
-                push_orbit_target_delta = yaw_delta_in_turn_dir(
-                    push_yaw_target,
-                    push_face_obj_yaw,
-                    push_orbit_dir,
-                )
+                if orbit_yaw_err >= 0.0:
+                    push_orbit_dir = 1
+                else:
+                    push_orbit_dir = -1
                 push_orbit_vy_sign = -push_orbit_dir
             push_orbit_progress_deg = 0.0
             push_orbit_reached = False

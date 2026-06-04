@@ -133,9 +133,9 @@ Follow_Push_Feedforward_Lateral_Gain = 1.55
 Follow_Push_Feedforward_Forward_Limit = 56.0
 Follow_Push_Feedforward_Lateral_Limit = 22.0
 Follow_Push_Angle_Priority_Error = 56
-Follow_Push_Feedforward_Fade_Error = 5
-Follow_Push_Feedforward_Min_Scale = 0.40
-Follow_Push_Enter_Soft_Ms = 120
+Follow_Push_Feedforward_Fade_Error = 8
+Follow_Push_Feedforward_Min_Scale = 0.48
+Follow_Push_Enter_Soft_Ms = 160
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Wz_Feedforward_Gain = 1.60
 Follow_Wz_Feedforward_Limit = 15.0
@@ -172,6 +172,7 @@ Follow_Spin_Feedforward_Lateral_Limit = 20.0
 Follow_Spin_Wz_Feedforward_Gain = 0.50
 Follow_Spin_Wz_Feedforward_Limit = 84.0
 Follow_Spin_Turn_Rate_Limit = 96.0
+Follow_Rotate_Reserve_Y = 6.0
 Follow_Pose_Angle_Deadband = 4
 Follow_Pose_Angle_Active_Error = 6
 Follow_Angle_XY_Mode_On_Error = 12
@@ -183,7 +184,7 @@ Follow_Spin_XY_Max_Scale = 0.88
 Follow_Pose_Wheel_Target_Limit = 46.0
 Follow_Command_Ramp_Vx = 16.0
 Follow_Command_Ramp_Vy = 14.0
-Follow_Push_Command_Ramp_Vx = 42.0
+Follow_Push_Command_Ramp_Vx = 34.0
 Follow_Push_Command_Ramp_Vy = 16.0
 Follow_Orbit_Command_Ramp_Vx = 22.0
 Follow_Orbit_Command_Ramp_Vy = 18.0
@@ -746,6 +747,8 @@ def solve_follow_pose_twist(
     push_mode=False,
     spin_mode=False,
 ):
+    if orbit_mode or spin_mode:
+        error_y -= Follow_Rotate_Reserve_Y
     vision_wz = calc_follow_angle(error_angle, orbit_mode, spin_mode)
     active_error = (
         Follow_Pose_Angle_Active_Error
@@ -1190,10 +1193,7 @@ def update_follow_targets(yaw_deg, gyro_z):
         target_lost_since_ms = 0
         use_motion_feedforward = fresh_motion
         if push_mode_active and ff_vx > 0.0:
-            ff_vx *= (
-                push_forward_ff_scale(cam_error_y)
-                * push_enter_soft_scale(now)
-            )
+            ff_vx *= push_forward_ff_scale(cam_error_y)
         orbit_close_guard_active = (
             orbit_mode_active
             and cam_error_y <= -Follow_Forward_Deadband
@@ -1274,6 +1274,8 @@ def update_follow_targets(yaw_deg, gyro_z):
         vy_limit = follow_limit(vy_limit, ff_vy, Follow_Master_Extra_Vy)
     vx = clamp(vx, -vx_limit, vx_limit)
     vy = clamp(vy, -vy_limit, vy_limit)
+    if push_mode_active and seen and vx > 0.0:
+        vx *= push_enter_soft_scale(now)
     if back_priority_active and vx <= 0.0 and last_cmd_vx > 0.0:
         last_cmd_vx = 0.0
     if (

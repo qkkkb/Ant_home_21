@@ -173,14 +173,15 @@ Follow_Spin_Feedforward_Lateral_Limit = 20.0
 Follow_Spin_Wz_Feedforward_Gain = 0.50
 Follow_Spin_Wz_Feedforward_Limit = 84.0
 Follow_Spin_Turn_Rate_Limit = 96.0
+Follow_Spin_Safe_Reserve_Y = 6.0
 Follow_Pose_Angle_Deadband = 4
 Follow_Pose_Angle_Active_Error = 6
 Follow_Angle_XY_Mode_On_Error = 12
 Follow_Angle_XY_Mode_Full_Error = 42
 Follow_Angle_XY_Min_Scale = 0.38
-Follow_Spin_XY_Min_Scale = 0.52
+Follow_Spin_XY_Min_Scale = 0.62
 Follow_Orbit_XY_Max_Scale = 0.58
-Follow_Spin_XY_Max_Scale = 0.70
+Follow_Spin_XY_Max_Scale = 0.78
 Follow_Pose_Wheel_Target_Limit = 46.0
 Follow_Command_Ramp_Vx = 16.0
 Follow_Command_Ramp_Vy = 14.0
@@ -740,6 +741,8 @@ def solve_follow_pose_twist(
     push_mode=False,
     spin_mode=False,
 ):
+    if spin_mode:
+        error_y -= Follow_Spin_Safe_Reserve_Y
     vision_wz = calc_follow_angle(error_angle, orbit_mode, spin_mode)
     active_error = (
         Follow_Pose_Angle_Active_Error

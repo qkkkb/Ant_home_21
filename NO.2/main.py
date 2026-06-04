@@ -163,8 +163,8 @@ Follow_Orbit_Pose_Angle_Min_Error = 14
 Follow_Orbit_Pose_Angle_Min_Turn = 30.0
 Follow_Normal_Pose_Angle_Deadband = 10
 Follow_Normal_Pose_Angle_Active_Error = 18
-Follow_Spin_Target_Point_Wz_To_Vx = -0.06
-Follow_Spin_Target_Point_Wz_To_Vy = -0.28
+Follow_Spin_Target_Point_Wz_To_Vx = 0.00
+Follow_Spin_Target_Point_Wz_To_Vy = 0.00
 Follow_Spin_Feedforward_Forward_Gain = 0.95
 Follow_Spin_Feedforward_Lateral_Gain = 1.05
 Follow_Spin_Feedforward_Forward_Limit = 12.0
@@ -1321,7 +1321,18 @@ def update_follow_targets(yaw_deg, gyro_z):
             )
         else:
             turn_rate_cmd = follow_ff_wz * Follow_Wz_Feedforward_Gain
+    spin_xy_lock_active = (
+        spin_mode_active
+        and seen
+        and (
+            cam_error_x >= Follow_Angle_XY_Mode_On_Error
+            or cam_error_x <= -Follow_Angle_XY_Mode_On_Error
+            or cam_error_y >= Follow_Angle_XY_Mode_On_Error
+            or cam_error_y <= -Follow_Angle_XY_Mode_On_Error
+        )
+    )
     priority_turn_mode = orbit_mode_active or spin_mode_active or angle_pose_mode_active
+    preserve_turn_mode = priority_turn_mode and (not spin_xy_lock_active)
     orbit_brake_active = (
         priority_turn_mode
         and (
@@ -1424,7 +1435,7 @@ def update_follow_targets(yaw_deg, gyro_z):
         cam_target_vy,
         vz_cmd,
         priority_turn_mode,
-        priority_turn_mode,
+        preserve_turn_mode,
     )
     last_cmd_vx = cam_target_vx
     last_cmd_vy = cam_target_vy

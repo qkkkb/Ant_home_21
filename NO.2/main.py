@@ -14,7 +14,6 @@ from coop_protocol import (
     CoopFrameParser,
     MASTER_MOTION_FLAG_ORBIT,
     MASTER_MOTION_FLAG_PUSH,
-    MASTER_MOTION_FLAG_STARTED,
     MASTER_MOTION_FLAG_SPIN,
     MSG_MASTER_MOTION,
     decode_master_motion,
@@ -199,7 +198,6 @@ Follow_Yaw_Limit = 15.0
 Follow_Target_Lost_Hold_Ms = 250
 Follow_Orbit_Mode_FfWz_On = 18.0
 Follow_Orbit_Mode_FfWz_Off = 7.0
-Follow_Orbit_Mode_Angle_On = 10
 Follow_Orbit_Mode_Angle_Off = 4
 Follow_Orbit_Mode_Gyro_Off = 6.0
 Follow_Orbit_Mode_Exit_Ms = 120
@@ -214,8 +212,6 @@ Follow_Orbit_Brake_Output_Limit = 8.0
 Master_Motion_Timeout_Ms = 250
 Follow_Master_Extra_Vx = 10.0
 Follow_Master_Extra_Vy = 8.0
-Camera_Right_Yaw_Cos = 0.5
-Camera_Right_Yaw_Sin = 0.8660254
 
 
 # ====================== Runtime state ======================
@@ -523,10 +519,6 @@ def master_motion_fresh():
 
 def master_motion_rx_fresh():
     return utime.ticks_diff(utime.ticks_ms(), master_last_rx_ms) <= Master_Motion_Timeout_Ms
-
-
-def master_started():
-    return master_motion_fresh() and ((master_flags & MASTER_MOTION_FLAG_STARTED) != 0)
 
 
 def master_orbit_mode(fresh_motion):
@@ -1511,21 +1503,6 @@ def apply_motor_duty(cmd, motor):
     if 0 < abs(cmd) < MOTOR_DUTY_MIN:
         cmd = MOTOR_DUTY_MIN if cmd > 0 else -MOTOR_DUTY_MIN
     motor.duty(cmd)
-
-
-def set_three_pwm_smooth(u_fl, u_fr, u_b):
-    global last_pwm_fl, last_pwm_fr, last_pwm_b
-
-    s_fl = smooth_value(int(u_fl), last_pwm_fl)
-    s_fr = smooth_value(int(u_fr), last_pwm_fr)
-    s_b = smooth_value(int(u_b), last_pwm_b)
-    apply_motor_duty(s_fl, motor_fl)
-    apply_motor_duty(s_fr, motor_fr)
-    apply_motor_duty(s_b, motor_b)
-    last_pwm_fl = s_fl
-    last_pwm_fr = s_fr
-    last_pwm_b = s_b
-    return s_fl, s_fr, s_b
 
 
 def apply_start_pwm(cmd, min_pwm):

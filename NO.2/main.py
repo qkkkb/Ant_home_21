@@ -142,6 +142,8 @@ Follow_Push_Close_Positive_Vx_Open_Error = 30
 Follow_Push_Close_Positive_Vx_Limit = 10.0
 Follow_Push_Visual_Forward_Scale = 1.06
 Follow_Push_Visual_Lateral_Scale = 1.18
+Follow_Normal_Visual_Forward_Scale = 1.03
+Follow_Normal_Visual_Lateral_Scale = 1.10
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Wz_Feedforward_Gain = 1.60
 Follow_Wz_Feedforward_Limit = 15.0
@@ -766,6 +768,9 @@ def solve_follow_pose_twist(
     if push_mode:
         body_vx *= Follow_Push_Visual_Forward_Scale
         body_vy *= Follow_Push_Visual_Lateral_Scale
+    elif (not orbit_mode) and (not spin_mode):
+        body_vx *= Follow_Normal_Visual_Forward_Scale
+        body_vy *= Follow_Normal_Visual_Lateral_Scale
     vx = body_vx
     vy = body_vy
     wz = vision_wz

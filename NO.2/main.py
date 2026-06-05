@@ -140,6 +140,8 @@ Follow_Push_Enter_Soft_Ms = 220
 Follow_Push_Close_Positive_Vx_Error = 4
 Follow_Push_Close_Positive_Vx_Open_Error = 30
 Follow_Push_Close_Positive_Vx_Limit = 10.0
+Follow_Push_Visual_Forward_Scale = 1.06
+Follow_Push_Visual_Lateral_Scale = 1.18
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Wz_Feedforward_Gain = 1.60
 Follow_Wz_Feedforward_Limit = 15.0
@@ -761,6 +763,9 @@ def solve_follow_pose_twist(
     cam_vx = calc_follow_forward(error_y, position_priority)
     cam_vy = calc_follow_lateral(error_x, position_priority)
     body_vx, body_vy = rotate_camera_velocity_to_body(cam_vx, cam_vy)
+    if push_mode:
+        body_vx *= Follow_Push_Visual_Forward_Scale
+        body_vy *= Follow_Push_Visual_Lateral_Scale
     vx = body_vx
     vy = body_vy
     wz = vision_wz

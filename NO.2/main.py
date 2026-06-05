@@ -118,6 +118,9 @@ Follow_Distance_Far_Boost_Gain = 1.20
 Follow_Distance_Close_Gain = 0.62
 Follow_Distance_Close_Limit = 28.0
 Follow_Distance_Emergency_Close_Error = 32
+Follow_Back_Close_Master_Vx = -0.8
+Follow_Back_Close_Error_Y = -6
+Follow_Back_Close_Toward_Vy_Limit = 6.0
 Follow_Orbit_Close_Back_Max_Vx = 28.0
 Follow_Orbit_Close_Back_Gain = 1.45
 Follow_Orbit_Close_Full_Error = 4
@@ -1268,6 +1271,14 @@ def update_follow_targets(yaw_deg, gyro_z):
         vy_limit = follow_limit(vy_limit, ff_vy, Follow_Master_Extra_Vy)
     vx = clamp(vx, -vx_limit, vx_limit)
     vy = clamp(vy, -vy_limit, vy_limit)
+    if (
+        fresh_motion
+        and seen
+        and ff_vx <= Follow_Back_Close_Master_Vx
+        and cam_error_y <= Follow_Back_Close_Error_Y
+        and vy > Follow_Back_Close_Toward_Vy_Limit
+    ):
+        vy = Follow_Back_Close_Toward_Vy_Limit
     if (
         push_mode_active
         and seen

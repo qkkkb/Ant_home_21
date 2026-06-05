@@ -95,12 +95,6 @@ Classify_Packet_Tag = 0xFD
 ART_MODE_TRACK_CMD = b"TRACK\n"
 ART_MODE_IDLE_CMD = b"IDLE\n"
 
-FOLLOW_MODE_UNKNOWN = -1
-FOLLOW_MODE_NORMAL = 0
-FOLLOW_MODE_ORBIT = 1
-FOLLOW_MODE_PUSH = 2
-FOLLOW_MODE_SPIN = 3
-
 
 # ====================== Follow control ======================
 Follow_Forward_Gain = 0.62
@@ -283,7 +277,7 @@ spin_latched_wz = 0.0
 spin_latch_until_ms = 0
 last_push_mode_active = False
 push_enter_ms = 0
-last_follow_mode_key = FOLLOW_MODE_UNKNOWN
+last_follow_mode_key = -1
 last_tune_log_ms = 0
 last_hard_stop = False
 last_stall_count = 0
@@ -504,7 +498,7 @@ def clear_cam_target_state():
     spin_latch_until_ms = 0
     last_push_mode_active = False
     push_enter_ms = 0
-    last_follow_mode_key = FOLLOW_MODE_UNKNOWN
+    last_follow_mode_key = -1
     cam_has_target = False
     cam_valid_target_since_ms = 0
     target_lost_since_ms = 0
@@ -1001,32 +995,6 @@ def reset_turn_loop_state():
         gyro_pid.err_last = 0.0
 
 
-def reset_follow_mode_memory():
-    global last_pwm_fl, last_pwm_fr, last_pwm_b
-    global last_stall_count, last_stall_boost
-    global last_cmd_vx, last_cmd_vy, last_cmd_wz, last_ap_vz_cmd
-    global last_angle_priority_active, last_back_priority_active
-
-    speed_reset(pid_fl)
-    speed_reset(pid_fr)
-    speed_reset(pid_b)
-    last_pwm_fl = 0
-    last_pwm_fr = 0
-    last_pwm_b = 0
-    last_stall_count = 0
-    last_stall_boost = False
-    last_cmd_vx = 0.0
-    last_cmd_vy = 0.0
-    last_cmd_wz = 0.0
-    last_ap_vz_cmd = 0.0
-    last_angle_priority_active = False
-    last_back_priority_active = False
-    if ENABLE_GYRO_LOOP and gyro_pid is not None:
-        gyro_pid.output = 0.0
-        gyro_pid.err = 0.0
-        gyro_pid.err_last = 0.0
-
-
 def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z, spin_priority=False):
     err = turn_rate_cmd - gyro_z
     limit = gyro_limit_for_turn(turn_rate_cmd, True, spin_priority)
@@ -1138,6 +1106,8 @@ def update_follow_targets(yaw_deg, gyro_z):
     global last_ff_vx, last_ff_vy, last_ff_wz
     global last_cmd_vx, last_cmd_vy, last_cmd_wz
     global last_ap_vz_cmd
+    global last_pwm_fl, last_pwm_fr, last_pwm_b
+    global last_stall_count, last_stall_boost
     global last_angle_priority_active
     global last_back_priority_active
     global last_push_mode_active, push_enter_ms
@@ -1202,15 +1172,32 @@ def update_follow_targets(yaw_deg, gyro_z):
         last_push_mode_active = False
         push_enter_ms = 0
     if spin_mode_active:
-        mode_key = FOLLOW_MODE_SPIN
+        mode_key = 3
     elif push_mode_active:
-        mode_key = FOLLOW_MODE_PUSH
+        mode_key = 2
     elif orbit_mode_active:
-        mode_key = FOLLOW_MODE_ORBIT
+        mode_key = 1
     else:
-        mode_key = FOLLOW_MODE_NORMAL
+        mode_key = 0
     if last_follow_mode_key != mode_key:
-        reset_follow_mode_memory()
+        speed_reset(pid_fl)
+        speed_reset(pid_fr)
+        speed_reset(pid_b)
+        last_pwm_fl = 0
+        last_pwm_fr = 0
+        last_pwm_b = 0
+        last_stall_count = 0
+        last_stall_boost = False
+        last_cmd_vx = 0.0
+        last_cmd_vy = 0.0
+        last_cmd_wz = 0.0
+        last_ap_vz_cmd = 0.0
+        last_angle_priority_active = False
+        last_back_priority_active = False
+        if ENABLE_GYRO_LOOP and gyro_pid is not None:
+            gyro_pid.output = 0.0
+            gyro_pid.err = 0.0
+            gyro_pid.err_last = 0.0
         last_follow_mode_key = mode_key
     if (
         spin_mode_active
@@ -1560,7 +1547,7 @@ def reset_speed_outputs():
     spin_latch_until_ms = 0
     last_push_mode_active = False
     push_enter_ms = 0
-    last_follow_mode_key = FOLLOW_MODE_UNKNOWN
+    last_follow_mode_key = -1
 
 
 def clamp_duty(value):

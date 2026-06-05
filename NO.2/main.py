@@ -170,7 +170,7 @@ Follow_Spin_Feedforward_Forward_Gain = 0.95
 Follow_Spin_Feedforward_Lateral_Gain = 1.05
 Follow_Spin_Feedforward_Forward_Limit = 12.0
 Follow_Spin_Feedforward_Lateral_Limit = 20.0
-Follow_Spin_Wz_Feedforward_Gain = 0.50
+Follow_Spin_Wz_Feedforward_Gain = 0.65
 Follow_Spin_Wz_Feedforward_Limit = 84.0
 Follow_Spin_Turn_Rate_Limit = 96.0
 Follow_Pose_Angle_Deadband = 4
@@ -820,7 +820,7 @@ def solve_follow_pose_twist(
                 Follow_Spin_Feedforward_Lateral_Gain,
                 Follow_Spin_Feedforward_Lateral_Limit,
             )
-            wz = add_feedforward_assist(
+            wz = add_feedforward_direct(
                 wz,
                 ff_wz,
                 Follow_Spin_Wz_Feedforward_Gain,

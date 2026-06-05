@@ -67,7 +67,7 @@ GYRO_CALIBRATE_DELAY_MS = 2
 GC_DIV = 50
 USE_MASTER_MOTION_FEEDFORWARD = True
 FOLLOW_WIRELESS_TUNE_LOG_ENABLE = True
-FOLLOW_TUNE_LOG_INTERVAL_MS = 100
+FOLLOW_TUNE_LOG_INTERVAL_MS = 500
 WHEEL_TARGET_STOP_EPS = 0.05
 WHEEL_TARGET_IDLE_EPS = 0.35
 FOLLOW_START_PWM = 6200
@@ -1715,46 +1715,35 @@ def wireless_tune_log():
     if utime.ticks_diff(now, last_tune_log_ms) < FOLLOW_TUNE_LOG_INTERVAL_MS:
         return
     last_tune_log_ms = now
+    gc.collect()
     try:
-        tune_send_int("FT seen=", 1 if last_follow_seen else 0)
-        tune_send_int(" err=", cam_error_x)
+        tune_send_int("FT e=", cam_error_x)
         tune_send_int(",", cam_error_y)
         tune_send_int(",", cam_error_angle)
-        tune_send_scaled(" vis=", last_visual_vx)
-        tune_send_scaled(",", last_visual_vy)
-        tune_send_scaled(" out=", cam_target_vx)
+        tune_send_scaled(" o=", cam_target_vx)
         tune_send_scaled(",", cam_target_vy)
         tune_send_scaled(",", last_vz_cmd)
-        tune_send_scaled(" ff=", last_ff_vx)
-        tune_send_scaled(",", last_ff_vy)
-        tune_send_scaled(",", last_ff_wz)
-        tune_send_scaled(" wz=", last_ff_wz)
-        tune_send_scaled(",", last_turn_rate_cmd)
-        tune_send_scaled(",", last_vz_cmd)
-        tune_send_scaled(" tar=", tune_f[0])
+        tune_send_scaled(" t=", tune_f[0])
         tune_send_scaled(",", tune_f[1])
         tune_send_scaled(",", tune_f[2])
-        tune_send_int(" enc=", tune_i[0])
+        tune_send_int(" n=", tune_i[0])
         tune_send_int(",", tune_i[1])
         tune_send_int(",", tune_i[2])
-        tune_send_int(" pid=", tune_i[3])
-        tune_send_int(",", tune_i[4])
-        tune_send_int(",", tune_i[5])
-        tune_send_int(" pwm=", tune_i[6])
+        tune_send_int(" p=", tune_i[6])
         tune_send_int(",", tune_i[7])
         tune_send_int(",", tune_i[8])
-        tune_send_int(" stop=", tune_i[9])
-        tune_send_int(" boost=", tune_i[10])
-        tune_send_int(" ap=", 1 if last_angle_priority_active else 0)
-        tune_send_int(" bp=", 1 if last_back_priority_active else 0)
         tune_send_scaled(" g=", tune_f[3])
-        tune_send_scaled(" glim=", tune_f[4])
-        tune_send_scaled(" yaw=", tune_f[5])
-        tune_send_int(" mf=", master_flags)
-        tune_send_int(" rx=", 1 if master_motion_rx_fresh() else 0)
+        tune_send_scaled(" y=", tune_f[5])
+        tune_send_int(" s=", tune_i[9])
+        tune_send_int(",", tune_i[10])
+        tune_send_int(",", 1 if last_angle_priority_active else 0)
+        tune_send_int(",", 1 if last_back_priority_active else 0)
+        tune_send_int(" m=", master_flags)
+        tune_send_int(",", 1 if master_motion_rx_fresh() else 0)
         wireless.send_str("\r\n")
     except Exception:
         pass
+    gc.collect()
 
 
 def calibrate_gyro_before_launch():

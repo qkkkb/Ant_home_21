@@ -2,23 +2,8 @@ H1 = 0xA5
 H2 = 0x5A
 MAX_LEN = 16
 
-MSG_TARGET_LOCK = 0x10
-MSG_ACK = 0x11
-MSG_MASTER_READY = 0x12
-MSG_SLAVE_APPROACHING = 0x13
-MSG_SLAVE_READY = 0x14
-MSG_PUSH_START = 0x15
-MSG_PUSH_STOP = 0x16
-MSG_DONE = 0x17
-MSG_ERROR = 0x18
 MSG_MASTER_MOTION = 0x19
 
-ACK_TARGET_LOCK = MSG_TARGET_LOCK
-ACK_PUSH_START = MSG_PUSH_START
-ACK_PUSH_STOP = MSG_PUSH_STOP
-MASTER_MOTION_FLAG_STARTED = 0x01
-MASTER_MOTION_FLAG_TARGET = 0x02
-MASTER_MOTION_FLAG_CLOSED_LOOP = 0x04
 MASTER_MOTION_FLAG_ORBIT = 0x08
 MASTER_MOTION_FLAG_SPIN = 0x10
 MASTER_MOTION_FLAG_PUSH = 0x20
@@ -79,51 +64,6 @@ class CoopFrameParser:
 def _u16(data, off):
     v = data[off] | (data[off + 1] << 8)
     return v - 65536 if v >= 32768 else v
-
-
-def _p16(v):
-    v = int(v)
-    if v > 32767:
-        v = 32767
-    elif v < -32768:
-        v = -32768
-    if v < 0:
-        v += 65536
-    return v & 0xFF, (v >> 8) & 0xFF
-
-
-def encode_frame(msg, seq, payload=b""):
-    n = 2 + len(payload)
-    frame = bytearray([H1, H2, n, msg & 0xFF, seq & 0xFF])
-    frame += payload
-    s = 0
-    for v in frame[2:]:
-        s = (s + v) & 0xFF
-    frame.append(s)
-    return frame
-
-
-def decode_target_lock(payload, payload_len):
-    if payload_len < 10:
-        return None
-    return (
-        payload[0],
-        payload[1],
-        _u16(payload, 2) / 10.0,
-        _u16(payload, 4),
-        _u16(payload, 6),
-        _u16(payload, 8) / 10.0,
-    )
-
-
-def encode_master_motion(seq, vx, vy, wz, yaw_deg, flags):
-    payload = bytearray()
-    for v in (int(vx * 10), int(vy * 10), int(wz * 10), int(yaw_deg * 10)):
-        lo, hi = _p16(v)
-        payload.append(lo)
-        payload.append(hi)
-    payload.append(flags & 0xFF)
-    return encode_frame(MSG_MASTER_MOTION, seq, payload)
 
 
 def decode_master_motion(payload, payload_len):

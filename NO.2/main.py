@@ -225,7 +225,10 @@ cam_error_angle = 0
 cam_target_vx = 0.0
 cam_target_vy = 0.0
 cam_last_rx_ms = 0
-cam_rx_buf = bytearray()
+cam_rx_buf = bytearray(32)
+cam_parse_state = 0
+cam_parse_x = 0
+cam_parse_y = 0
 cam_has_target = False
 cam_rx_started = False
 cam_valid_target_since_ms = 0
@@ -466,8 +469,9 @@ def update_cam_target(err_x, err_y, err_angle=0):
 
 
 def clear_cam_target_state():
-    global cam_error_x, cam_error_y, cam_last_rx_ms, cam_rx_buf
+    global cam_error_x, cam_error_y, cam_last_rx_ms
     global cam_error_angle
+    global cam_parse_state, cam_parse_x, cam_parse_y
     global cam_has_target, cam_valid_target_since_ms, target_lost_since_ms
     global last_cmd_vx, last_cmd_vy, last_cmd_wz, last_ap_vz_cmd
     global last_angle_priority_active
@@ -498,7 +502,9 @@ def clear_cam_target_state():
     cam_valid_target_since_ms = 0
     target_lost_since_ms = 0
     cam_last_rx_ms = 0
-    cam_rx_buf = bytearray()
+    cam_parse_state = 0
+    cam_parse_x = 0
+    cam_parse_y = 0
 
 
 def cam_packet_fresh():
@@ -1043,50 +1049,55 @@ def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z, spin_priority=False):
 
 
 def poll_art_uart():
-    global cam_rx_buf, cam_has_target, cam_rx_started, cam_valid_target_since_ms
+    global cam_has_target, cam_rx_started, cam_valid_target_since_ms
     global cam_last_rx_ms, target_lost_since_ms
+    global cam_parse_state, cam_parse_x, cam_parse_y
 
     pending = cam_uart.any()
-    if pending:
-        if pending > 32:
-            pending = 32
-        data = cam_uart.read(pending)
-        if data:
-            cam_rx_buf += data
-            while len(cam_rx_buf) >= 3:
-                if cam_rx_buf[0] != Cam_Frame_Head:
-                    cam_rx_buf = cam_rx_buf[1:]
-                    continue
-                if not cam_rx_started:
-                    cam_rx_started = True
-                frame_len = 3
-                if cam_rx_buf[1] == No_Target_Marker and cam_rx_buf[2] == No_Target_Marker:
-                    cam_has_target = False
-                    cam_valid_target_since_ms = 0
-                    cam_last_rx_ms = utime.ticks_ms()
-                elif cam_rx_buf[1] in (Line_Packet_Tag, Classify_Packet_Tag):
-                    cam_last_rx_ms = utime.ticks_ms()
-                else:
-                    if len(cam_rx_buf) < 4:
-                        return
-                    if cam_rx_buf[3] == Cam_Frame_Head:
-                        err_angle = 0
-                    else:
-                        err_angle = (int(cam_rx_buf[3]) - Cam_Error_Offset) * Cam_Error_Scale
-                        frame_len = 4
-                    cam_has_target = True
-                    target_lost_since_ms = 0
-                    if cam_valid_target_since_ms == 0:
-                        cam_valid_target_since_ms = utime.ticks_ms()
-                    update_cam_target(
-                        (int(cam_rx_buf[1]) - Cam_Error_Offset) * Cam_Error_Scale,
-                        (int(cam_rx_buf[2]) - Cam_Error_Offset) * Cam_Error_Scale,
-                        err_angle,
-                    )
-                cam_rx_buf = cam_rx_buf[frame_len:]
-
-    if len(cam_rx_buf) > 20:
-        cam_rx_buf = bytearray()
+    if not pending:
+        return
+    if pending > 32:
+        pending = 32
+    n = cam_uart.readinto(cam_rx_buf, pending)
+    if not n:
+        return
+    for i in range(n):
+        b = int(cam_rx_buf[i]) & 0xFF
+        if cam_parse_state == 0:
+            if b == Cam_Frame_Head:
+                cam_rx_started = True
+                cam_parse_state = 1
+        elif cam_parse_state == 1:
+            cam_parse_x = b
+            cam_parse_state = 2
+        elif cam_parse_state == 2:
+            cam_parse_y = b
+            if cam_parse_x == No_Target_Marker and cam_parse_y == No_Target_Marker:
+                cam_has_target = False
+                cam_valid_target_since_ms = 0
+                cam_last_rx_ms = utime.ticks_ms()
+                cam_parse_state = 0
+            elif cam_parse_x == Line_Packet_Tag or cam_parse_x == Classify_Packet_Tag:
+                cam_last_rx_ms = utime.ticks_ms()
+                cam_parse_state = 0
+            else:
+                cam_parse_state = 3
+        else:
+            if b == Cam_Frame_Head:
+                err_angle = 0
+                cam_parse_state = 1
+            else:
+                err_angle = (b - Cam_Error_Offset) * Cam_Error_Scale
+                cam_parse_state = 0
+            cam_has_target = True
+            target_lost_since_ms = 0
+            if cam_valid_target_since_ms == 0:
+                cam_valid_target_since_ms = utime.ticks_ms()
+            update_cam_target(
+                (cam_parse_x - Cam_Error_Offset) * Cam_Error_Scale,
+                (cam_parse_y - Cam_Error_Offset) * Cam_Error_Scale,
+                err_angle,
+            )
 
 
 def handle_coop_frame(msg_type, seq, payload, payload_len):
@@ -1688,6 +1699,11 @@ def coop_flash_rx():
     coop_rx_led_until_ms = utime.ticks_add(utime.ticks_ms(), COOP_LED_PULSE_MS)
 
 
+def tune_send_value(label, value):
+    wireless.send_str(label)
+    wireless.send_str(str(value))
+
+
 def wireless_tune_log():
     global last_tune_log_ms
 
@@ -1698,58 +1714,43 @@ def wireless_tune_log():
         return
     last_tune_log_ms = now
     try:
-        wireless.send_str(
-            "FT seen=%d err=%d,%d,%d vis=%.2f,%.2f out=%.2f,%.2f,%.2f "
-            "ff=%.2f,%.2f,%.2f wz=%.2f,%.2f,%.2f "
-            % (
-                1 if last_follow_seen else 0,
-                cam_error_x,
-                cam_error_y,
-                cam_error_angle,
-                last_visual_vx,
-                last_visual_vy,
-                cam_target_vx,
-                cam_target_vy,
-                last_vz_cmd,
-                last_ff_vx,
-                last_ff_vy,
-                last_ff_wz,
-                last_ff_wz,
-                last_turn_rate_cmd,
-                last_vz_cmd,
-            )
-        )
-        wireless.send_str(
-            "tar=%.1f,%.1f,%.1f enc=%d,%d,%d pid=%d,%d,%d pwm=%d,%d,%d "
-            % (
-                tune_f[0],
-                tune_f[1],
-                tune_f[2],
-                tune_i[0],
-                tune_i[1],
-                tune_i[2],
-                tune_i[3],
-                tune_i[4],
-                tune_i[5],
-                tune_i[6],
-                tune_i[7],
-                tune_i[8],
-            )
-        )
-        wireless.send_str(
-            "stop=%d boost=%d ap=%d bp=%d g=%.2f glim=%.1f yaw=%.1f mf=%d rx=%d\r\n"
-            % (
-                tune_i[9],
-                tune_i[10],
-                1 if last_angle_priority_active else 0,
-                1 if last_back_priority_active else 0,
-                tune_f[3],
-                tune_f[4],
-                tune_f[5],
-                int(master_flags),
-                1 if master_motion_rx_fresh() else 0,
-            )
-        )
+        tune_send_value("FT seen=", 1 if last_follow_seen else 0)
+        tune_send_value(" err=", cam_error_x)
+        tune_send_value(",", cam_error_y)
+        tune_send_value(",", cam_error_angle)
+        tune_send_value(" vis=", last_visual_vx)
+        tune_send_value(",", last_visual_vy)
+        tune_send_value(" out=", cam_target_vx)
+        tune_send_value(",", cam_target_vy)
+        tune_send_value(",", last_vz_cmd)
+        tune_send_value(" ff=", last_ff_vx)
+        tune_send_value(",", last_ff_vy)
+        tune_send_value(",", last_ff_wz)
+        tune_send_value(" wz=", last_ff_wz)
+        tune_send_value(",", last_turn_rate_cmd)
+        tune_send_value(",", last_vz_cmd)
+        tune_send_value(" tar=", tune_f[0])
+        tune_send_value(",", tune_f[1])
+        tune_send_value(",", tune_f[2])
+        tune_send_value(" enc=", tune_i[0])
+        tune_send_value(",", tune_i[1])
+        tune_send_value(",", tune_i[2])
+        tune_send_value(" pid=", tune_i[3])
+        tune_send_value(",", tune_i[4])
+        tune_send_value(",", tune_i[5])
+        tune_send_value(" pwm=", tune_i[6])
+        tune_send_value(",", tune_i[7])
+        tune_send_value(",", tune_i[8])
+        tune_send_value(" stop=", tune_i[9])
+        tune_send_value(" boost=", tune_i[10])
+        tune_send_value(" ap=", 1 if last_angle_priority_active else 0)
+        tune_send_value(" bp=", 1 if last_back_priority_active else 0)
+        tune_send_value(" g=", tune_f[3])
+        tune_send_value(" glim=", tune_f[4])
+        tune_send_value(" yaw=", tune_f[5])
+        tune_send_value(" mf=", master_flags)
+        tune_send_value(" rx=", 1 if master_motion_rx_fresh() else 0)
+        wireless.send_str("\r\n")
     except Exception:
         pass
 

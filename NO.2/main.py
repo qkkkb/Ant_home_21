@@ -66,8 +66,11 @@ GYRO_CALIBRATE_DELAY_MS = 2
 
 GC_DIV = 50
 USE_MASTER_MOTION_FEEDFORWARD = True
-FOLLOW_WIRELESS_TUNE_LOG_ENABLE = False
-FOLLOW_TUNE_LOG_INTERVAL_MS = 500
+FOLLOW_WIRELESS_TUNE_LOG_ENABLE = True
+FOLLOW_TUNE_LOG_INTERVAL_MS = 100
+TUNE_LOG_FRAME_LEN = 40
+TUNE_LOG_HEAD_0 = 0xA7
+TUNE_LOG_HEAD_1 = 0x54
 WHEEL_TARGET_STOP_EPS = 0.05
 WHEEL_TARGET_IDLE_EPS = 0.35
 FOLLOW_START_PWM = 6200
@@ -280,6 +283,8 @@ last_stall_count = 0
 last_stall_boost = False
 tune_f = array('f', [0.0] * 6)
 tune_i = array('i', [0] * 11)
+tune_tx_buf = bytearray(TUNE_LOG_FRAME_LEN)
+tune_seq = 0
 pose_vx = 0.0
 pose_vy = 0.0
 pose_wz = 0.0
@@ -1696,18 +1701,25 @@ def coop_flash_rx():
     coop_rx_led_until_ms = utime.ticks_add(utime.ticks_ms(), COOP_LED_PULSE_MS)
 
 
-def tune_send_int(label, value):
-    wireless.send_str(label)
-    wireless.send_str(str(int(value)))
+def tune_i16(value):
+    value = int(value)
+    if value > 32767:
+        return 32767
+    if value < -32768:
+        return -32768
+    return value
 
 
-def tune_send_scaled(label, value):
-    wireless.send_str(label)
-    wireless.send_str(str(int(value * 100.0)))
+def tune_put_i16(idx, value):
+    value = tune_i16(value)
+    if value < 0:
+        value += 65536
+    tune_tx_buf[idx] = value & 0xFF
+    tune_tx_buf[idx + 1] = (value >> 8) & 0xFF
 
 
 def wireless_tune_log():
-    global last_tune_log_ms
+    global last_tune_log_ms, tune_seq
 
     if not FOLLOW_WIRELESS_TUNE_LOG_ENABLE:
         return
@@ -1715,35 +1727,47 @@ def wireless_tune_log():
     if utime.ticks_diff(now, last_tune_log_ms) < FOLLOW_TUNE_LOG_INTERVAL_MS:
         return
     last_tune_log_ms = now
-    gc.collect()
-    try:
-        tune_send_int("FT e=", cam_error_x)
-        tune_send_int(",", cam_error_y)
-        tune_send_int(",", cam_error_angle)
-        tune_send_scaled(" o=", cam_target_vx)
-        tune_send_scaled(",", cam_target_vy)
-        tune_send_scaled(",", last_vz_cmd)
-        tune_send_scaled(" t=", tune_f[0])
-        tune_send_scaled(",", tune_f[1])
-        tune_send_scaled(",", tune_f[2])
-        tune_send_int(" n=", tune_i[0])
-        tune_send_int(",", tune_i[1])
-        tune_send_int(",", tune_i[2])
-        tune_send_int(" p=", tune_i[6])
-        tune_send_int(",", tune_i[7])
-        tune_send_int(",", tune_i[8])
-        tune_send_scaled(" g=", tune_f[3])
-        tune_send_scaled(" y=", tune_f[5])
-        tune_send_int(" s=", tune_i[9])
-        tune_send_int(",", tune_i[10])
-        tune_send_int(",", 1 if last_angle_priority_active else 0)
-        tune_send_int(",", 1 if last_back_priority_active else 0)
-        tune_send_int(" m=", master_flags)
-        tune_send_int(",", 1 if master_motion_rx_fresh() else 0)
-        wireless.send_str("\r\n")
-    except Exception:
-        pass
-    gc.collect()
+    status = 0
+    if last_follow_seen:
+        status |= 0x01
+    if tune_i[9]:
+        status |= 0x02
+    if tune_i[10]:
+        status |= 0x04
+    if last_angle_priority_active:
+        status |= 0x08
+    if last_back_priority_active:
+        status |= 0x10
+    if master_motion_rx_fresh():
+        status |= 0x20
+    tune_tx_buf[0] = TUNE_LOG_HEAD_0
+    tune_tx_buf[1] = TUNE_LOG_HEAD_1
+    tune_tx_buf[2] = tune_seq & 0xFF
+    tune_seq = (tune_seq + 1) & 0xFF
+    tune_tx_buf[3] = status
+    tune_tx_buf[4] = master_flags & 0xFF
+    tune_put_i16(5, cam_error_x)
+    tune_put_i16(7, cam_error_y)
+    tune_put_i16(9, cam_error_angle)
+    tune_put_i16(11, cam_target_vx * 100.0)
+    tune_put_i16(13, cam_target_vy * 100.0)
+    tune_put_i16(15, last_vz_cmd * 100.0)
+    tune_put_i16(17, tune_f[0] * 100.0)
+    tune_put_i16(19, tune_f[1] * 100.0)
+    tune_put_i16(21, tune_f[2] * 100.0)
+    tune_put_i16(23, tune_i[0])
+    tune_put_i16(25, tune_i[1])
+    tune_put_i16(27, tune_i[2])
+    tune_put_i16(29, tune_i[6])
+    tune_put_i16(31, tune_i[7])
+    tune_put_i16(33, tune_i[8])
+    tune_put_i16(35, tune_f[3] * 100.0)
+    tune_put_i16(37, tune_f[5] * 10.0)
+    checksum = 0
+    for i in range(TUNE_LOG_FRAME_LEN - 1):
+        checksum = (checksum + tune_tx_buf[i]) & 0xFF
+    tune_tx_buf[TUNE_LOG_FRAME_LEN - 1] = checksum
+    wireless.send_bytearray(tune_tx_buf, TUNE_LOG_FRAME_LEN)
 
 
 def calibrate_gyro_before_launch():

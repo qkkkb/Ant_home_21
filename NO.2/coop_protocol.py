@@ -61,18 +61,6 @@ class CoopFrameParser:
                 self.reset()
 
 
-def _u16(data, off):
+def decode_i16(data, off):
     v = data[off] | (data[off + 1] << 8)
     return v - 65536 if v >= 32768 else v
-
-
-def decode_master_motion(payload, payload_len):
-    if payload_len < 9:
-        return None
-    return (
-        _u16(payload, 0) / 10.0,
-        _u16(payload, 2) / 10.0,
-        _u16(payload, 4) / 10.0,
-        _u16(payload, 6) / 10.0,
-        payload[8],
-    )

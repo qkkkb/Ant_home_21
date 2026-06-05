@@ -16,7 +16,7 @@ from coop_protocol import (
     MASTER_MOTION_FLAG_PUSH,
     MASTER_MOTION_FLAG_SPIN,
     MSG_MASTER_MOTION,
-    decode_master_motion,
+    decode_i16,
 )
 
 
@@ -1104,16 +1104,13 @@ def handle_coop_frame(msg_type, seq, payload, payload_len):
     global master_vx, master_vy, master_wz, master_yaw
     global master_flags, master_last_rx_ms
 
-    if msg_type != MSG_MASTER_MOTION:
+    if msg_type != MSG_MASTER_MOTION or payload_len < 9:
         return
-    motion = decode_master_motion(payload, payload_len)
-    if motion is None:
-        return
-    master_vx = motion[0]
-    master_vy = motion[1]
-    master_wz = motion[2]
-    master_yaw = motion[3]
-    master_flags = int(motion[4])
+    master_vx = decode_i16(payload, 0) / 10.0
+    master_vy = decode_i16(payload, 2) / 10.0
+    master_wz = decode_i16(payload, 4) / 10.0
+    master_yaw = decode_i16(payload, 6) / 10.0
+    master_flags = payload[8]
     master_last_rx_ms = utime.ticks_ms()
     coop_flash_rx()
 
@@ -1699,9 +1696,14 @@ def coop_flash_rx():
     coop_rx_led_until_ms = utime.ticks_add(utime.ticks_ms(), COOP_LED_PULSE_MS)
 
 
-def tune_send_value(label, value):
+def tune_send_int(label, value):
     wireless.send_str(label)
-    wireless.send_str(str(value))
+    wireless.send_str(str(int(value)))
+
+
+def tune_send_scaled(label, value):
+    wireless.send_str(label)
+    wireless.send_str(str(int(value * 100.0)))
 
 
 def wireless_tune_log():
@@ -1714,42 +1716,42 @@ def wireless_tune_log():
         return
     last_tune_log_ms = now
     try:
-        tune_send_value("FT seen=", 1 if last_follow_seen else 0)
-        tune_send_value(" err=", cam_error_x)
-        tune_send_value(",", cam_error_y)
-        tune_send_value(",", cam_error_angle)
-        tune_send_value(" vis=", last_visual_vx)
-        tune_send_value(",", last_visual_vy)
-        tune_send_value(" out=", cam_target_vx)
-        tune_send_value(",", cam_target_vy)
-        tune_send_value(",", last_vz_cmd)
-        tune_send_value(" ff=", last_ff_vx)
-        tune_send_value(",", last_ff_vy)
-        tune_send_value(",", last_ff_wz)
-        tune_send_value(" wz=", last_ff_wz)
-        tune_send_value(",", last_turn_rate_cmd)
-        tune_send_value(",", last_vz_cmd)
-        tune_send_value(" tar=", tune_f[0])
-        tune_send_value(",", tune_f[1])
-        tune_send_value(",", tune_f[2])
-        tune_send_value(" enc=", tune_i[0])
-        tune_send_value(",", tune_i[1])
-        tune_send_value(",", tune_i[2])
-        tune_send_value(" pid=", tune_i[3])
-        tune_send_value(",", tune_i[4])
-        tune_send_value(",", tune_i[5])
-        tune_send_value(" pwm=", tune_i[6])
-        tune_send_value(",", tune_i[7])
-        tune_send_value(",", tune_i[8])
-        tune_send_value(" stop=", tune_i[9])
-        tune_send_value(" boost=", tune_i[10])
-        tune_send_value(" ap=", 1 if last_angle_priority_active else 0)
-        tune_send_value(" bp=", 1 if last_back_priority_active else 0)
-        tune_send_value(" g=", tune_f[3])
-        tune_send_value(" glim=", tune_f[4])
-        tune_send_value(" yaw=", tune_f[5])
-        tune_send_value(" mf=", master_flags)
-        tune_send_value(" rx=", 1 if master_motion_rx_fresh() else 0)
+        tune_send_int("FT seen=", 1 if last_follow_seen else 0)
+        tune_send_int(" err=", cam_error_x)
+        tune_send_int(",", cam_error_y)
+        tune_send_int(",", cam_error_angle)
+        tune_send_scaled(" vis=", last_visual_vx)
+        tune_send_scaled(",", last_visual_vy)
+        tune_send_scaled(" out=", cam_target_vx)
+        tune_send_scaled(",", cam_target_vy)
+        tune_send_scaled(",", last_vz_cmd)
+        tune_send_scaled(" ff=", last_ff_vx)
+        tune_send_scaled(",", last_ff_vy)
+        tune_send_scaled(",", last_ff_wz)
+        tune_send_scaled(" wz=", last_ff_wz)
+        tune_send_scaled(",", last_turn_rate_cmd)
+        tune_send_scaled(",", last_vz_cmd)
+        tune_send_scaled(" tar=", tune_f[0])
+        tune_send_scaled(",", tune_f[1])
+        tune_send_scaled(",", tune_f[2])
+        tune_send_int(" enc=", tune_i[0])
+        tune_send_int(",", tune_i[1])
+        tune_send_int(",", tune_i[2])
+        tune_send_int(" pid=", tune_i[3])
+        tune_send_int(",", tune_i[4])
+        tune_send_int(",", tune_i[5])
+        tune_send_int(" pwm=", tune_i[6])
+        tune_send_int(",", tune_i[7])
+        tune_send_int(",", tune_i[8])
+        tune_send_int(" stop=", tune_i[9])
+        tune_send_int(" boost=", tune_i[10])
+        tune_send_int(" ap=", 1 if last_angle_priority_active else 0)
+        tune_send_int(" bp=", 1 if last_back_priority_active else 0)
+        tune_send_scaled(" g=", tune_f[3])
+        tune_send_scaled(" glim=", tune_f[4])
+        tune_send_scaled(" yaw=", tune_f[5])
+        tune_send_int(" mf=", master_flags)
+        tune_send_int(" rx=", 1 if master_motion_rx_fresh() else 0)
         wireless.send_str("\r\n")
     except Exception:
         pass

@@ -599,6 +599,8 @@ def update_orbit_follow_mode(
             )
             and (-Follow_Orbit_Mode_Angle_Off <= error_angle <= Follow_Orbit_Mode_Angle_Off)
             and (-Follow_Orbit_Mode_Gyro_Off <= gyro_z <= Follow_Orbit_Mode_Gyro_Off)
+            and (-Follow_Orbit_Position_X_Error <= cam_error_x <= Follow_Orbit_Position_X_Error)
+            and (-Follow_Orbit_Position_Y_Error <= cam_error_y <= Follow_Orbit_Position_Y_Error)
         )
     )
     if stable:
@@ -779,7 +781,7 @@ def solve_follow_pose_twist(
                 Follow_Orbit_Feedforward_Lateral_Gain,
                 Follow_Orbit_Feedforward_Lateral_Limit,
             )
-            wz = add_feedforward_assist(
+            wz = add_feedforward_direct(
                 wz,
                 ff_wz,
                 Follow_Orbit_Wz_Feedforward_Gain,

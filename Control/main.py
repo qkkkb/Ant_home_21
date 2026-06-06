@@ -902,10 +902,9 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 push_orbit_dir = 0
                 push_orbit_vy_sign = 0
             else:
-                if orbit_yaw_err >= 0.0:
+                push_orbit_dir = -1
+                if push_orbit_target_delta < 179.0 and orbit_yaw_err >= 0.0:
                     push_orbit_dir = 1
-                else:
-                    push_orbit_dir = -1
                 push_orbit_vy_sign = -push_orbit_dir
             push_orbit_progress_deg = 0.0
             push_orbit_reached = False

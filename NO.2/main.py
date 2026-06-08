@@ -133,12 +133,14 @@ Follow_Push_Feedforward_Lateral_Limit = 22.0
 Follow_Push_Angle_Priority_Error = 56
 Follow_Push_Feedforward_Fade_Error = 8
 Follow_Push_Feedforward_Min_Scale = 0.48
+Follow_Push_Lateral_Ff_Fade_Error = 14
+Follow_Push_Lateral_Ff_Min_Scale = 0.62
 Follow_Push_Enter_Soft_Ms = 220
 Follow_Push_Close_Positive_Vx_Error = 4
 Follow_Push_Close_Positive_Vx_Open_Error = 36
 Follow_Push_Close_Positive_Vx_Limit = 10.0
-Follow_Push_Visual_Forward_Scale = 1.06
-Follow_Push_Visual_Lateral_Scale = 1.42
+Follow_Push_Visual_Forward_Scale = 1.12
+Follow_Push_Visual_Lateral_Scale = 1.56
 Follow_Normal_Visual_Forward_Scale = 0.98
 Follow_Normal_Visual_Lateral_Scale = 1.04
 Follow_Hold_Feedforward_Gain = 1.70
@@ -189,7 +191,7 @@ Follow_Pose_Wheel_Target_Limit = 46.0
 Follow_Command_Ramp_Vx = 12.0
 Follow_Command_Ramp_Vy = 10.0
 Follow_Push_Command_Ramp_Vx = 26.0
-Follow_Push_Command_Ramp_Vy = 22.0
+Follow_Push_Command_Ramp_Vy = 20.0
 Follow_Orbit_Command_Ramp_Vx = 22.0
 Follow_Orbit_Command_Ramp_Vy = 18.0
 Follow_Command_Ramp_Wz = 11.0
@@ -409,6 +411,19 @@ def push_forward_ff_scale(error_y):
         (error_y - Follow_Forward_Deadband)
         * (1.0 - Follow_Push_Feedforward_Min_Scale)
         / (Follow_Push_Feedforward_Fade_Error - Follow_Forward_Deadband)
+    )
+
+
+def push_lateral_ff_scale(error_x):
+    err_abs = abs(error_x)
+    if err_abs <= Follow_Lateral_Deadband:
+        return 1.0
+    if err_abs >= Follow_Push_Lateral_Ff_Fade_Error:
+        return Follow_Push_Lateral_Ff_Min_Scale
+    return 1.0 - (
+        (err_abs - Follow_Lateral_Deadband)
+        * (1.0 - Follow_Push_Lateral_Ff_Min_Scale)
+        / (Follow_Push_Lateral_Ff_Fade_Error - Follow_Lateral_Deadband)
     )
 
 
@@ -1215,6 +1230,7 @@ def update_follow_targets(yaw_deg, gyro_z):
         if push_mode_active and ff_vx > 0.0:
             ff_vx *= (
                 push_forward_ff_scale(cam_error_y)
+                * push_lateral_ff_scale(cam_error_x)
                 * push_enter_soft_scale(now)
             )
         orbit_close_guard_active = (

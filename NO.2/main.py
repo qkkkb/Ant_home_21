@@ -134,11 +134,14 @@ Follow_Push_Angle_Priority_Error = 56
 Follow_Push_Feedforward_Fade_Error = 8
 Follow_Push_Feedforward_Min_Scale = 0.48
 Follow_Push_Enter_Soft_Ms = 220
+Follow_Push_Exit_Hold_Ms = 220
+Follow_Push_Exit_Hold_X_Error = 8
+Follow_Push_Exit_Hold_Y_Error = 6
 Follow_Push_Close_Positive_Vx_Error = 4
-Follow_Push_Close_Positive_Vx_Open_Error = 30
+Follow_Push_Close_Positive_Vx_Open_Error = 36
 Follow_Push_Close_Positive_Vx_Limit = 10.0
 Follow_Push_Visual_Forward_Scale = 1.06
-Follow_Push_Visual_Lateral_Scale = 1.18
+Follow_Push_Visual_Lateral_Scale = 1.28
 Follow_Normal_Visual_Forward_Scale = 0.98
 Follow_Normal_Visual_Lateral_Scale = 1.04
 Follow_Hold_Feedforward_Gain = 1.70
@@ -189,7 +192,7 @@ Follow_Pose_Wheel_Target_Limit = 46.0
 Follow_Command_Ramp_Vx = 12.0
 Follow_Command_Ramp_Vy = 10.0
 Follow_Push_Command_Ramp_Vx = 26.0
-Follow_Push_Command_Ramp_Vy = 16.0
+Follow_Push_Command_Ramp_Vy = 18.0
 Follow_Orbit_Command_Ramp_Vx = 22.0
 Follow_Orbit_Command_Ramp_Vy = 18.0
 Follow_Command_Ramp_Wz = 11.0
@@ -269,7 +272,9 @@ filtered_ff_wz = 0.0
 spin_latched_wz = 0.0
 spin_latch_until_ms = 0
 last_push_mode_active = False
+last_explicit_push_active = False
 push_enter_ms = 0
+push_exit_hold_until_ms = 0
 last_follow_mode_key = -1
 last_tune_log_ms = 0
 last_hard_stop = False
@@ -462,7 +467,8 @@ def clear_cam_target_state():
     global last_back_priority_active
     global orbit_follow_active, orbit_follow_exit_since_ms, filtered_ff_wz
     global spin_latched_wz, spin_latch_until_ms
-    global last_push_mode_active, push_enter_ms
+    global last_push_mode_active, last_explicit_push_active
+    global push_enter_ms, push_exit_hold_until_ms
     global last_follow_mode_key
 
     cam_error_x = 0
@@ -480,7 +486,9 @@ def clear_cam_target_state():
     spin_latched_wz = 0.0
     spin_latch_until_ms = 0
     last_push_mode_active = False
+    last_explicit_push_active = False
     push_enter_ms = 0
+    push_exit_hold_until_ms = 0
     last_follow_mode_key = -1
     cam_has_target = False
     cam_valid_target_since_ms = 0
@@ -1092,7 +1100,8 @@ def update_follow_targets(yaw_deg, gyro_z):
     global last_stall_count, last_stall_boost
     global last_angle_priority_active
     global last_back_priority_active
-    global last_push_mode_active, push_enter_ms
+    global last_push_mode_active, last_explicit_push_active
+    global push_enter_ms, push_exit_hold_until_ms
     global last_follow_mode_key
 
     now = utime.ticks_ms()
@@ -1145,7 +1154,40 @@ def update_follow_targets(yaw_deg, gyro_z):
             -Follow_Normal_Wz_Feedforward_Limit,
             Follow_Normal_Wz_Feedforward_Limit,
         )
-    push_mode_active = explicit_push and (not orbit_mode_active) and (not spin_mode_active)
+    push_allowed = (not orbit_mode_active) and (not spin_mode_active)
+    push_hold_active = False
+    if explicit_push and push_allowed:
+        push_exit_hold_until_ms = 0
+        last_explicit_push_active = True
+    else:
+        if last_explicit_push_active:
+            if (
+                push_allowed
+                and seen
+                and (
+                    cam_error_x >= Follow_Push_Exit_Hold_X_Error
+                    or cam_error_x <= -Follow_Push_Exit_Hold_X_Error
+                    or cam_error_y >= Follow_Push_Exit_Hold_Y_Error
+                    or cam_error_y <= -Follow_Push_Exit_Hold_Y_Error
+                )
+            ):
+                push_exit_hold_until_ms = utime.ticks_add(now, Follow_Push_Exit_Hold_Ms)
+            last_explicit_push_active = False
+        if push_exit_hold_until_ms != 0:
+            if (
+                (not push_allowed)
+                or (not seen)
+                or (
+                    -Follow_Push_Exit_Hold_X_Error <= cam_error_x <= Follow_Push_Exit_Hold_X_Error
+                    and -Follow_Push_Exit_Hold_Y_Error <= cam_error_y <= Follow_Push_Exit_Hold_Y_Error
+                )
+            ):
+                push_exit_hold_until_ms = 0
+            elif utime.ticks_diff(push_exit_hold_until_ms, now) > 0:
+                push_hold_active = True
+            else:
+                push_exit_hold_until_ms = 0
+    push_mode_active = push_allowed and (explicit_push or push_hold_active)
     if push_mode_active:
         if not last_push_mode_active:
             push_enter_ms = now
@@ -1520,7 +1562,9 @@ def reset_speed_outputs():
     spin_latched_wz = 0.0
     spin_latch_until_ms = 0
     last_push_mode_active = False
+    last_explicit_push_active = False
     push_enter_ms = 0
+    push_exit_hold_until_ms = 0
     last_follow_mode_key = -1
 
 

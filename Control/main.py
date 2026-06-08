@@ -39,9 +39,6 @@ PWM_SMOOTH_FACTOR = cfg.PWM_SMOOTH_FACTOR
 # PWM 单次最大变化量（防冲击）
 MAX_PWM_CHANGE = cfg.MAX_PWM_CHANGE
 
-# 默认开启速度环；需要方向控制时再叠加陀螺仪环
-ENABLE_GYRO_LOOP = True
-
 GYRO_SIGN = 1.0
 
 # 陀螺仪 Z 轴标定参数
@@ -54,9 +51,6 @@ GYRO_OUTPUT_LIMIT = 5.0
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True   #是否在启动时自动进行陀螺仪标定
 GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
-
-# IMU 使能条件
-ENABLE_IMU = ENABLE_GYRO_LOOP
 
 # 调试与退出配置
 GC_DIV = 50
@@ -300,10 +294,7 @@ def refresh_field_reference(force=False):
         )
         return False
 
-    if ENABLE_IMU and imu_runtime is not None:
-        launch_yaw = normalize_yaw_deg(imu_runtime.read_yaw())
-    else:
-        launch_yaw = 0.0
+    launch_yaw = normalize_yaw_deg(imu_runtime.read_yaw())
 
     field_up_yaw = launch_yaw
     # Measured yaw decreases when the car physically turns left.
@@ -319,8 +310,6 @@ def refresh_field_reference(force=False):
 
 
 def push_yaw_error_deg(yaw_deg):
-    if not ENABLE_IMU:
-        return 0.0
     return -wrapped_yaw_error(push_yaw_target, yaw_deg)
 
 
@@ -545,23 +534,22 @@ def nav_set_state(new_state, reason="", force=False):
         motor_fr.duty(0)
         motor_b.duty(0)
 
-    if ENABLE_IMU and imu_runtime is not None:
-        if new_state == NAV_STATE_SEARCH_TURN:
-            search_turn_yaw_target = normalize_yaw_deg(field_up_yaw + Nav_Search_Turn_Yaw)
-            yaw_ref_deg = search_turn_yaw_target
-        elif new_state == NAV_STATE_FINE:
-            if push_orbit_done:
-                yaw_ref_deg = push_yaw_target
-            else:
-                yaw_ref_deg = imu_runtime.read_yaw()
-        elif new_state in (NAV_STATE_COARSE, NAV_STATE_PUSH_CLASSIFY):
-            yaw_ref_deg = imu_runtime.read_yaw()
-        elif new_state in (NAV_STATE_PUSH_ORIENT, NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH, NAV_STATE_PUSH_BACK):
+    if new_state == NAV_STATE_SEARCH_TURN:
+        search_turn_yaw_target = normalize_yaw_deg(field_up_yaw + Nav_Search_Turn_Yaw)
+        yaw_ref_deg = search_turn_yaw_target
+    elif new_state == NAV_STATE_FINE:
+        if push_orbit_done:
             yaw_ref_deg = push_yaw_target
-        elif new_state == NAV_STATE_PUSH_TURN:
-            yaw_ref_deg = push_return_yaw_target
-        elif new_state == NAV_STATE_POST_TURN_FORWARD:
-            yaw_ref_deg = push_return_yaw_target
+        else:
+            yaw_ref_deg = imu_runtime.read_yaw()
+    elif new_state in (NAV_STATE_COARSE, NAV_STATE_PUSH_CLASSIFY):
+        yaw_ref_deg = imu_runtime.read_yaw()
+    elif new_state in (NAV_STATE_PUSH_ORIENT, NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH, NAV_STATE_PUSH_BACK):
+        yaw_ref_deg = push_yaw_target
+    elif new_state == NAV_STATE_PUSH_TURN:
+        yaw_ref_deg = push_return_yaw_target
+    elif new_state == NAV_STATE_POST_TURN_FORWARD:
+        yaw_ref_deg = push_return_yaw_target
 
     update_nav_led_display()
     send_art_mode_command(new_state)
@@ -640,18 +628,14 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         cam_target_vx = 0.0
         cam_target_vy = 0.0
         if seen:
-            if ENABLE_IMU:
-                yaw_ref_deg = yaw_deg
+            yaw_ref_deg = yaw_deg
             nav_set_state(NAV_STATE_COARSE, "target_seen_during_search_turn")
             return
         yaw_ref_deg = search_turn_yaw_target
-        yaw_search_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg)) if ENABLE_IMU else 0.0
+        yaw_search_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg))
         search_turn_stable = (
-            (not ENABLE_IMU)
-            or (
-                yaw_search_err_abs <= Nav_Search_Turn_Ok_Yaw
-                and abs(gyro_z) <= Nav_Search_Turn_Gyro_Th
-            )
+            yaw_search_err_abs <= Nav_Search_Turn_Ok_Yaw
+            and abs(gyro_z) <= Nav_Search_Turn_Gyro_Th
         )
         if search_turn_stable:
             if nav_search_turn_ok_since_ms == 0:
@@ -674,8 +658,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             return
         if seen and nav_detect_since_ms > 0:
             if utime.ticks_diff(now, nav_detect_since_ms) >= Nav_Detect_Ms:
-                if ENABLE_IMU:
-                    yaw_ref_deg = yaw_deg
+                yaw_ref_deg = yaw_deg
                 nav_set_state(NAV_STATE_COARSE, "target_detected")
         return
 
@@ -692,8 +675,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             cam_target_vx = 0.0
             if nav_detect_since_ms > 0:
                 if utime.ticks_diff(now, nav_detect_since_ms) >= Nav_Detect_Ms:
-                    if ENABLE_IMU:
-                        yaw_ref_deg = yaw_deg
+                    yaw_ref_deg = yaw_deg
                     nav_set_state(NAV_STATE_COARSE, "post_turn_target_seen")
             return
 
@@ -836,7 +818,6 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             )
         fine_yaw_ok = (
             (not push_orbit_done)
-            or (not ENABLE_IMU)
             or (abs(push_yaw_error_deg(yaw_deg)) <= Nav_Push_Prepare_Reorient_Yaw)
         )
         if push_orbit_done:
@@ -935,7 +916,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
     if nav_state == NAV_STATE_PUSH_ORIENT:
         nav_ready_for_push = False
         yaw_ref_deg = push_yaw_target
-        yaw_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg)) if ENABLE_IMU else 0.0
+        yaw_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg))
         orbit_stop_delta = max(0.0, push_orbit_target_delta - Nav_Push_Orient_Ok_Yaw)
         if push_orbit_last_ms == 0:
             push_orbit_last_ms = now
@@ -956,11 +937,11 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             cam_target_vy = 0.0
         else:
             cam_target_vy = push_orbit_vy_sign * orbit_vy_mag
-        if (not ENABLE_IMU) or push_orbit_reached:
+        if push_orbit_reached:
             brake_elapsed = 0
             if push_orbit_brake_since_ms > 0:
                 brake_elapsed = utime.ticks_diff(now, push_orbit_brake_since_ms)
-            if (not ENABLE_IMU) or abs(gyro_z) <= Nav_Push_Orbit_Stop_Gyro_Th or brake_elapsed >= Nav_Push_Orbit_Brake_Max_Ms:
+            if abs(gyro_z) <= Nav_Push_Orbit_Stop_Gyro_Th or brake_elapsed >= Nav_Push_Orbit_Brake_Max_Ms:
                 push_orbit_done = True
                 nav_set_state(NAV_STATE_FINE, "orbit_done_refine")
         else:
@@ -975,8 +956,8 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
     if nav_state == NAV_STATE_PUSH_PREPARE:
         nav_ready_for_push = False
         yaw_ref_deg = push_yaw_target
-        yaw_prepare_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg)) if ENABLE_IMU else 0.0
-        if ENABLE_IMU and yaw_prepare_err_abs > Nav_Push_Prepare_Reorient_Yaw:
+        yaw_prepare_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg))
+        if yaw_prepare_err_abs > Nav_Push_Prepare_Reorient_Yaw:
             cam_target_vx = 0.0
             cam_target_vy = 0.0
             nav_push_prepare_ok_since_ms = 0
@@ -1050,7 +1031,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             and abs(cam_error_x) <= Nav_Push_Prepare_Ok_X
             and cam_error_y >= Nav_Push_Prepare_Ok_Y_Min
             and cam_error_y <= Nav_Push_Prepare_Ok_Y_Max
-            and ((not ENABLE_IMU) or (yaw_prepare_err_abs <= Nav_Push_Prepare_Ok_Yaw))
+            and yaw_prepare_err_abs <= Nav_Push_Prepare_Ok_Yaw
             and low_speed
             and (not prepare_braking)
         ):
@@ -1097,7 +1078,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         yaw_ref_deg = push_return_yaw_target
         cam_target_vx = 0.0
         cam_target_vy = 0.0
-        yaw_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg)) if ENABLE_IMU else 0.0
+        yaw_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg))
         if yaw_err_abs <= Nav_Push_Turn_Ok_Yaw:
             if not push_turn_settle:
                 reset_gyro_pid_state()
@@ -1105,12 +1086,11 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         elif push_turn_settle and yaw_err_abs > Nav_Push_Turn_Recover_Yaw:
             push_turn_settle = False
             nav_push_turn_ok_since_ms = 0
-        if (not ENABLE_IMU) or (push_turn_settle and low_speed and abs(gyro_z) <= 8.0):
+        if push_turn_settle and low_speed and abs(gyro_z) <= 8.0:
             if nav_push_turn_ok_since_ms == 0:
                 nav_push_turn_ok_since_ms = now
             elif utime.ticks_diff(now, nav_push_turn_ok_since_ms) >= Nav_Push_Turn_Ok_Ms:
-                if ENABLE_IMU and imu_runtime is not None:
-                    imu_runtime.reset_yaw(push_return_yaw_target)
+                imu_runtime.reset_yaw(push_return_yaw_target)
                 nav_set_state(NAV_STATE_POST_TURN_FORWARD, "push_finish_wait_target")
         else:
             nav_push_turn_ok_since_ms = 0
@@ -1203,15 +1183,13 @@ cam_uart = UART(cfg.CAM_UART_ID, cfg.CAM_UART_BAUD)
 cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
 
 # IMU 运行时初始化
-imu_runtime = None
-if ENABLE_IMU:
-    imu_runtime = IMUYawRuntime(
-        sign=GYRO_SIGN,
-        offset_z=GYRO_OFFSET_Z,
-        scale=GYRO_SCALE,
-        deadband_dps=GYRO_DEADBAND_DPS,
-        tick_period_ms=TICK_PERIOD_MS,
-    )
+imu_runtime = IMUYawRuntime(
+    sign=GYRO_SIGN,
+    offset_z=GYRO_OFFSET_Z,
+    scale=GYRO_SCALE,
+    deadband_dps=GYRO_DEADBAND_DPS,
+    tick_period_ms=TICK_PERIOD_MS,
+)
 
 # ====================== LED 导航显示辅助 ======================
 def update_nav_led_display():
@@ -1233,11 +1211,7 @@ def update_nav_led_display():
 
 
 def calibrate_gyro_before_launch():
-    if (
-        AUTO_CALIBRATE_GYRO_ON_LAUNCH
-        and ENABLE_IMU
-        and imu_runtime is not None
-    ):
+    if AUTO_CALIBRATE_GYRO_ON_LAUNCH:
         pit1.stop()
         try:
             imu_runtime.calibrate_offset(
@@ -1262,10 +1236,7 @@ def check_c9_start():
                 log("[C9] launch in 0.5s")
                 utime.sleep_ms(500)
                 calibrate_gyro_before_launch()
-                if ENABLE_IMU and imu_runtime is not None:
-                    yaw_ref_deg = imu_runtime.read_yaw()
-                else:
-                    yaw_ref_deg = 0.0
+                yaw_ref_deg = imu_runtime.read_yaw()
                 refresh_field_reference()
                 car_started = True
                 auto_start_done = True
@@ -1404,7 +1375,7 @@ def send_master_motion(now):
             wz = last_turn_rate_cmd
     if cam_target_seen():
         flags |= MASTER_MOTION_FLAG_TARGET
-    yaw_deg = imu_runtime.read_yaw() if (ENABLE_IMU and imu_runtime is not None) else 0.0
+    yaw_deg = imu_runtime.read_yaw()
     motion_put_u8(0, 0xA5)
     motion_put_u8(1, 0x5A)
     motion_put_u8(2, 11)
@@ -1433,10 +1404,7 @@ log("[INIT] boot, vision loop waiting")
 log("[INFO] C9=start C8=exit")
 
 # 陀螺仪偏移设置
-if ENABLE_IMU:
-    log("IMU offset preset %.2f" % GYRO_OFFSET_Z)
-else:
-    log("IMU off, speed loop only")
+log("IMU offset preset %.2f" % GYRO_OFFSET_Z)
 
 # ---------------------- Ticker ----------------------
 pit_flag = False
@@ -1449,10 +1417,7 @@ def time_pit_handler(_):
     pit_count += 1
 
 pit1 = ticker(1)
-if ENABLE_IMU:
-    pit1.capture_list(enc_fl, enc_fr, enc_b, imu_runtime.capture_device())
-else:
-    pit1.capture_list(enc_fl, enc_fr, enc_b)
+pit1.capture_list(enc_fl, enc_fr, enc_b, imu_runtime.capture_device())
 pit1.callback(time_pit_handler)
 pit1.start(TICK_PERIOD_MS)
 
@@ -1467,14 +1432,13 @@ pid_fl.init_c()
 pid_fr.init_c()
 pid_b.init_c()
 
-if ENABLE_GYRO_LOOP:
-    gyro_pid = AnglePID()
-    gyro_pid.output = 0.0
-    gyro_pid.err = 0.0
-    gyro_pid.err_last = 0.0
-    gyro_pid.gyro_kp = GYRO_KP
-    gyro_pid.gyro_ki = GYRO_KI
-    gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
+gyro_pid = AnglePID()
+gyro_pid.output = 0.0
+gyro_pid.err = 0.0
+gyro_pid.err_last = 0.0
+gyro_pid.gyro_kp = GYRO_KP
+gyro_pid.gyro_ki = GYRO_KI
+gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
 
 turn_pid = AnglePID()
 turn_pid.output = 0.0
@@ -1509,10 +1473,7 @@ def update_master_motion_estimate(e_fl, e_fr, e_b, gyro_z):
     get_car_spd(master_motion_est, e_fr, e_fl, e_b)
     vx = master_motion_deadband(master_motion_est.speed_x, MASTER_MOTION_LINEAR_DEADBAND)
     vy = master_motion_deadband(master_motion_est.speed_y, MASTER_MOTION_LINEAR_DEADBAND)
-    if ENABLE_IMU:
-        wz = master_motion_deadband(gyro_z, MASTER_MOTION_WZ_DEADBAND)
-    else:
-        wz = master_motion_deadband(master_motion_est.speed_z, MASTER_MOTION_WZ_DEADBAND)
+    wz = master_motion_deadband(gyro_z, MASTER_MOTION_WZ_DEADBAND)
     master_motion_vx += (vx - master_motion_vx) * MASTER_MOTION_FILTER
     master_motion_vy += (vy - master_motion_vy) * MASTER_MOTION_FILTER
     master_motion_wz += (wz - master_motion_wz) * MASTER_MOTION_FILTER
@@ -1531,14 +1492,9 @@ def calc_speed_closed_loop():
 
     # 已发车：执行闭环逻辑
     # 读取陀螺仪数据
-    if ENABLE_IMU:
-        gyro_z = imu_runtime.read_gyro_z()
-        raw_gyro_z = imu_runtime.raw_gyro_z
-        yaw_deg = imu_runtime.read_yaw()
-    else:
-        gyro_z = 0.0
-        raw_gyro_z = 0.0
-        yaw_deg = 0.0
+    gyro_z = imu_runtime.read_gyro_z()
+    raw_gyro_z = imu_runtime.raw_gyro_z
+    yaw_deg = imu_runtime.read_yaw()
     e_fl = enc_fl.get()
     e_fr = enc_fr.get()
     e_b = enc_b.get()
@@ -1579,11 +1535,10 @@ def calc_speed_closed_loop():
         pid_b.delta_tar = 0.0
         pid_b.delta_tar_last = 0.0
         pid_b.delta_ud = 0.0
-        if gyro_pid is not None:
-            gyro_pid.output = 0.0
-            gyro_pid.err = 0.0
-            gyro_pid.err_last = 0.0
-            gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
+        gyro_pid.output = 0.0
+        gyro_pid.err = 0.0
+        gyro_pid.err_last = 0.0
+        gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
         last_pwm_fl = 0
         last_pwm_fr = 0
         last_pwm_b = 0
@@ -1592,7 +1547,7 @@ def calc_speed_closed_loop():
         motor_b.duty(0)
         return None
 
-    yaw_err_deg = -wrapped_yaw_error(yaw_ref_deg, yaw_deg) if ENABLE_IMU else 0.0
+    yaw_err_deg = -wrapped_yaw_error(yaw_ref_deg, yaw_deg)
     if nav_state == NAV_STATE_SEARCH_TURN:
         if yaw_err_deg > Nav_Search_Turn_Ok_Yaw:
             turn_rate_cmd = Nav_Search_Turn_Open_Vz
@@ -1677,38 +1632,26 @@ def calc_speed_closed_loop():
         turn_pid.output = 0.0
         turn_pid.err = 0.0
         turn_pid.err_last = 0.0
-    elif ENABLE_IMU:
+    else:
         turn_rate_cmd = turn_ctrl(turn_pid, yaw_err_deg, 0)
         if nav_state == NAV_STATE_SEARCH_TURN:
             if turn_rate_cmd > Nav_Search_Turn_Max_Rate:
                 turn_rate_cmd = Nav_Search_Turn_Max_Rate
             elif turn_rate_cmd < -Nav_Search_Turn_Max_Rate:
                 turn_rate_cmd = -Nav_Search_Turn_Max_Rate
-    else:
-        turn_pid.output = 0.0
-        turn_pid.err = 0.0
-        turn_pid.err_last = 0.0
-        turn_rate_cmd = 0.0
 
     # 陀螺仪内环（方向控制）
-    if ENABLE_GYRO_LOOP and gyro_pid is not None:
-        if nav_state == NAV_STATE_SEARCH_TURN:
-            gyro_pid.gyro_output_limit = Nav_Search_Turn_Gyro_Limit
-        elif nav_state == NAV_STATE_PUSH_ORIENT:
-            gyro_pid.gyro_output_limit = Nav_Push_Orbit_Gyro_Limit
-        elif nav_state == NAV_STATE_PUSH:
-            gyro_pid.gyro_output_limit = Nav_Push_Execute_Gyro_Limit
-        elif nav_state == NAV_STATE_PUSH_TURN:
-            gyro_pid.gyro_output_limit = Nav_Push_Turn_Gyro_Limit
-        else:
-            gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
-        vz_cmd = gyro_ctrl(gyro_pid, turn_rate_cmd - gyro_z)
+    if nav_state == NAV_STATE_SEARCH_TURN:
+        gyro_pid.gyro_output_limit = Nav_Search_Turn_Gyro_Limit
+    elif nav_state == NAV_STATE_PUSH_ORIENT:
+        gyro_pid.gyro_output_limit = Nav_Push_Orbit_Gyro_Limit
+    elif nav_state == NAV_STATE_PUSH:
+        gyro_pid.gyro_output_limit = Nav_Push_Execute_Gyro_Limit
+    elif nav_state == NAV_STATE_PUSH_TURN:
+        gyro_pid.gyro_output_limit = Nav_Push_Turn_Gyro_Limit
     else:
-        if gyro_pid is not None:
-            gyro_pid.output = 0.0
-            gyro_pid.err = 0.0
-            gyro_pid.err_last = 0.0
-        vz_cmd = turn_rate_cmd
+        gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
+    vz_cmd = gyro_ctrl(gyro_pid, turn_rate_cmd - gyro_z)
     move_cmd.tar_spd_x = cam_target_vx
     move_cmd.tar_spd_y = cam_target_vy
     move_cmd.tar_spd_z = vz_cmd
@@ -1777,10 +1720,7 @@ try:
         )
         if vision_ready:
             calibrate_gyro_before_launch()
-            if ENABLE_IMU and imu_runtime is not None:
-                yaw_ref_deg = imu_runtime.read_yaw()
-            else:
-                yaw_ref_deg = 0.0
+            yaw_ref_deg = imu_runtime.read_yaw()
             refresh_field_reference()
             car_started = True
             auto_start_done = True

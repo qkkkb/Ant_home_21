@@ -137,13 +137,14 @@ Nav_Classify_Timeout_Ms = 1500
 
 Nav_Push_Orient_Ok_Yaw = 5.0    #orbit 目标角度误差小于该值即认为定向完成
 Nav_Push_Orbit_Skip_Yaw = 15.0
+Nav_Push_Orbit_Opposite_Yaw = 165.0
 Nav_Push_Orient_Max_Ms = 15000
 Nav_Push_Orbit_Slow_Yaw = 40.0
 Nav_Push_Orbit_Fast_Vy = 4.5
 Nav_Push_Orbit_Fast_Rate = 75.0
-Nav_Push_Orbit_Slow_Rate = 35.0
+Nav_Push_Orbit_Slow_Rate = 25.0
 Nav_Push_Orbit_Gyro_Limit = 10.0
-Nav_Push_Orbit_Radius_Base = 1.45   #orbit 基础半径系数，实际轨迹半径=该系数 * 车轮轴距；如果轨迹过大或过小可以调整该值
+Nav_Push_Orbit_Radius_Base = 1.90   #orbit 基础半径系数，实际轨迹半径=该系数 * 车轮轴距；如果轨迹过大或过小可以调整该值
 Nav_Push_Orbit_Radius_Gain = 0.01
 Nav_Push_Orbit_Stop_Gyro_Th = 3.0   #orbit 过程中如果陀螺仪读数小于该值则认为已经接近目标角度，可以停止转向加速前进
 Nav_Push_Orbit_Brake_Max_Ms = 1000
@@ -170,11 +171,11 @@ Nav_Push_Execute_Gyro_Limit = 12.0
 Nav_Push_Line_Lost_Ms = 150
 Nav_Push_Line_Extra_Ms = 180
 Nav_Push_Back_Speed = 10
-Nav_Push_Back_Ms = 2500
-Nav_Push_Turn_Slow_Yaw = 35.0
-Nav_Push_Turn_Fast_Rate = 170.0
-Nav_Push_Turn_Slow_Rate = 55.0
-Nav_Push_Turn_Gyro_Limit = 16.0
+Nav_Push_Back_Ms = 4000
+Nav_Push_Turn_Slow_Yaw = 75.0
+Nav_Push_Turn_Fast_Rate = 100.0
+Nav_Push_Turn_Slow_Rate = 35.0
+Nav_Push_Turn_Gyro_Limit = 8.0
 Nav_Push_Turn_Ok_Yaw = 6.0
 Nav_Push_Turn_Recover_Yaw = 12.0
 Nav_Push_Turn_Ok_Ms = 150
@@ -903,7 +904,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 push_orbit_vy_sign = 0
             else:
                 push_orbit_dir = -1
-                if push_orbit_target_delta < 179.0 and orbit_yaw_err >= 0.0:
+                if push_orbit_target_delta < Nav_Push_Orbit_Opposite_Yaw and orbit_yaw_err >= 0.0:
                     push_orbit_dir = 1
                 push_orbit_vy_sign = -push_orbit_dir
             push_orbit_progress_deg = 0.0

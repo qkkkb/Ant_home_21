@@ -396,46 +396,41 @@ def orbit_close_lateral_limit(error_y):
     )
 
 
-def push_forward_ff_scale(error_y):
+def push_ff_scale(error_y, error_x, now):
     if error_y <= -Follow_Forward_Deadband:
-        return 0.0
-    if error_y <= 0:
-        return Follow_Push_Feedforward_Min_Scale * (
+        scale = 0.0
+    elif error_y <= 0:
+        scale = Follow_Push_Feedforward_Min_Scale * (
             (error_y + Follow_Forward_Deadband) / Follow_Forward_Deadband
         )
-    if error_y <= Follow_Forward_Deadband:
-        return Follow_Push_Feedforward_Min_Scale
-    if error_y >= Follow_Push_Feedforward_Fade_Error:
-        return 1.0
-    return Follow_Push_Feedforward_Min_Scale + (
-        (error_y - Follow_Forward_Deadband)
-        * (1.0 - Follow_Push_Feedforward_Min_Scale)
-        / (Follow_Push_Feedforward_Fade_Error - Follow_Forward_Deadband)
-    )
+    elif error_y <= Follow_Forward_Deadband:
+        scale = Follow_Push_Feedforward_Min_Scale
+    elif error_y >= Follow_Push_Feedforward_Fade_Error:
+        scale = 1.0
+    else:
+        scale = Follow_Push_Feedforward_Min_Scale + (
+            (error_y - Follow_Forward_Deadband)
+            * (1.0 - Follow_Push_Feedforward_Min_Scale)
+            / (Follow_Push_Feedforward_Fade_Error - Follow_Forward_Deadband)
+        )
 
-
-def push_lateral_ff_scale(error_x):
     err_abs = abs(error_x)
-    if err_abs <= Follow_Lateral_Deadband:
-        return 1.0
     if err_abs >= Follow_Push_Lateral_Ff_Fade_Error:
-        return Follow_Push_Lateral_Ff_Min_Scale
-    return 1.0 - (
-        (err_abs - Follow_Lateral_Deadband)
-        * (1.0 - Follow_Push_Lateral_Ff_Min_Scale)
-        / (Follow_Push_Lateral_Ff_Fade_Error - Follow_Lateral_Deadband)
-    )
+        scale *= Follow_Push_Lateral_Ff_Min_Scale
+    elif err_abs > Follow_Lateral_Deadband:
+        scale *= 1.0 - (
+            (err_abs - Follow_Lateral_Deadband)
+            * (1.0 - Follow_Push_Lateral_Ff_Min_Scale)
+            / (Follow_Push_Lateral_Ff_Fade_Error - Follow_Lateral_Deadband)
+        )
 
-
-def push_enter_soft_scale(now):
-    if Follow_Push_Enter_Soft_Ms <= 0 or push_enter_ms == 0:
-        return 1.0
-    elapsed = utime.ticks_diff(now, push_enter_ms)
-    if elapsed <= 0:
-        return 0.0
-    if elapsed >= Follow_Push_Enter_Soft_Ms:
-        return 1.0
-    return elapsed / Follow_Push_Enter_Soft_Ms
+    if Follow_Push_Enter_Soft_Ms > 0 and push_enter_ms != 0:
+        elapsed = utime.ticks_diff(now, push_enter_ms)
+        if elapsed <= 0:
+            return 0.0
+        if elapsed < Follow_Push_Enter_Soft_Ms:
+            scale *= elapsed / Follow_Push_Enter_Soft_Ms
+    return scale
 
 
 def gyro_limit_for_turn(turn_rate_cmd, priority=False, spin_priority=False):
@@ -1228,11 +1223,7 @@ def update_follow_targets(yaw_deg, gyro_z):
         target_lost_since_ms = 0
         use_motion_feedforward = fresh_motion
         if push_mode_active and ff_vx > 0.0:
-            ff_vx *= (
-                push_forward_ff_scale(cam_error_y)
-                * push_lateral_ff_scale(cam_error_x)
-                * push_enter_soft_scale(now)
-            )
+            ff_vx *= push_ff_scale(cam_error_y, cam_error_x, now)
         orbit_close_guard_active = (
             orbit_mode_active
             and cam_error_y <= -Follow_Forward_Deadband
@@ -1669,10 +1660,26 @@ def coop_flash_rx():
     coop_rx_led_until_ms = utime.ticks_add(utime.ticks_ms(), COOP_LED_PULSE_MS)
 
 
-def wireless_tune_log(snap):
+def wireless_tune_log(
+    e_fl,
+    e_fr,
+    e_b,
+    t_fl,
+    t_fr,
+    t_b,
+    u_fl,
+    u_fr,
+    u_b,
+    s_fl,
+    s_fr,
+    s_b,
+    gyro_z,
+    gyro_limit,
+    yaw_deg,
+):
     global last_tune_log_ms
 
-    if not FOLLOW_WIRELESS_TUNE_LOG_ENABLE or snap is None:
+    if not FOLLOW_WIRELESS_TUNE_LOG_ENABLE:
         return
     now = utime.ticks_ms()
     if utime.ticks_diff(now, last_tune_log_ms) < FOLLOW_TUNE_LOG_INTERVAL_MS:
@@ -1681,9 +1688,6 @@ def wireless_tune_log(snap):
     try:
         wireless.send_str(
             "FT seen=%d err=%d,%d,%d vis=%.2f,%.2f out=%.2f,%.2f,%.2f "
-            "ff=%.2f,%.2f,%.2f wz=%.2f,%.2f,%.2f "
-            "tar=%.1f,%.1f,%.1f enc=%d,%d,%d pid=%d,%d,%d pwm=%d,%d,%d stop=%d boost=%d ap=%d bp=%d "
-            "g=%.2f glim=%.1f yaw=%.1f mf=%d rx=%d\r\n"
             % (
                 1 if last_follow_seen else 0,
                 cam_error_x,
@@ -1694,31 +1698,47 @@ def wireless_tune_log(snap):
                 cam_target_vx,
                 cam_target_vy,
                 last_vz_cmd,
+            )
+        )
+        wireless.send_str(
+            "ff=%.2f,%.2f,%.2f wz=%.2f,%.2f,%.2f "
+            % (
                 last_ff_vx,
                 last_ff_vy,
                 last_ff_wz,
                 last_ff_wz,
                 last_turn_rate_cmd,
                 last_vz_cmd,
-                snap["tar_fl"],
-                snap["tar_fr"],
-                snap["tar_b"],
-                int(snap["enc_fl"]),
-                int(snap["enc_fr"]),
-                int(snap["enc_b"]),
-                int(snap["pid_fl"]),
-                int(snap["pid_fr"]),
-                int(snap["pid_b"]),
-                int(snap["pwm_fl"]),
-                int(snap["pwm_fr"]),
-                int(snap["pwm_b"]),
-                int(snap["hard_stop"]),
-                int(snap["stall_boost"]),
+            )
+        )
+        wireless.send_str(
+            "tar=%.1f,%.1f,%.1f enc=%d,%d,%d pid=%d,%d,%d "
+            % (
+                t_fl,
+                t_fr,
+                t_b,
+                int(e_fl),
+                int(e_fr),
+                int(e_b),
+                int(u_fl),
+                int(u_fr),
+                int(u_b),
+            )
+        )
+        wireless.send_str(
+            "pwm=%d,%d,%d stop=%d boost=%d ap=%d bp=%d "
+            "g=%.2f glim=%.1f yaw=%.1f mf=%d rx=%d\r\n"
+            % (
+                int(s_fl),
+                int(s_fr),
+                int(s_b),
+                1 if last_hard_stop else 0,
+                1 if last_stall_boost else 0,
                 1 if last_angle_priority_active else 0,
                 1 if last_back_priority_active else 0,
-                snap["gyro_z"],
-                snap["gyro_limit"],
-                snap["yaw_deg"],
+                gyro_z,
+                gyro_limit,
+                yaw_deg,
                 int(master_flags),
                 1 if master_motion_rx_fresh() else 0,
             )
@@ -1797,11 +1817,9 @@ def calc_speed_closed_loop():
 
     if ENABLE_IMU:
         gyro_z = imu_runtime.read_gyro_z()
-        raw_gyro_z = imu_runtime.raw_gyro_z
         yaw_deg = imu_runtime.read_yaw()
     else:
         gyro_z = 0.0
-        raw_gyro_z = 0.0
         yaw_deg = 0.0
 
     vz_cmd = update_follow_targets(yaw_deg, gyro_z)
@@ -1837,28 +1855,24 @@ def calc_speed_closed_loop():
             u_fl, u_fr, u_b, t_fl, t_fr, t_b, last_stall_boost
         )
 
-    return {
-        "enc_fl": e_fl,
-        "enc_fr": e_fr,
-        "enc_b": e_b,
-        "tar_fl": t_fl,
-        "tar_fr": t_fr,
-        "tar_b": t_b,
-        "pid_fl": u_fl,
-        "pid_fr": u_fr,
-        "pid_b": u_b,
-        "pwm_fl": s_fl,
-        "pwm_fr": s_fr,
-        "pwm_b": s_b,
-        "hard_stop": 1 if last_hard_stop else 0,
-        "stall_boost": 1 if last_stall_boost else 0,
-        "raw_gyro_z": raw_gyro_z,
-        "gyro_z": gyro_z,
-        "gyro_limit": gyro_pid.gyro_output_limit if gyro_pid is not None else 0.0,
-        "yaw_deg": yaw_deg,
-        "turn_rate_cmd": last_turn_rate_cmd,
-        "vz_cmd": last_vz_cmd,
-    }
+    if FOLLOW_WIRELESS_TUNE_LOG_ENABLE:
+        wireless_tune_log(
+            e_fl,
+            e_fr,
+            e_b,
+            t_fl,
+            t_fr,
+            t_b,
+            u_fl,
+            u_fr,
+            u_b,
+            s_fl,
+            s_fr,
+            s_b,
+            gyro_z,
+            gyro_pid.gyro_output_limit if gyro_pid is not None else 0.0,
+            yaw_deg,
+        )
 
 
 key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
@@ -1932,12 +1946,9 @@ try:
         if (not car_started) and cam_target_seen():
             start_follow("signal")
 
-        snap = None
         if pit_flag:
             pit_flag = False
-            snap = calc_speed_closed_loop()
-            if FOLLOW_WIRELESS_TUNE_LOG_ENABLE:
-                wireless_tune_log(snap)
+            calc_speed_closed_loop()
 
         if utime.ticks_diff(now, last_status_ms) >= 1000:
             led.toggle()

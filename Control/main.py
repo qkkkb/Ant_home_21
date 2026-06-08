@@ -60,7 +60,6 @@ ENABLE_IMU = ENABLE_GYRO_LOOP
 
 # 调试与退出配置
 GC_DIV = 50
-FORCE_MOTOR_OFF = False  # 调试开关：True 时程序继续运行，但三个电机始终断输出
 DEBUG_LOG_ENABLE = True
 DEBUG_LOG_PERIOD_MS = 500
 
@@ -1620,13 +1619,7 @@ def calc_speed_closed_loop():
         u_fl = speed_ctrl(pid_fl, e_fl, t_fl)
         u_fr = speed_ctrl(pid_fr, e_fr, t_fr)
         u_b = speed_ctrl(pid_b, e_b, t_b)
-        if FORCE_MOTOR_OFF:
-            set_three_pwm_smooth(0, 0, 0)
-            s_fl = 0
-            s_fr = 0
-            s_b = 0
-        else:
-            s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
+        s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
         now_log = utime.ticks_ms()
         if DEBUG_LOG_ENABLE and utime.ticks_diff(now_log, debug_log_last_ms) >= DEBUG_LOG_PERIOD_MS:
             debug_log_last_ms = now_log
@@ -1741,13 +1734,7 @@ def calc_speed_closed_loop():
     u_b = speed_ctrl(pid_b, e_b, t_b)
 
     # PWM 平滑输出
-    if FORCE_MOTOR_OFF:
-        set_three_pwm_smooth(0, 0, 0)
-        s_fl = 0
-        s_fr = 0
-        s_b = 0
-    else:
-        s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
+    s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
     now_log = utime.ticks_ms()
     if DEBUG_LOG_ENABLE and utime.ticks_diff(now_log, debug_log_last_ms) >= DEBUG_LOG_PERIOD_MS:
         debug_log_last_ms = now_log
@@ -1772,8 +1759,6 @@ def calc_speed_closed_loop():
     return None
 
 log("speed loop start")
-if FORCE_MOTOR_OFF:
-    log("FORCE_MOTOR_OFF=1")
 
 try:
     while True:

@@ -4,23 +4,10 @@ import utime
 from smartcar import ticker, encoder
 from machine import SPI
 from models import AnglePID, MoveBase, SpeedPID
-from move_base import calc_wheel_spd, get_car_spd
+from move_base import calc_wheel_spd
 import pid as _pid_mod
 import config as cfg
 from hardware import Motor
-from seekfree import WIRELESS_UART
-
-MASTER_MOTION_TX_PERIOD_MS = cfg.MASTER_MOTION_TX_PERIOD_MS
-MASTER_MOTION_FRAME_LEN = 15
-MASTER_MOTION_FLAG_STARTED = 0x01
-MASTER_MOTION_FLAG_TARGET = 0x02
-MASTER_MOTION_FLAG_CLOSED_LOOP = 0x04
-MASTER_MOTION_FLAG_ORBIT = 0x08
-MASTER_MOTION_FLAG_SPIN = 0x10
-MASTER_MOTION_FLAG_PUSH = 0x20
-MASTER_MOTION_FILTER = 0.35
-MASTER_MOTION_LINEAR_DEADBAND = 0.5
-MASTER_MOTION_WZ_DEADBAND = 0.8
 
 # 设置 PID 最大 PWM 值
 _pid_mod.PWM_MAX = cfg.PWM_MAX
@@ -1411,12 +1398,6 @@ enc_fl = encoder(cfg.ENC_FL_A, cfg.ENC_FL_B, cfg.ENC_FL_INVERT)
 enc_fr = encoder(cfg.ENC_FR_A, cfg.ENC_FR_B, cfg.ENC_FR_INVERT)
 enc_b  = encoder(cfg.ENC_B_A,  cfg.ENC_B_B,  cfg.ENC_B_INVERT)
 
-motion_wireless = None
-try:
-    motion_wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
-except Exception:
-    motion_wireless = None
-
 cam_uart = UART(cfg.CAM_UART_ID, cfg.CAM_UART_BAUD)
 cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
 
@@ -1550,91 +1531,8 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
     return s_fl, s_fr, s_b
 
 log("Wireless debug log disabled; master motion broadcast enabled")
-
-motion_tx_buf = bytearray(16)
-motion_seq = 0
-motion_last_tx_ms = 0
-
-
-def motion_next_seq():
-    global motion_seq
-    motion_seq = (motion_seq + 1) & 0xFF
-    if motion_seq == 0:
-        motion_seq = 1
-    return motion_seq
-
-
-def motion_put_u8(idx, value):
-    motion_tx_buf[idx] = int(value) & 0xFF
-
-
-def motion_put_i16(idx, value):
-    value = int(value)
-    if value > 32767:
-        value = 32767
-    elif value < -32768:
-        value = -32768
-    if value < 0:
-        value += 65536
-    motion_tx_buf[idx] = value & 0xFF
-    motion_tx_buf[idx + 1] = (value >> 8) & 0xFF
-
-
-def send_master_motion(now):
-    global motion_last_tx_ms
-
-    if motion_wireless is None:
-        return
-    if utime.ticks_diff(now, motion_last_tx_ms) < MASTER_MOTION_TX_PERIOD_MS:
-        return
-    flags = 0
-    vx = 0.0
-    vy = 0.0
-    wz = 0.0
-    if car_started:
-        flags = MASTER_MOTION_FLAG_STARTED | MASTER_MOTION_FLAG_CLOSED_LOOP
-        vx = master_motion_vx
-        vy = master_motion_vy
-        wz = master_motion_wz
-        if nav_state == NAV_STATE_PUSH_ORIENT:
-            flags |= MASTER_MOTION_FLAG_ORBIT
-            vx = cam_target_vx
-            vy = cam_target_vy
-            wz = last_turn_rate_cmd
-        elif nav_state == NAV_STATE_PUSH:
-            flags |= MASTER_MOTION_FLAG_PUSH
-            vx = cam_target_vx
-            vy = cam_target_vy
-            wz = last_turn_rate_cmd
-        elif nav_state == NAV_STATE_PUSH_TURN:
-            flags |= MASTER_MOTION_FLAG_SPIN
-            vx = cam_target_vx
-            vy = cam_target_vy
-            wz = last_turn_rate_cmd
-    if cam_target_seen():
-        flags |= MASTER_MOTION_FLAG_TARGET
-    yaw_deg = imu_runtime.read_yaw()
-    motion_put_u8(0, 0xA5)
-    motion_put_u8(1, 0x5A)
-    motion_put_u8(2, 11)
-    motion_put_u8(3, 0x19)
-    motion_put_u8(4, motion_next_seq())
-    motion_put_i16(5, vx * 10)
-    motion_put_i16(7, vy * 10)
-    motion_put_i16(9, wz * 10)
-    motion_put_i16(11, yaw_deg * 10)
-    motion_put_u8(13, flags)
-    checksum = 0
-    i = 2
-    while i < 14:
-        checksum = (checksum + motion_tx_buf[i]) & 0xFF
-        i += 1
-    motion_put_u8(14, checksum)
-    try:
-        motion_wireless.send_bytearray(motion_tx_buf, MASTER_MOTION_FRAME_LEN)
-        motion_last_tx_ms = now
-    except Exception:
-        pass
+import coop_master
+coop_master.init()
 
 # ====================== 初始化 LED 显示 ======================
 update_nav_led_display()
@@ -1661,7 +1559,6 @@ pit1.start(TICK_PERIOD_MS)
 
 # ---------------------- Controller state ----------------------
 move_cmd = MoveBase()
-master_motion_est = MoveBase()
 
 pid_fl = SpeedPID()
 pid_fr = SpeedPID()
@@ -1692,29 +1589,9 @@ last_status_ms = start_time
 loop_count = 0
 last_vz_cmd = 0.0
 last_turn_rate_cmd = 0.0
-master_motion_vx = 0.0
-master_motion_vy = 0.0
-master_motion_wz = 0.0
 yaw_ref_deg = 0.0
 debug_log_last_ms = start_time
 
-
-def master_motion_deadband(value, deadband):
-    if -deadband < value < deadband:
-        return 0.0
-    return value
-
-
-def update_master_motion_estimate(e_fl, e_fr, e_b, gyro_z):
-    global master_motion_vx, master_motion_vy, master_motion_wz
-
-    get_car_spd(master_motion_est, e_fr, e_fl, e_b)
-    vx = master_motion_deadband(master_motion_est.speed_x, MASTER_MOTION_LINEAR_DEADBAND)
-    vy = master_motion_deadband(master_motion_est.speed_y, MASTER_MOTION_LINEAR_DEADBAND)
-    wz = master_motion_deadband(gyro_z, MASTER_MOTION_WZ_DEADBAND)
-    master_motion_vx += (vx - master_motion_vx) * MASTER_MOTION_FILTER
-    master_motion_vy += (vy - master_motion_vy) * MASTER_MOTION_FILTER
-    master_motion_wz += (wz - master_motion_wz) * MASTER_MOTION_FILTER
 
 # ====================== 速度闭环主函数（含发车判断） ======================
 def calc_speed_closed_loop():
@@ -1736,7 +1613,7 @@ def calc_speed_closed_loop():
     e_fl = enc_fl.get()
     e_fr = enc_fr.get()
     e_b = enc_b.get()
-    update_master_motion_estimate(e_fl, e_fr, e_b, gyro_z)
+    coop_master.update_state(e_fl, e_fr, e_b, gyro_z)
     low_speed = abs(e_fl) <= Nav_Low_Speed_Th and abs(e_fr) <= Nav_Low_Speed_Th and abs(e_b) <= Nav_Low_Speed_Th
     update_nav_state_and_targets(yaw_deg, low_speed, gyro_z)
 
@@ -1969,7 +1846,16 @@ try:
         if pit_flag:
             pit_flag = False
             calc_speed_closed_loop()
-        send_master_motion(now)
+        coop_master.send_if_due(
+            now,
+            car_started,
+            nav_state_code(nav_state),
+            cam_target_seen(),
+            imu_runtime.read_yaw(),
+            cam_target_vx,
+            cam_target_vy,
+            last_turn_rate_cmd,
+        )
 
         if utime.ticks_diff(now, last_status_ms) >= 1000:
             led.toggle()

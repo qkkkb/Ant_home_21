@@ -10,8 +10,8 @@
 2. `main.py` 不轮询协同帧，也不发送目标锁定、ready、push start/stop 等协同消息。
 3. 主车完成目标对准和推送准备后，直接从 `PUSH_PREPARE` 进入 `PUSH_EXECUTE`，不再进入等待从车的流程。
 4. 推完 `Nav_Object_Total` 个目标后，主车进入回库流程：朝场地左方找黄线、后退、顺时针转 90 度，再后退到下方黄线后停车。
-5. `main.py` 发送 `MSG_MASTER_MOTION` 主车运动反馈广播，用于从车跟随；无线调试日志保持关闭以节省内存。
-6. `coop_protocol.py`、`controller_coop.py` 和 `examples/coop_demo.py` 保留，作为后续恢复双车协同时的参考代码，当前主流程不调用完整协同状态机。
+5. `main.py` 仍保留主车运动反馈广播调用链，用于从车跟随；具体打包与发送逻辑已移到 `coop_master.py`，无线调试日志保持关闭以节省内存。
+6. `coop_protocol.py`、`controller_coop.py`、`coop_master.py` 和 `examples/coop_demo.py` 保留，作为后续恢复双车协同时的参考代码，当前主流程不调用完整协同状态机。
 
 视觉通信仍然启用：主车通过 `CAM_UART_ID`/`CAM_UART_BAUD` 与视觉端交换搜索、粗对准、细对准、分类和黄线状态。
 
@@ -25,7 +25,7 @@ imu_runtime.py             IMU yaw/gyro rate 运行时
 pid.py                     速度环、陀螺仪环、转向环 PID 对象
 move_base.py               三轮底盘运动学映射
 uart_protocol.py           旧版 ART 串口协议辅助函数
-coop_protocol.py           双车协同帧协议，当前主流程暂不发送主车运动反馈帧
+coop_protocol.py           双车协同帧协议，当前主流程主车广播由 coop_master.py 处理
 controller_coop.py         早期双车协同控制器骨架，当前保留但主流程停用
 Test/                      运动、IMU 和调试脚本
 examples/                  示例和适配代码

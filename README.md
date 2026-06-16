@@ -15,7 +15,7 @@ Ant_Home/
 
 ## 模块概览
 
-`Control/` 是主车控制模块。当前真实运行入口主要是 `Control/main.py`，它负责三轮底盘速度闭环、陀螺仪 yaw/gyro rate 控制、ART 视觉串口解析、目标推送/回库状态机、按键启停和主车运动反馈广播。当前 `COOP_ENABLE = False`，主车不恢复完整双车协同状态机，也不等待从车协同；`MSG_MASTER_MOTION` 运动反馈广播保持开启。详细说明见 `Control/README.md`。
+`Control/` 是主车控制模块。当前真实运行入口主要是 `Control/main.py`，它负责三轮底盘速度闭环、陀螺仪 yaw/gyro rate 控制、ART 视觉串口解析、目标推送/回库状态机和按键启停；`Control/coop_master.py` 负责主车运动反馈广播。当前 `COOP_ENABLE = False`，主车不恢复完整双车协同状态机，也不等待从车协同；`MSG_MASTER_MOTION` 运动反馈广播保持开启。详细说明见 `Control/README.md`。
 
 `NO.2/` 保存第二辆车相关程序。其中 `NO.2/main.py` 保留从主车接收运动反馈的链路，便于从车红外视觉按主车实际运动量做跟随控制。
 
@@ -31,7 +31,7 @@ Ant_Home/
 2. 控制端启动文件是否指向预期入口。当前 `Control/boot.py` 中仍有执行 `/flash/JINGZHI.py` 的逻辑，部署前要按实际文件名确认。
 3. 主车视觉端模型路径是否存在，例如 `/sd/detect.tflite` 和 `/sd/classify.tflite`；从车红外视觉不依赖 TFLite 模型。
 4. 主车、从车与对应视觉端 UART 波特率是否一致，当前控制端相机 UART 默认是 `9600`。
-5. 当前主车 `Control/config.py` 中 `COOP_ENABLE = False`，完整双车协同链路停用；`Control/main.py` 保持 `MSG_MASTER_MOTION` 运动反馈广播开启，并关闭无线调试日志。若启用从车红外视觉跟随，需要确认主从车 `COOP_WIRELESS_BAUD` 与 `MSG_MASTER_MOTION` 协议一致。
+5. 当前主车 `Control/config.py` 中 `COOP_ENABLE = False`，完整双车协同链路停用；`Control/coop_master.py` 保持 `MSG_MASTER_MOTION` 运动反馈广播开启，并关闭无线调试日志。若启用从车红外视觉跟随，需要确认主从车 `COOP_WIRELESS_BAUD` 与 `MSG_MASTER_MOTION` 协议一致。
 
 ## 开发与文档约束
 

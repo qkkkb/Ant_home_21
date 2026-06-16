@@ -75,6 +75,11 @@ NAV_STATE_PUSH = "PUSH_EXECUTE"
 NAV_STATE_PUSH_BACK = "PUSH_FINISH_BACK"
 NAV_STATE_PUSH_TURN = "PUSH_FINISH_TURN"
 NAV_STATE_POST_TURN_FORWARD = "POST_TURN_FORWARD"
+NAV_STATE_RETURN_LEFT = "RETURN_LEFT"
+NAV_STATE_RETURN_BACK = "RETURN_BACK"
+NAV_STATE_RETURN_TURN = "RETURN_TURN"
+NAV_STATE_RETURN_FINAL = "RETURN_FINAL"
+NAV_STATE_RETURN_DONE = "RETURN_DONE"
 ART_MODE_SEARCH_CMD = b"SEARCH\n"
 ART_MODE_COARSE_CMD = b"COARSE\n"
 ART_MODE_FINE_CMD = b"FINE\n"
@@ -176,6 +181,23 @@ Nav_Push_Turn_Forced_Dir = 1
 Nav_Post_Turn_No_Target_Ms = 100
 Nav_Post_Turn_Forward_Ms = 1500
 Nav_Post_Turn_Forward_Speed = 9
+Nav_Object_Total = 3
+Nav_Return_Left_Speed = 9
+Nav_Return_Left_Start_Yaw = 10.0
+Nav_Return_Left_Line_Extra_Ms = 160
+Nav_Return_Back_Speed = 8
+Nav_Return_Back_Ms = 700
+Nav_Return_Turn_Dir = 1
+Nav_Return_Turn_Slow_Yaw = 55.0
+Nav_Return_Turn_Fast_Rate = 75.0
+Nav_Return_Turn_Slow_Rate = 28.0
+Nav_Return_Turn_Gyro_Limit = 7.0
+Nav_Return_Turn_Ok_Yaw = 6.0
+Nav_Return_Turn_Recover_Yaw = 12.0
+Nav_Return_Turn_Ok_Ms = 120
+Nav_Return_Final_Back_Speed = 7
+Nav_Return_Final_Line_Extra_Ms = 120
+Nav_Return_Max_Ms = 6000
 
 # ====================== 全局状态变量 ======================
 # 小车启动标志：False=上电静止，True=已启动
@@ -241,6 +263,7 @@ line_crossed = False
 push_line_seen_once = False
 push_line_lost_since_ms = 0
 push_line_extra_since_ms = 0
+pushed_object_count = 0
 
 def wrapped_yaw_error(ref_deg, now_deg):
     err = now_deg - ref_deg
@@ -353,6 +376,16 @@ def get_push_turn_rate(yaw_err_abs):
     return Nav_Push_Turn_Slow_Rate + (Nav_Push_Turn_Fast_Rate - Nav_Push_Turn_Slow_Rate) * ratio
 
 
+def get_return_turn_rate(yaw_err_abs):
+    if yaw_err_abs <= Nav_Return_Turn_Ok_Yaw:
+        return 0.0
+    if yaw_err_abs > Nav_Return_Turn_Slow_Yaw:
+        return Nav_Return_Turn_Fast_Rate
+    span = Nav_Return_Turn_Slow_Yaw - Nav_Return_Turn_Ok_Yaw
+    ratio = (yaw_err_abs - Nav_Return_Turn_Ok_Yaw) / span
+    return Nav_Return_Turn_Slow_Rate + (Nav_Return_Turn_Fast_Rate - Nav_Return_Turn_Slow_Rate) * ratio
+
+
 def update_push_orbit_radius(err_y):
     global push_orbit_radius_ratio
 
@@ -396,6 +429,8 @@ def cam_target_seen():
 def send_art_mode_command(new_state):
     if new_state in (NAV_STATE_SEARCH, NAV_STATE_SEARCH_TURN, NAV_STATE_POST_TURN_FORWARD):
         cam_uart.write(ART_MODE_SEARCH_CMD)
+    elif new_state in (NAV_STATE_RETURN_LEFT, NAV_STATE_RETURN_FINAL):
+        cam_uart.write(ART_MODE_LINE_CMD)
     elif new_state == NAV_STATE_COARSE:
         cam_uart.write(ART_MODE_COARSE_CMD)
     elif new_state == NAV_STATE_FINE:
@@ -408,7 +443,7 @@ def send_art_mode_command(new_state):
         cam_uart.write(ART_MODE_FINE_CMD)
     elif new_state == NAV_STATE_PUSH:
         cam_uart.write(ART_MODE_LINE_CMD)
-    elif new_state in (NAV_STATE_PUSH_BACK, NAV_STATE_PUSH_TURN):
+    elif new_state in (NAV_STATE_PUSH_BACK, NAV_STATE_PUSH_TURN, NAV_STATE_RETURN_BACK, NAV_STATE_RETURN_TURN, NAV_STATE_RETURN_DONE):
         cam_uart.write(ART_MODE_IDLE_CMD)
 
 
@@ -435,6 +470,16 @@ def nav_state_code(state):
         return 9
     if state == NAV_STATE_POST_TURN_FORWARD:
         return 10
+    if state == NAV_STATE_RETURN_LEFT:
+        return 11
+    if state == NAV_STATE_RETURN_BACK:
+        return 12
+    if state == NAV_STATE_RETURN_TURN:
+        return 13
+    if state == NAV_STATE_RETURN_FINAL:
+        return 14
+    if state == NAV_STATE_RETURN_DONE:
+        return 15
     return -1
 
 
@@ -453,6 +498,7 @@ def nav_set_state(new_state, reason="", force=False):
     global push_orbit_reached, push_orbit_progress_deg, push_orbit_last_ms
     global push_orbit_brake_since_ms
     global last_pwm_fl, last_pwm_fr, last_pwm_b
+    global pushed_object_count
 
     if nav_state == new_state and (not force):
         return
@@ -488,10 +534,20 @@ def nav_set_state(new_state, reason="", force=False):
         NAV_STATE_PUSH_CLASSIFY,
         NAV_STATE_PUSH_PREPARE,
         NAV_STATE_PUSH,
+        NAV_STATE_RETURN_LEFT,
+        NAV_STATE_RETURN_FINAL,
     ):
         clear_cam_target_state()
 
-    if new_state in (NAV_STATE_SEARCH, NAV_STATE_SEARCH_TURN, NAV_STATE_POST_TURN_FORWARD, NAV_STATE_PUSH, NAV_STATE_PUSH_CLASSIFY):
+    if new_state in (
+        NAV_STATE_SEARCH,
+        NAV_STATE_SEARCH_TURN,
+        NAV_STATE_POST_TURN_FORWARD,
+        NAV_STATE_PUSH,
+        NAV_STATE_PUSH_CLASSIFY,
+        NAV_STATE_RETURN_LEFT,
+        NAV_STATE_RETURN_FINAL,
+    ):
         line_crossed = False
         push_line_seen_once = False
         push_line_lost_since_ms = 0
@@ -522,14 +578,37 @@ def nav_set_state(new_state, reason="", force=False):
         elif cam_error_y < -Nav_Forward_Deadband:
             nav_fine_last_y_sign = -1
 
-    if new_state in (NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH, NAV_STATE_PUSH_TURN, NAV_STATE_POST_TURN_FORWARD):
+    if new_state == NAV_STATE_PUSH_BACK:
+        pushed_object_count += 1
+        log("[NAV] pushed_count=%d/%d" % (pushed_object_count, Nav_Object_Total))
+
+    if new_state in (
+        NAV_STATE_PUSH_PREPARE,
+        NAV_STATE_PUSH,
+        NAV_STATE_PUSH_TURN,
+        NAV_STATE_POST_TURN_FORWARD,
+        NAV_STATE_RETURN_LEFT,
+        NAV_STATE_RETURN_BACK,
+        NAV_STATE_RETURN_TURN,
+        NAV_STATE_RETURN_FINAL,
+        NAV_STATE_RETURN_DONE,
+    ):
         reset_gyro_pid_state()
-    if new_state in (NAV_STATE_PUSH, NAV_STATE_PUSH_TURN, NAV_STATE_POST_TURN_FORWARD):
+    if new_state in (
+        NAV_STATE_PUSH,
+        NAV_STATE_PUSH_TURN,
+        NAV_STATE_POST_TURN_FORWARD,
+        NAV_STATE_RETURN_LEFT,
+        NAV_STATE_RETURN_BACK,
+        NAV_STATE_RETURN_TURN,
+        NAV_STATE_RETURN_FINAL,
+        NAV_STATE_RETURN_DONE,
+    ):
         pid_fl.output = pid_fr.output = pid_b.output = 0.0
         pid_fl.tar_spd_last = pid_fr.tar_spd_last = pid_b.tar_spd_last = 0.0
         pid_fl.delta_ud = pid_fr.delta_ud = pid_b.delta_ud = 0.0
         last_pwm_fl = last_pwm_fr = last_pwm_b = 0
-    if new_state == NAV_STATE_POST_TURN_FORWARD:
+    if new_state in (NAV_STATE_POST_TURN_FORWARD, NAV_STATE_RETURN_DONE):
         motor_fl.duty(0)
         motor_fr.duty(0)
         motor_b.duty(0)
@@ -550,6 +629,14 @@ def nav_set_state(new_state, reason="", force=False):
         yaw_ref_deg = push_return_yaw_target
     elif new_state == NAV_STATE_POST_TURN_FORWARD:
         yaw_ref_deg = push_return_yaw_target
+    elif new_state == NAV_STATE_RETURN_LEFT:
+        yaw_ref_deg = field_left_yaw
+    elif new_state == NAV_STATE_RETURN_BACK:
+        yaw_ref_deg = field_left_yaw
+    elif new_state == NAV_STATE_RETURN_TURN:
+        yaw_ref_deg = field_up_yaw
+    elif new_state in (NAV_STATE_RETURN_FINAL, NAV_STATE_RETURN_DONE):
+        yaw_ref_deg = field_up_yaw
 
     update_nav_led_display()
     send_art_mode_command(new_state)
@@ -1091,9 +1178,90 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 nav_push_turn_ok_since_ms = now
             elif utime.ticks_diff(now, nav_push_turn_ok_since_ms) >= Nav_Push_Turn_Ok_Ms:
                 imu_runtime.reset_yaw(push_return_yaw_target)
-                nav_set_state(NAV_STATE_POST_TURN_FORWARD, "push_finish_wait_target")
+                if pushed_object_count >= Nav_Object_Total:
+                    nav_set_state(NAV_STATE_RETURN_LEFT, "all_objects_done")
+                else:
+                    nav_set_state(NAV_STATE_POST_TURN_FORWARD, "push_finish_wait_target")
         else:
             nav_push_turn_ok_since_ms = 0
+        return
+
+    if nav_state == NAV_STATE_RETURN_LEFT:
+        nav_ready_for_push = False
+        yaw_ref_deg = field_left_yaw
+        cam_target_vy = 0.0
+        if abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg)) > Nav_Return_Left_Start_Yaw:
+            cam_target_vx = 0.0
+        else:
+            cam_target_vx = Nav_Return_Left_Speed
+            if line_crossed:
+                if nav_push_prepare_ok_since_ms == 0:
+                    nav_push_prepare_ok_since_ms = now
+                elif utime.ticks_diff(now, nav_push_prepare_ok_since_ms) >= Nav_Return_Left_Line_Extra_Ms:
+                    nav_set_state(NAV_STATE_RETURN_BACK, "return_left_line_seen")
+            else:
+                nav_push_prepare_ok_since_ms = 0
+        if utime.ticks_diff(now, nav_transition_ms) >= Nav_Return_Max_Ms:
+            nav_set_state(NAV_STATE_RETURN_DONE, "return_left_timeout")
+        return
+
+    if nav_state == NAV_STATE_RETURN_BACK:
+        nav_ready_for_push = False
+        yaw_ref_deg = field_left_yaw
+        cam_target_vx = -Nav_Return_Back_Speed
+        cam_target_vy = 0.0
+        if utime.ticks_diff(now, nav_transition_ms) >= Nav_Return_Back_Ms:
+            nav_set_state(NAV_STATE_RETURN_TURN, "return_back_done")
+        return
+
+    if nav_state == NAV_STATE_RETURN_TURN:
+        nav_ready_for_push = False
+        yaw_ref_deg = field_up_yaw
+        cam_target_vx = 0.0
+        cam_target_vy = 0.0
+        yaw_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg))
+        if yaw_err_abs <= Nav_Return_Turn_Ok_Yaw:
+            if not push_turn_settle:
+                reset_gyro_pid_state()
+            push_turn_settle = True
+        elif push_turn_settle and yaw_err_abs > Nav_Return_Turn_Recover_Yaw:
+            push_turn_settle = False
+            nav_push_turn_ok_since_ms = 0
+        if push_turn_settle and low_speed and abs(gyro_z) <= 8.0:
+            if nav_push_turn_ok_since_ms == 0:
+                nav_push_turn_ok_since_ms = now
+            elif utime.ticks_diff(now, nav_push_turn_ok_since_ms) >= Nav_Return_Turn_Ok_Ms:
+                imu_runtime.reset_yaw(field_up_yaw)
+                nav_set_state(NAV_STATE_RETURN_FINAL, "return_turn_done")
+        else:
+            nav_push_turn_ok_since_ms = 0
+        if utime.ticks_diff(now, nav_transition_ms) >= Nav_Return_Max_Ms:
+            nav_set_state(NAV_STATE_RETURN_DONE, "return_turn_timeout")
+        return
+
+    if nav_state == NAV_STATE_RETURN_FINAL:
+        nav_ready_for_push = False
+        yaw_ref_deg = field_up_yaw
+        cam_target_vx = -Nav_Return_Final_Back_Speed
+        cam_target_vy = 0.0
+        if line_crossed:
+            if nav_push_prepare_ok_since_ms == 0:
+                nav_push_prepare_ok_since_ms = now
+            elif utime.ticks_diff(now, nav_push_prepare_ok_since_ms) >= Nav_Return_Final_Line_Extra_Ms:
+                nav_set_state(NAV_STATE_RETURN_DONE, "return_final_line_seen")
+        else:
+            nav_push_prepare_ok_since_ms = 0
+        if utime.ticks_diff(now, nav_transition_ms) >= Nav_Return_Max_Ms:
+            nav_set_state(NAV_STATE_RETURN_DONE, "return_final_timeout")
+        return
+
+    if nav_state == NAV_STATE_RETURN_DONE:
+        nav_ready_for_push = False
+        cam_target_vx = 0.0
+        cam_target_vy = 0.0
+        move_cmd.tar_spd_x = 0.0
+        move_cmd.tar_spd_y = 0.0
+        move_cmd.tar_spd_z = 0.0
         return
 
     cam_target_vx = 0.0
@@ -1200,9 +1368,9 @@ def update_nav_led_display():
         straight_value = 1
     elif nav_state == NAV_STATE_POST_TURN_FORWARD:
         straight_value = 1
-    elif nav_state in (NAV_STATE_FINE, NAV_STATE_PUSH_CLASSIFY, NAV_STATE_PUSH_PREPARE):
+    elif nav_state in (NAV_STATE_FINE, NAV_STATE_PUSH_CLASSIFY, NAV_STATE_PUSH_PREPARE, NAV_STATE_RETURN_LEFT, NAV_STATE_RETURN_BACK, NAV_STATE_RETURN_FINAL):
         translate_value = 1
-    elif nav_state in (NAV_STATE_SEARCH_TURN, NAV_STATE_PUSH_ORIENT, NAV_STATE_PUSH, NAV_STATE_PUSH_BACK, NAV_STATE_PUSH_TURN):
+    elif nav_state in (NAV_STATE_SEARCH_TURN, NAV_STATE_PUSH_ORIENT, NAV_STATE_PUSH, NAV_STATE_PUSH_BACK, NAV_STATE_PUSH_TURN, NAV_STATE_RETURN_TURN):
         rotate_value = 1
 
     led_straight.value(straight_value)
@@ -1228,6 +1396,7 @@ def calibrate_gyro_before_launch():
 def check_c9_start():
     """处理发车按键，带消抖和延时发车。"""
     global last_c9_state, car_started, auto_start_done, start_time, yaw_ref_deg
+    global pushed_object_count
     current_c9 = key_start.value()
     if current_c9 == 0 and last_c9_state == 1:
         utime.sleep_ms(10)
@@ -1240,6 +1409,7 @@ def check_c9_start():
                 refresh_field_reference()
                 car_started = True
                 auto_start_done = True
+                pushed_object_count = 0
                 start_time = utime.ticks_ms()
                 nav_set_state(NAV_STATE_SEARCH_TURN, "launch_search_turn", force=True)
                 log("[C9] launched, vision loop on")
@@ -1597,6 +1767,15 @@ def calc_speed_closed_loop():
             )
         return None
 
+    if nav_state == NAV_STATE_RETURN_DONE:
+        motor_fl.duty(0)
+        motor_fr.duty(0)
+        motor_b.duty(0)
+        last_pwm_fl = 0
+        last_pwm_fr = 0
+        last_pwm_b = 0
+        return None
+
     gyro_rate_mode = False
     if nav_state == NAV_STATE_PUSH_ORIENT:
         orbit_remaining = max(0.0, push_orbit_target_delta - push_orbit_progress_deg)
@@ -1627,6 +1806,18 @@ def calc_speed_closed_loop():
             else:
                 turn_rate_cmd = 0.0
         gyro_rate_mode = True
+    elif nav_state == NAV_STATE_RETURN_TURN:
+        return_turn_remaining = yaw_delta_in_turn_dir(
+            field_up_yaw,
+            yaw_deg,
+            Nav_Return_Turn_Dir,
+        )
+        return_turn_rate_mag = get_return_turn_rate(return_turn_remaining)
+        if return_turn_rate_mag > 0.0:
+            turn_rate_cmd = Nav_Return_Turn_Dir * return_turn_rate_mag
+        else:
+            turn_rate_cmd = 0.0
+        gyro_rate_mode = True
 
     if gyro_rate_mode:
         turn_pid.output = 0.0
@@ -1649,6 +1840,8 @@ def calc_speed_closed_loop():
         gyro_pid.gyro_output_limit = Nav_Push_Execute_Gyro_Limit
     elif nav_state == NAV_STATE_PUSH_TURN:
         gyro_pid.gyro_output_limit = Nav_Push_Turn_Gyro_Limit
+    elif nav_state == NAV_STATE_RETURN_TURN:
+        gyro_pid.gyro_output_limit = Nav_Return_Turn_Gyro_Limit
     else:
         gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
     vz_cmd = gyro_ctrl(gyro_pid, turn_rate_cmd - gyro_z)
@@ -1724,6 +1917,7 @@ try:
             refresh_field_reference()
             car_started = True
             auto_start_done = True
+            pushed_object_count = 0
             start_time = now
             nav_set_state(NAV_STATE_SEARCH_TURN, "vision_launch_search_turn", force=True)
             log("[VISION] first valid target, car_started=1")

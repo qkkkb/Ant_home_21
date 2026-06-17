@@ -16,7 +16,7 @@ LINE_BUF_LEN = 64
 DEFAULT_BODY_SPEED = 3.0
 DEFAULT_ROTATE_SPEED = 2.0
 DEFAULT_RUN_MS = 600
-PWM_PER_SPEED = 1600
+PWM_PER_SPEED = 6000
 LOOP_SLEEP_MS = 5
 STATUS_PERIOD_MS = 1000
 FEEDBACK_PERIOD_MS = 100
@@ -337,9 +337,9 @@ class MoveBasePolarityTest:
                 e_fl,
                 e_fr,
                 e_b,
-                sign_char(e_fl, 1),
-                sign_char(e_fr, 1),
-                sign_char(e_b, 1),
+                sign_char(e_fl, 0),
+                sign_char(e_fr, 0),
+                sign_char(e_b, 0),
             )
         )
 

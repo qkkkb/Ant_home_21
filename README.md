@@ -7,6 +7,7 @@
 ```txt
 Ant_Home/
   Control/    主车控制程序，包含运动闭环、视觉串口、IMU、单车目标推送/回库状态机和测试脚本
+  New structure/  新车部署目录，包含 LSM6DSV16X 入口、运行依赖和电机极性/运动映射无线测试脚本
   NO.2/       第二辆车/从车控制程序，可接收主车运动反馈供红外视觉跟随使用
   Vision/     视觉端程序，包含 OpenMV/ART 目标检测、分类、黄线检测和 IPM 标定脚本
   AGENTS.md   协作、Git、README 和 MicroPython 内存优化约束
@@ -16,6 +17,8 @@ Ant_Home/
 ## 模块概览
 
 `Control/` 是主车控制模块。当前真实运行入口主要是 `Control/main.py`，它负责三轮底盘速度闭环、陀螺仪 yaw/gyro rate 控制、ART 视觉串口解析、目标推送/回库状态机和按键启停；`Control/coop_master.py` 负责主车运动反馈广播。当前 `COOP_ENABLE = False`，主车不恢复完整双车协同状态机，也不等待从车协同；`MSG_MASTER_MOTION` 运动反馈广播保持开启。详细说明见 `Control/README.md`。
+
+`New structure/` 是新车部署用目录。`main_lsm6dsv16x_95.py` 保留基于 `95eb1b3` 的主控逻辑并适配 LSM6DSV16X 陀螺仪运行时；`move_base_polarity_wireless_test.py` 用无线串口发送车体运动或单电机命令，配合 `move_base.calc_wheel_spd()` 校验新车电机极性和运动映射。
 
 `NO.2/` 保存第二辆车相关程序。其中 `NO.2/main.py` 保留从主车接收运动反馈的链路，便于从车红外视觉按主车实际运动量做跟随控制。
 

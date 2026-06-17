@@ -1,4 +1,4 @@
-﻿from machine import Pin, UART
+from machine import Pin, UART
 import gc
 import utime
 from smartcar import ticker, encoder

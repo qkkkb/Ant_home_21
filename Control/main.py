@@ -174,7 +174,7 @@ Nav_Return_Left_Start_Yaw = 10.0
 Nav_Return_Left_Line_Extra_Ms = 160
 Nav_Return_Left_Max_Ms = 10000
 Nav_Return_Back_Speed = 8
-Nav_Return_Back_Ms = 1600
+Nav_Return_Back_Ms = 1300
 Nav_Return_Turn_Dir = 1
 Nav_Return_Turn_Slow_Yaw = 55.0
 Nav_Return_Turn_Fast_Rate = 75.0
@@ -184,7 +184,7 @@ Nav_Return_Turn_Ok_Yaw = 6.0
 Nav_Return_Turn_Recover_Yaw = 12.0
 Nav_Return_Turn_Ok_Ms = 120
 Nav_Return_Final_Back_Speed = 7
-Nav_Return_Final_Line_Extra_Ms = 120
+Nav_Return_Final_Line_Extra_Ms = 60
 Nav_Return_Max_Ms = 6000
 
 # ====================== 全局状态变量 ======================
@@ -753,8 +753,6 @@ def update_return_home(now, yaw_deg, low_speed, gyro_z):
                     push_line_extra_since_ms = now
                 elif utime.ticks_diff(now, push_line_extra_since_ms) >= Nav_Return_Final_Line_Extra_Ms:
                     nav_set_state(NAV_STATE_RETURN_DONE, "return_final_line_crossed")
-        if utime.ticks_diff(now, nav_transition_ms) >= Nav_Return_Max_Ms:
-            nav_set_state(NAV_STATE_RETURN_DONE, "return_final_timeout")
         return
 
     if nav_state == NAV_STATE_RETURN_DONE:

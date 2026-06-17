@@ -168,10 +168,11 @@ Nav_Push_Turn_Forced_Dir = 1
 Nav_Post_Turn_No_Target_Ms = 100
 Nav_Post_Turn_Forward_Ms = 1500
 Nav_Post_Turn_Forward_Speed = 9
-Nav_Object_Total = 3
-Nav_Return_Left_Speed = 9
+Nav_Object_Total = 1
+Nav_Return_Left_Speed = 12
 Nav_Return_Left_Start_Yaw = 10.0
 Nav_Return_Left_Line_Extra_Ms = 160
+Nav_Return_Left_Max_Ms = 10000
 Nav_Return_Back_Speed = 8
 Nav_Return_Back_Ms = 700
 Nav_Return_Turn_Dir = 1
@@ -688,7 +689,7 @@ def update_return_home(now, yaw_deg, low_speed, gyro_z):
                     nav_set_state(NAV_STATE_RETURN_BACK, "return_left_line_seen")
             else:
                 nav_push_prepare_ok_since_ms = 0
-        if utime.ticks_diff(now, nav_transition_ms) >= Nav_Return_Max_Ms:
+        if utime.ticks_diff(now, nav_transition_ms) >= Nav_Return_Left_Max_Ms:
             nav_set_state(NAV_STATE_RETURN_DONE, "return_left_timeout")
         return
 

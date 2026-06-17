@@ -132,6 +132,8 @@ Nav_Push_Orbit_Radius_Gain = 0.004
 Nav_Push_Orbit_Stop_Gyro_Th = 3.0   #orbit 过程中如果陀螺仪读数小于该值则认为已经接近目标角度，可以停止转向加速前进
 Nav_Push_Orbit_Brake_Max_Ms = 1000
 Nav_Push_Prepare_Reorient_Yaw = 10.0
+Nav_Push_Prepare_Hard_Reorient_Yaw = 24.0
+Nav_Push_Prepare_Soft_Scale = 0.45
 Nav_Push_Prepare_Forward_Gain = 0.038
 Nav_Push_Prepare_Lateral_Gain = 0.115
 Nav_Push_Prepare_Forward_Limit = 3.6
@@ -147,7 +149,7 @@ Nav_Push_Prepare_Back_Speed = 4.0
 Nav_Push_Prepare_Ok_X = 4    #准备阶段前进误差小于该值即认为横移准备就绪
 Nav_Push_Prepare_Ok_Y_Min = -8
 Nav_Push_Prepare_Ok_Y_Max = 8  #准备阶段横移误差小于该值即认为前进准备就绪
-Nav_Push_Prepare_Ok_Yaw = 4   #准备阶段定向误差小于该值即认为定向准备就绪
+Nav_Push_Prepare_Ok_Yaw = 6   #准备阶段定向误差小于该值即认为定向准备就绪
 Nav_Push_Prepare_Ok_Ms = 70
 Nav_Push_Execute_Forward_Speed = 6.5    #执行阶段前进速度
 Nav_Push_Execute_Gyro_Limit = 12.0
@@ -514,7 +516,7 @@ def nav_set_state(new_state, reason="", force=False):
 
     if new_state in (NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH, NAV_STATE_PUSH_TURN, NAV_STATE_POST_TURN_FORWARD):
         reset_gyro_pid_state()
-    if new_state in (NAV_STATE_PUSH, NAV_STATE_PUSH_TURN, NAV_STATE_POST_TURN_FORWARD):
+    if new_state in (NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH, NAV_STATE_PUSH_TURN, NAV_STATE_POST_TURN_FORWARD):
         pid_fl.output = pid_fr.output = pid_b.output = 0.0
         pid_fl.tar_spd_last = pid_fr.tar_spd_last = pid_b.tar_spd_last = 0.0
         pid_fl.delta_ud = pid_fr.delta_ud = pid_b.delta_ud = 0.0
@@ -947,7 +949,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         nav_ready_for_push = False
         yaw_ref_deg = push_yaw_target
         yaw_prepare_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg))
-        if yaw_prepare_err_abs > Nav_Push_Prepare_Reorient_Yaw:
+        if yaw_prepare_err_abs > Nav_Push_Prepare_Hard_Reorient_Yaw:
             cam_target_vx = 0.0
             cam_target_vy = 0.0
             nav_push_prepare_ok_since_ms = 0
@@ -1015,7 +1017,14 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                     vy_cmd = min_vy
                 elif -min_vy < vy_cmd < 0.0:
                     vy_cmd = -min_vy
-            apply_nav_targets(vx_cmd, vy_cmd, Nav_Push_Prepare_Forward_Limit, Nav_Push_Prepare_Lateral_Limit)
+            vx_limit = Nav_Push_Prepare_Forward_Limit
+            vy_limit = Nav_Push_Prepare_Lateral_Limit
+            if yaw_prepare_err_abs > Nav_Push_Prepare_Reorient_Yaw:
+                vx_cmd = vx_cmd * Nav_Push_Prepare_Soft_Scale
+                vy_cmd = vy_cmd * Nav_Push_Prepare_Soft_Scale
+                vx_limit = vx_limit * Nav_Push_Prepare_Soft_Scale
+                vy_limit = vy_limit * Nav_Push_Prepare_Soft_Scale
+            apply_nav_targets(vx_cmd, vy_cmd, vx_limit, vy_limit)
         if (
             seen
             and abs(cam_error_x) <= Nav_Push_Prepare_Ok_X
@@ -1407,7 +1416,7 @@ def calc_speed_closed_loop():
     low_speed = abs(e_fl) <= Nav_Low_Speed_Th and abs(e_fr) <= Nav_Low_Speed_Th and abs(e_b) <= Nav_Low_Speed_Th
     update_nav_state_and_targets(yaw_deg, low_speed, gyro_z)
 
-    if nav_state in (NAV_STATE_SEARCH, NAV_STATE_PUSH_CLASSIFY):
+    if nav_state == NAV_STATE_SEARCH:
         move_cmd.tar_spd_x = 0.0
         move_cmd.tar_spd_y = 0.0
         move_cmd.tar_spd_z = 0.0

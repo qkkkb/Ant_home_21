@@ -245,6 +245,38 @@ class MoveBasePolarityTest:
         self.log("WIRE CW/CCW [SPD] [MS] MOVE VX VY VZ [MS]")
         self.log("WIRE M FL|FR|B DUTY [MS]")
 
+    def log_config(self):
+        self.log(
+            "MOTOR PIN FL=%s/%s INV=%d FR=%s/%s INV=%d B=%s/%s INV=%d PPS=%d"
+            % (
+                cfg.MOTOR_FL_PH,
+                cfg.MOTOR_FL_PWM,
+                1 if cfg.MOTOR_FL_INVERT else 0,
+                cfg.MOTOR_FR_PH,
+                cfg.MOTOR_FR_PWM,
+                1 if cfg.MOTOR_FR_INVERT else 0,
+                cfg.MOTOR_B_PH,
+                cfg.MOTOR_B_PWM,
+                1 if cfg.MOTOR_B_INVERT else 0,
+                PWM_PER_SPEED,
+            )
+        )
+        self.log(
+            "ENC PIN FL=%s/%s INV=%d FR=%s/%s INV=%d B=%s/%s INV=%d"
+            % (
+                cfg.ENC_FL_A,
+                cfg.ENC_FL_B,
+                1 if cfg.ENC_FL_INVERT else 0,
+                cfg.ENC_FR_A,
+                cfg.ENC_FR_B,
+                1 if cfg.ENC_FR_INVERT else 0,
+                cfg.ENC_B_A,
+                cfg.ENC_B_B,
+                1 if cfg.ENC_B_INVERT else 0,
+            )
+        )
+        self.log("EXPECT ENC F=+,-,0 B=-,+,0 R=+,+,- L=-,-,+ CW=+,+,+ CCW=-,-,-")
+
     def update_mode_leds(self):
         straight, translate, rotate = MODE_LED_TABLE[self.mode]
         self.led_straight.value(straight)
@@ -482,10 +514,7 @@ class MoveBasePolarityTest:
 
     def run(self):
         self.log("=== KEY TEST START ===")
-        self.log(
-            "MOTOR INV FL=%s FR=%s B=%s PPS=%d"
-            % (cfg.MOTOR_FL_INVERT, cfg.MOTOR_FR_INVERT, cfg.MOTOR_B_INVERT, PWM_PER_SPEED)
-        )
+        self.log_config()
         self.help()
         self.log_mode()
         try:

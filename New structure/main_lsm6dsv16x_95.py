@@ -321,6 +321,43 @@ def reset_gyro_pid_state():
         pid.err_last = 0.0
 
 
+def reset_speed_pid_state():
+    global last_pwm_fl, last_pwm_fr, last_pwm_b
+
+    move_cmd.tar_spd_x = 0.0
+    move_cmd.tar_spd_y = 0.0
+    move_cmd.tar_spd_z = 0.0
+    move_cmd.speed_fl = 0.0
+    move_cmd.speed_fr = 0.0
+    move_cmd.speed_b = 0.0
+
+    pid_fl.output = 0.0
+    pid_fl.err = 0.0
+    pid_fl.err_last = 0.0
+    pid_fl.tar_spd_last = 0.0
+    pid_fl.delta_tar = 0.0
+    pid_fl.delta_tar_last = 0.0
+    pid_fl.delta_ud = 0.0
+    pid_fr.output = 0.0
+    pid_fr.err = 0.0
+    pid_fr.err_last = 0.0
+    pid_fr.tar_spd_last = 0.0
+    pid_fr.delta_tar = 0.0
+    pid_fr.delta_tar_last = 0.0
+    pid_fr.delta_ud = 0.0
+    pid_b.output = 0.0
+    pid_b.err = 0.0
+    pid_b.err_last = 0.0
+    pid_b.tar_spd_last = 0.0
+    pid_b.delta_tar = 0.0
+    pid_b.delta_tar_last = 0.0
+    pid_b.delta_ud = 0.0
+
+    last_pwm_fl = 0
+    last_pwm_fr = 0
+    last_pwm_b = 0
+
+
 def get_push_orbit_motion(yaw_err_abs):
     if yaw_err_abs <= Nav_Push_Orient_Ok_Yaw:
         return 0.0, 0.0
@@ -516,11 +553,18 @@ def nav_set_state(new_state, reason="", force=False):
 
     if new_state in (NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH, NAV_STATE_PUSH_TURN, NAV_STATE_POST_TURN_FORWARD):
         reset_gyro_pid_state()
-    if new_state in (NAV_STATE_PUSH_PREPARE, NAV_STATE_PUSH, NAV_STATE_PUSH_TURN, NAV_STATE_POST_TURN_FORWARD):
-        pid_fl.output = pid_fr.output = pid_b.output = 0.0
-        pid_fl.tar_spd_last = pid_fr.tar_spd_last = pid_b.tar_spd_last = 0.0
-        pid_fl.delta_ud = pid_fr.delta_ud = pid_b.delta_ud = 0.0
-        last_pwm_fl = last_pwm_fr = last_pwm_b = 0
+    if (
+        new_state in (
+            NAV_STATE_PUSH_CLASSIFY,
+            NAV_STATE_PUSH_ORIENT,
+            NAV_STATE_PUSH_PREPARE,
+            NAV_STATE_PUSH,
+            NAV_STATE_PUSH_TURN,
+            NAV_STATE_POST_TURN_FORWARD,
+        )
+        or (new_state == NAV_STATE_FINE and push_orbit_done)
+    ):
+        reset_speed_pid_state()
     if new_state == NAV_STATE_POST_TURN_FORWARD:
         motor_fl.duty(0)
         motor_fr.duty(0)
@@ -1417,45 +1461,16 @@ def calc_speed_closed_loop():
     update_nav_state_and_targets(yaw_deg, low_speed, gyro_z)
 
     if nav_state == NAV_STATE_SEARCH:
-        move_cmd.tar_spd_x = 0.0
-        move_cmd.tar_spd_y = 0.0
-        move_cmd.tar_spd_z = 0.0
-        move_cmd.speed_fl = 0.0
-        move_cmd.speed_fr = 0.0
-        move_cmd.speed_b = 0.0
+        reset_speed_pid_state()
         last_turn_rate_cmd = 0.0
         last_vz_cmd = 0.0
         turn_pid.output = 0.0
         turn_pid.err = 0.0
         turn_pid.err_last = 0.0
-        pid_fl.output = 0.0
-        pid_fl.err = 0.0
-        pid_fl.err_last = 0.0
-        pid_fl.tar_spd_last = 0.0
-        pid_fl.delta_tar = 0.0
-        pid_fl.delta_tar_last = 0.0
-        pid_fl.delta_ud = 0.0
-        pid_fr.output = 0.0
-        pid_fr.err = 0.0
-        pid_fr.err_last = 0.0
-        pid_fr.tar_spd_last = 0.0
-        pid_fr.delta_tar = 0.0
-        pid_fr.delta_tar_last = 0.0
-        pid_fr.delta_ud = 0.0
-        pid_b.output = 0.0
-        pid_b.err = 0.0
-        pid_b.err_last = 0.0
-        pid_b.tar_spd_last = 0.0
-        pid_b.delta_tar = 0.0
-        pid_b.delta_tar_last = 0.0
-        pid_b.delta_ud = 0.0
         gyro_pid.output = 0.0
         gyro_pid.err = 0.0
         gyro_pid.err_last = 0.0
         gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
-        last_pwm_fl = 0
-        last_pwm_fr = 0
-        last_pwm_b = 0
         motor_fl.duty(0)
         motor_fr.duty(0)
         motor_b.duty(0)

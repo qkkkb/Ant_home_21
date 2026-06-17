@@ -684,17 +684,7 @@ def update_return_home(now, yaw_deg, low_speed, gyro_z):
         else:
             cam_target_vx = Nav_Return_Left_Speed
             if line_crossed:
-                push_line_seen_once = True
-                push_line_lost_since_ms = 0
-                push_line_extra_since_ms = 0
-            elif push_line_seen_once:
-                if push_line_lost_since_ms == 0:
-                    push_line_lost_since_ms = now
-                elif utime.ticks_diff(now, push_line_lost_since_ms) >= Nav_Push_Line_Lost_Ms:
-                    if push_line_extra_since_ms == 0:
-                        push_line_extra_since_ms = now
-                    elif utime.ticks_diff(now, push_line_extra_since_ms) >= Nav_Return_Left_Line_Extra_Ms:
-                        nav_set_state(NAV_STATE_RETURN_BACK, "return_left_line_crossed")
+                nav_set_state(NAV_STATE_RETURN_BACK, "return_left_line_seen")
         if utime.ticks_diff(now, nav_transition_ms) >= Nav_Return_Left_Max_Ms:
             nav_set_state(NAV_STATE_RETURN_DONE, "return_left_timeout")
         return

@@ -29,6 +29,14 @@ MODE_CCW = 5
 MODE_COUNT = 6
 
 MODE_NAMES = ("F", "B", "R", "L", "CW", "CCW")
+MODE_LED_TABLE = (
+    (1, 0, 0),
+    (0, 1, 0),
+    (0, 0, 1),
+    (1, 1, 0),
+    (1, 0, 1),
+    (0, 1, 1),
+)
 
 
 def clamp_duty(value):
@@ -134,7 +142,7 @@ class WirelessLineReader:
             i += 1
             if ch == 10 or ch == 13:
                 if self.line_len:
-                    text = bytes(self.line_buf[: self.line_len]).decode()
+                    text = bytes(self.line_buf[: self.line_len]).decode("ascii", "ignore")
                     self.line_len = 0
                     return text.strip()
             elif 32 <= ch <= 126:
@@ -160,10 +168,13 @@ class MoveBasePolarityTest:
         self.key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
         self.key_start = Pin(cfg.BTN_START_PIN, Pin.IN, Pin.PULL_UP)
         self.key_mode = Pin(cfg.BTN_MODE_PIN, Pin.IN, Pin.PULL_UP)
-        self.last_exit_state = 1
-        self.last_start_state = 1
-        self.last_mode_state = 1
         self.mode = MODE_F
+        self.key_items = (
+            (self.key_mode, self._on_mode_key, "MODE"),
+            (self.key_start, self._on_start_key, "RUN"),
+            (self.key_exit, self._on_exit_key, "EXIT"),
+        )
+        self.key_last = [1, 1, 1]
         self.stop_at_ms = 0
         self.active = False
         self.exit_requested = False
@@ -172,6 +183,12 @@ class MoveBasePolarityTest:
         self.update_mode_leds()
 
     def log(self, msg):
+        if not isinstance(msg, str):
+            msg = str(msg)
+        try:
+            msg = msg.encode("ascii", "ignore").decode("ascii")
+        except Exception:
+            pass
         print(msg)
         try:
             self.wireless.send_str(msg + "\r\n")
@@ -179,25 +196,34 @@ class MoveBasePolarityTest:
             pass
 
     def help(self):
-        self.log("keys: C14=next mode, C9=run mode, C8=stop/exit")
-        self.log("mode order: F B R L CW CCW")
-        self.log("wire: NEXT, RUN, STOP, HELP")
-        self.log("wire: F/B/L/R [spd] [ms], CW/CCW [spd] [ms]")
-        self.log("wire: MOVE vx vy vz [ms], M FL|FR|B duty [ms]")
+        self.log("KEYS C14 NEXT C9 RUN C8 STOP")
+        self.log("MODES F B R L CW CCW")
+        self.log("WIRE NEXT RUN STOP HELP")
+        self.log("WIRE F/B/L/R [SPD] [MS]")
+        self.log("WIRE CW/CCW [SPD] [MS] MOVE VX VY VZ [MS]")
+        self.log("WIRE M FL|FR|B DUTY [MS]")
 
     def update_mode_leds(self):
-        straight = 1 if self.mode == MODE_F or self.mode == MODE_B else 0
-        translate = 1 if self.mode == MODE_R or self.mode == MODE_L else 0
-        rotate = 1 if self.mode == MODE_CW or self.mode == MODE_CCW else 0
+        straight, translate, rotate = MODE_LED_TABLE[self.mode]
         self.led_straight.value(straight)
         self.led_translate.value(translate)
         self.led_rotate.value(rotate)
 
     def log_mode(self):
         vx, vy, vz, run_ms = mode_motion(self.mode)
+        leds = MODE_LED_TABLE[self.mode]
         self.log(
-            "MODE %s body=%.2f,%.2f,%.2f ms=%d"
-            % (MODE_NAMES[self.mode], vx, vy, vz, run_ms)
+            "MODE %s LED=%d%d%d BODY=%.2f,%.2f,%.2f MS=%d"
+            % (
+                MODE_NAMES[self.mode],
+                leds[0],
+                leds[1],
+                leds[2],
+                vx,
+                vy,
+                vz,
+                run_ms,
+            )
         )
 
     def select_next_mode(self):
@@ -217,6 +243,29 @@ class MoveBasePolarityTest:
         vx, vy, vz, run_ms = mode_motion(self.mode)
         self.apply_move(MODE_NAMES[self.mode], vx, vy, vz, run_ms)
 
+    def _on_mode_key(self):
+        self.select_next_mode()
+
+    def _on_start_key(self):
+        self.run_selected_mode()
+
+    def _on_exit_key(self):
+        self.stop()
+        self.exit_requested = True
+        self.log("KEY EXIT")
+
+    def poll_keys(self):
+        for idx, item in enumerate(self.key_items):
+            btn = item[0]
+            cur = btn.value()
+            if self.key_last[idx] == 1 and cur == 0:
+                utime.sleep_ms(20)
+                if btn.value() == 0:
+                    item[1]()
+                    if idx != 2:
+                        self.log("KEY %s" % item[2])
+            self.key_last[idx] = cur
+
     def apply_move(self, name, vx, vy, vz, run_ms):
         calc_wheel_spd(self.move, vx, vy, vz)
         pwm_fl = apply_min_duty(self.move.speed_fl * PWM_PER_SPEED)
@@ -226,7 +275,7 @@ class MoveBasePolarityTest:
         self.stop_at_ms = utime.ticks_add(utime.ticks_ms(), int(run_ms))
         self.active = True
         self.log(
-            "%s body=%.2f,%.2f,%.2f tar=%.2f,%.2f,%.2f pwm=%d,%d,%d ms=%d"
+            "RUN %s BODY=%.2f,%.2f,%.2f TAR=%.2f,%.2f,%.2f PWM=%d,%d,%d MS=%d"
             % (
                 name,
                 vx,
@@ -260,7 +309,7 @@ class MoveBasePolarityTest:
         self.stop_at_ms = utime.ticks_add(utime.ticks_ms(), int(run_ms))
         self.active = True
         self.log(
-            "M %s pwm=%d,%d,%d ms=%d"
+            "M %s PWM=%d,%d,%d MS=%d"
             % (
                 role,
                 apply_min_duty(pwm_fl),
@@ -269,32 +318,6 @@ class MoveBasePolarityTest:
                 int(run_ms),
             )
         )
-
-    def check_exit_key(self):
-        current = self.key_exit.value()
-        if current == 0 and self.last_exit_state == 1:
-            utime.sleep_ms(10)
-            if self.key_exit.value() == 0:
-                self.stop()
-                self.exit_requested = True
-                self.log("C8 EXIT")
-        self.last_exit_state = current
-
-    def check_start_key(self):
-        current = self.key_start.value()
-        if current == 0 and self.last_start_state == 1:
-            utime.sleep_ms(10)
-            if self.key_start.value() == 0:
-                self.run_selected_mode()
-        self.last_start_state = current
-
-    def check_mode_key(self):
-        current = self.key_mode.value()
-        if current == 0 and self.last_mode_state == 1:
-            utime.sleep_ms(10)
-            if self.key_mode.value() == 0:
-                self.select_next_mode()
-        self.last_mode_state = current
 
     def handle_line(self, line):
         if not line:
@@ -324,7 +347,7 @@ class MoveBasePolarityTest:
                 self.update_mode_leds()
                 self.log_mode()
             else:
-                self.log("ERR mode range 0..5")
+                self.log("ERR MODE 0..5")
             return
         if cmd == "M":
             duty = parse_int(parts, 2, 1200)
@@ -354,12 +377,12 @@ class MoveBasePolarityTest:
         elif cmd == "CCW":
             self.apply_move("CCW", 0.0, 0.0, -speed, run_ms)
         else:
-            self.log("ERR unknown cmd")
+            self.log("ERR CMD")
 
     def run(self):
-        self.log("=== move_base polarity key test ===")
+        self.log("=== KEY TEST START ===")
         self.log(
-            "motor inv fl=%s fr=%s b=%s pwm_per_speed=%d"
+            "MOTOR INV FL=%s FR=%s B=%s PPS=%d"
             % (cfg.MOTOR_FL_INVERT, cfg.MOTOR_FR_INVERT, cfg.MOTOR_B_INVERT, PWM_PER_SPEED)
         )
         self.help()
@@ -368,11 +391,9 @@ class MoveBasePolarityTest:
             while not self.exit_requested:
                 self.loop_count += 1
                 now = utime.ticks_ms()
-                self.check_exit_key()
+                self.poll_keys()
                 if self.exit_requested:
                     break
-                self.check_mode_key()
-                self.check_start_key()
 
                 line = self.reader.poll(self.wireless)
                 if line is not None:
@@ -386,7 +407,7 @@ class MoveBasePolarityTest:
                     self.led.toggle()
                     self.last_status_ms = now
                     self.log(
-                        "READY mode=%s active=%d"
+                        "READY MODE=%s ACTIVE=%d"
                         % (MODE_NAMES[self.mode], 1 if self.active else 0)
                     )
 

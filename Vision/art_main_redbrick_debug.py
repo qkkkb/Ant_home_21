@@ -106,7 +106,7 @@ RED_BLOB_MAX_H = int(WORK_H * 0.70)
 RED_BLOB_MIN_FILL100 = 18
 RED_BRICK_ASPECT_MIN100 = 30     # w / h >= 0.30
 RED_BRICK_ASPECT_MAX100 = 380    # w / h <= 3.80
-RED_BRICK_MAX_AREA = int(WORK_W * WORK_H * 0.22)
+RED_BRICK_MAX_AREA = int(WORK_W * WORK_H * 0.42)
 RED_BRICK_CONFIRM_FRAMES = 2
 
 # Model/frame relationship.
@@ -135,6 +135,10 @@ REDBAG_PROTECT_BLOB_COVER100 = 35
 
 # Collision corridor only affects debug obstacle code, not target filtering.
 RED_BRICK_CENTER_HALF_W = int(WORK_W * 0.16)
+RED_TARGET_OWNED_BLOB_COVER100 = 55
+RED_TARGET_OWNED_MODEL_COVER100 = 20
+RED_BRICK_SCORE_Y_WEIGHT = 2
+RED_BRICK_SCORE_PIXELS_WEIGHT = 1
 
 
 # Red blob tuple indexes.
@@ -213,6 +217,22 @@ def rect_touches_edge(x1, y1, x2, y2, margin):
         or y1 <= margin
         or x2 >= WORK_W - 1 - margin
         or y2 >= WORK_H - 1 - margin
+    )
+
+
+def red_blob_is_target_owned(rb, target):
+    if target is None:
+        return False
+    rb_rect = (rb[RB_X1], rb[RB_Y1], rb[RB_X2], rb[RB_Y2])
+    target_rect = (target[M_X1], target[M_Y1], target[M_X2], target[M_Y2])
+    overlap = rect_intersection_area(rb_rect, target_rect)
+    if overlap <= 0:
+        return False
+    blob_cover100 = (overlap * 100) // max(rb[RB_AREA], 1)
+    model_cover100 = (overlap * 100) // max(target[M_AREA], 1)
+    return (
+        blob_cover100 >= RED_TARGET_OWNED_BLOB_COVER100
+        or model_cover100 >= RED_TARGET_OWNED_MODEL_COVER100
     )
 
 
@@ -489,6 +509,14 @@ def draw_red_blob(img, rb, confirmed):
     img.draw_string(rb[RB_X1], max(0, rb[RB_Y1] - 10), label, color=color, scale=1)
 
 
+def draw_target_owned_red_blob(img, rb):
+    if not RED_BRICK_DEBUG_DRAW:
+        return
+    color = (0, 255, 255)
+    img.draw_rectangle(rb[RB_X1], rb[RB_Y1], rb[RB_W], rb[RB_H], color=color, thickness=1)
+    img.draw_string(rb[RB_X1], max(0, rb[RB_Y1] - 10), "TARGET_RED", color=color, scale=1)
+
+
 def draw_model(img, model, filtered, protected, target):
     if not RED_BRICK_DEBUG_DRAW:
         return
@@ -515,13 +543,25 @@ def draw_model(img, model, filtered, protected, target):
     img.draw_string(model[M_X1], max(0, model[M_Y1] - 10), label, color=color, scale=1)
 
 
-def calc_red_brick_code(red_blobs):
+def calc_red_brick_code(img, red_blobs, target, log_this_frame):
     best = None
+    best_score = -1
     for rb in red_blobs:
         if not rb[RB_BRICKLIKE]:
             continue
-        if best is None or rb[RB_PIXELS] > best[RB_PIXELS]:
+        if red_blob_is_target_owned(rb, target):
+            draw_target_owned_red_blob(img, rb)
+            if log_this_frame:
+                print(
+                    "RB skip target_owned x=%d y=%d w=%d h=%d pixels=%d"
+                    % (rb[RB_X1], rb[RB_Y1], rb[RB_W], rb[RB_H], rb[RB_PIXELS])
+                )
+            continue
+        score = rb[RB_PIXELS] * RED_BRICK_SCORE_PIXELS_WEIGHT + rb[RB_Y2] * RED_BRICK_SCORE_Y_WEIGHT
+        draw_red_blob(img, rb, False)
+        if best is None or score > best_score:
             best = rb
+            best_score = score
     if best is None:
         return RED_BRICK_NONE, None
     center_x = (best[RB_X1] + best[RB_X2]) // 2
@@ -530,6 +570,18 @@ def calc_red_brick_code(red_blobs):
     if center_x > (WORK_W // 2 + RED_BRICK_CENTER_HALF_W):
         return RED_BRICK_RIGHT, best
     return RED_BRICK_CENTER, best
+
+
+def calc_red_brick_error(rb):
+    if rb is None:
+        return 0, 0, 0.0, 0.0
+    mid_x = (rb[RB_X1] + rb[RB_X2]) // 2
+    bottom_y = rb[RB_Y2]
+    bev_x, bev_y = ipm_transform(mid_x, bottom_y)
+    bev_x, bev_y = normalize_bev_point(bev_x, bev_y)
+    error_x = int(bev_x) - BEV_CENTER_X
+    error_y = BEV_TARGET_Y - int(bev_y)
+    return error_x, error_y, bev_x, bev_y
 
 
 def select_target_with_redbrick_filter(img, models, red_blobs, log_this_frame):
@@ -680,7 +732,15 @@ while True:
         continue
 
     red_blobs = collect_red_blobs(img, log_this_frame)
-    raw_code, raw_code_blob = calc_red_brick_code(red_blobs)
+    models = collect_model_candidates(img)
+    target, filtered_count, protected_count = select_target_with_redbrick_filter(
+        img,
+        models,
+        red_blobs,
+        log_this_frame,
+    )
+
+    raw_code, raw_code_blob = calc_red_brick_code(img, red_blobs, target, log_this_frame)
     if raw_code == RED_BRICK_NONE:
         red_brick_confirm_count = 0
         red_brick_last_code = RED_BRICK_NONE
@@ -697,20 +757,21 @@ while True:
     if raw_code_blob is not None:
         draw_red_blob(img, raw_code_blob, confirmed_code != RED_BRICK_NONE)
 
+    brick_error_x, brick_error_y, brick_bev_x, brick_bev_y = calc_red_brick_error(raw_code_blob)
     send_red_brick_state(confirmed_code)
     if log_this_frame:
         print(
-            "RB state raw=%d confirmed=%d count=%d"
-            % (raw_code, confirmed_code, red_brick_confirm_count)
+            "RB state raw=%d confirmed=%d count=%d err=(%d,%d) bev=(%.1f,%.1f)"
+            % (
+                raw_code,
+                confirmed_code,
+                red_brick_confirm_count,
+                brick_error_x,
+                brick_error_y,
+                brick_bev_x,
+                brick_bev_y,
+            )
         )
-
-    models = collect_model_candidates(img)
-    target, filtered_count, protected_count = select_target_with_redbrick_filter(
-        img,
-        models,
-        red_blobs,
-        log_this_frame,
-    )
 
     if target is None:
         frozen_error = None

@@ -36,17 +36,7 @@ GYRO_DEADBAND_DPS = 0.8  # 陀螺仪死区阈值
 GYRO_KP = 0.22
 GYRO_KI = 0.004
 GYRO_OUTPUT_LIMIT = 5.0
-Nav_Track_Gyro_Limit = 7.0
-Nav_Track_Gyro_Boost_Limit = 8.0
-Nav_Track_Yaw_Full_Speed = 2.5
-Nav_Track_Yaw_Slow = 8.0
-Nav_Track_Yaw_Stop = 16.0
-Nav_Track_Vx_Min_Scale = 0.55
-Nav_Track_Vy_Min_Scale = 0.0
-Nav_Track_Turn_Boost_Max = 17.0
-Nav_Track_Turn_Boost_Gain = 0.2
-Nav_Track_Coarse_Yaw_Ok = 8.0
-Nav_Track_Fine_Yaw_Ok = 6.0
+Nav_Track_Gyro_Limit = 6.0
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True   #是否在启动时自动进行陀螺仪标定
 GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
@@ -112,9 +102,6 @@ Nav_Coarse_Forward_Gain = 0.075
 Nav_Coarse_Lateral_Gain = 0.035		#COARSE 横移系数
 Nav_Coarse_Forward_Limit = 6.5
 Nav_Coarse_Lateral_Limit = 4.0
-Nav_Coarse_Lateral_Far_Y = 235
-Nav_Coarse_Lateral_Full_Y = 190
-Nav_Coarse_Lateral_Far_Scale = 0.25
 Nav_Fine_Forward_Gain = 0.035
 Nav_Fine_Classify_Lateral_Gain = 0.06
 Nav_Fine_Lateral_Gain = 0.12        #FINE 横移系数
@@ -639,45 +626,6 @@ def apply_nav_targets(vx, vy, vx_limit, vy_limit):
     cam_target_vy = vy
 
 
-def apply_yaw_locked_nav_targets(vx, vy, vx_limit, vy_limit, yaw_err_abs):
-    vx_scale = 1.0
-    vy_scale = 1.0
-    if yaw_err_abs > Nav_Track_Yaw_Stop:
-        vx_scale = Nav_Track_Vx_Min_Scale
-        vy_scale = Nav_Track_Vy_Min_Scale
-    elif yaw_err_abs > Nav_Track_Yaw_Slow:
-        span = Nav_Track_Yaw_Stop - Nav_Track_Yaw_Slow
-        if span > 0.0:
-            ratio = (yaw_err_abs - Nav_Track_Yaw_Slow) / span
-            vx_scale = 0.8 - ratio * (0.8 - Nav_Track_Vx_Min_Scale)
-            vy_scale = 0.35 - ratio * 0.35
-        else:
-            vx_scale = Nav_Track_Vx_Min_Scale
-            vy_scale = Nav_Track_Vy_Min_Scale
-    elif yaw_err_abs > Nav_Track_Yaw_Full_Speed:
-        span = Nav_Track_Yaw_Slow - Nav_Track_Yaw_Full_Speed
-        if span > 0.0:
-            ratio = (yaw_err_abs - Nav_Track_Yaw_Full_Speed) / span
-            vx_scale = 1.0 - ratio * 0.2
-            vy_scale = 1.0 - ratio * 0.65
-        else:
-            vx_scale = 0.8
-            vy_scale = 0.35
-    apply_nav_targets(vx * vx_scale, vy * vy_scale, vx_limit * vx_scale, vy_limit * vy_scale)
-
-
-def coarse_lateral_scale(err_y):
-    if err_y >= Nav_Coarse_Lateral_Far_Y:
-        return Nav_Coarse_Lateral_Far_Scale
-    if err_y <= Nav_Coarse_Lateral_Full_Y:
-        return 1.0
-    span = Nav_Coarse_Lateral_Far_Y - Nav_Coarse_Lateral_Full_Y
-    if span <= 0:
-        return 1.0
-    ratio = float(err_y - Nav_Coarse_Lateral_Full_Y) / span
-    return 1.0 - ratio * (1.0 - Nav_Coarse_Lateral_Far_Scale)
-
-
 def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
     global nav_detect_since_ms, nav_target_lost_since_ms, nav_search_turn_ok_since_ms
     global nav_coarse_ok_since_ms, nav_fine_ok_since_ms
@@ -793,7 +741,6 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
 
     if nav_state == NAV_STATE_COARSE:
         nav_ready_for_push = False
-        yaw_track_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg))
         blend_start = Nav_Coarse_Exit_Y + 40
         if cam_error_y < blend_start:
             t = float(cam_error_y - Nav_Coarse_Exit_Y) / 40.0
@@ -803,15 +750,13 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         else:
             fwd_gain = Nav_Coarse_Forward_Gain
             lat_gain = Nav_Coarse_Lateral_Gain
-        lat_scale = coarse_lateral_scale(cam_error_y)
-        apply_yaw_locked_nav_targets(
+        apply_nav_targets(
             cam_error_y * fwd_gain,
-            -cam_error_x * lat_gain * lat_scale,
+            -cam_error_x * lat_gain,
             Nav_Coarse_Forward_Limit,
-            Nav_Coarse_Lateral_Limit * lat_scale,
-            yaw_track_err_abs,
+            Nav_Coarse_Lateral_Limit,
         )
-        if seen and cam_error_y <= Nav_Coarse_Exit_Y and yaw_track_err_abs <= Nav_Track_Coarse_Yaw_Ok:
+        if seen and cam_error_y <= Nav_Coarse_Exit_Y:
             if nav_coarse_ok_since_ms == 0:
                 nav_coarse_ok_since_ms = now
             elif utime.ticks_diff(now, nav_coarse_ok_since_ms) >= Nav_Coarse_Ok_Ms:
@@ -822,7 +767,6 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
 
     if nav_state == NAV_STATE_FINE:
         nav_ready_for_push = False
-        yaw_track_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg))
         if push_orbit_done:
             fine_lateral_gain = Nav_Fine_Push_Lateral_Gain
             fine_lateral_limit = Nav_Fine_Push_Lateral_Limit
@@ -890,20 +834,18 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             cam_target_vy = 0.0
         elif Nav_Fine_Forward_Brake_Enable and nav_fine_forward_brake_since_ms != 0:
             nav_fine_forward_brake_since_ms = 0
-            apply_yaw_locked_nav_targets(
+            apply_nav_targets(
                 cam_error_y * Nav_Fine_Forward_Gain,
                 -cam_error_x * fine_lateral_gain,
                 Nav_Fine_Forward_Limit,
                 fine_lateral_limit,
-                yaw_track_err_abs,
             )
         elif (not Nav_Fine_Lateral_Brake_Enable) or nav_fine_brake_since_ms == 0:
-            apply_yaw_locked_nav_targets(
+            apply_nav_targets(
                 cam_error_y * Nav_Fine_Forward_Gain,
                 -cam_error_x * fine_lateral_gain,
                 Nav_Fine_Forward_Limit,
                 fine_lateral_limit,
-                yaw_track_err_abs,
             )
         elif utime.ticks_diff(now, nav_fine_brake_since_ms) < fine_lateral_brake_ms:
             fine_braking = True
@@ -917,19 +859,15 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         else:
             nav_fine_brake_since_ms = 0
             nav_fine_brake_vy = 0.0
-            apply_yaw_locked_nav_targets(
+            apply_nav_targets(
                 cam_error_y * Nav_Fine_Forward_Gain,
                 -cam_error_x * fine_lateral_gain,
                 Nav_Fine_Forward_Limit,
                 fine_lateral_limit,
-                yaw_track_err_abs,
             )
         fine_yaw_ok = (
-            yaw_track_err_abs <= Nav_Track_Fine_Yaw_Ok
-            or (
-                push_orbit_done
-                and abs(push_yaw_error_deg(yaw_deg)) <= Nav_Push_Prepare_Reorient_Yaw
-            )
+            (not push_orbit_done)
+            or (abs(push_yaw_error_deg(yaw_deg)) <= Nav_Push_Prepare_Reorient_Yaw)
         )
         if push_orbit_done:
             fine_ok_x = Nav_Fine_Push_Ok_X
@@ -1143,7 +1081,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 vy_cmd = vy_cmd * Nav_Push_Prepare_Soft_Scale
                 vx_limit = vx_limit * Nav_Push_Prepare_Soft_Scale
                 vy_limit = vy_limit * Nav_Push_Prepare_Soft_Scale
-            apply_yaw_locked_nav_targets(vx_cmd, vy_cmd, vx_limit, vy_limit, yaw_prepare_err_abs)
+            apply_nav_targets(vx_cmd, vy_cmd, vx_limit, vy_limit)
         if (
             seen
             and abs(cam_error_x) <= Nav_Push_Prepare_Ok_X
@@ -1641,16 +1579,6 @@ def calc_speed_closed_loop():
                 turn_rate_cmd = Nav_Search_Turn_Max_Rate
             elif turn_rate_cmd < -Nav_Search_Turn_Max_Rate:
                 turn_rate_cmd = -Nav_Search_Turn_Max_Rate
-        elif nav_state in (NAV_STATE_COARSE, NAV_STATE_FINE, NAV_STATE_PUSH_CLASSIFY, NAV_STATE_PUSH_PREPARE):
-            yaw_err_abs = abs(yaw_err_deg)
-            if yaw_err_abs > Nav_Track_Yaw_Slow:
-                turn_rate_mag = 15.0 + (yaw_err_abs - Nav_Track_Yaw_Slow) * Nav_Track_Turn_Boost_Gain
-                if turn_rate_mag > Nav_Track_Turn_Boost_Max:
-                    turn_rate_mag = Nav_Track_Turn_Boost_Max
-                if yaw_err_deg > 0.0:
-                    turn_rate_cmd = turn_rate_mag
-                else:
-                    turn_rate_cmd = -turn_rate_mag
 
     # 陀螺仪内环（方向控制）
     if nav_state == NAV_STATE_PUSH_TURN:
@@ -1669,10 +1597,7 @@ def calc_speed_closed_loop():
     elif nav_state == NAV_STATE_PUSH_TURN:
         gyro_pid.gyro_output_limit = Nav_Push_Turn_Gyro_Limit
     elif nav_state in (NAV_STATE_COARSE, NAV_STATE_FINE, NAV_STATE_PUSH_CLASSIFY, NAV_STATE_PUSH_PREPARE):
-        if abs(yaw_err_deg) > Nav_Track_Yaw_Slow:
-            gyro_pid.gyro_output_limit = Nav_Track_Gyro_Boost_Limit
-        else:
-            gyro_pid.gyro_output_limit = Nav_Track_Gyro_Limit
+        gyro_pid.gyro_output_limit = Nav_Track_Gyro_Limit
     else:
         gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
     vz_cmd = gyro_ctrl(gyro_pid, turn_rate_cmd - gyro_z)

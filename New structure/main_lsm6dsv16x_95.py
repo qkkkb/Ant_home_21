@@ -99,9 +99,9 @@ Nav_Fine_Push_Ok_Ms = 40
 Nav_Transition_Grace_Ms = 200
 Nav_Low_Speed_Th = 30
 Nav_Coarse_Forward_Gain = 0.075
-Nav_Coarse_Lateral_Gain = 0.035		#COARSE 横移系数
+Nav_Coarse_Lateral_Gain = 0.030		#COARSE 横移系数
 Nav_Coarse_Forward_Limit = 6.5
-Nav_Coarse_Lateral_Limit = 4.0
+Nav_Coarse_Lateral_Limit = 3.2
 Nav_Fine_Forward_Gain = 0.035
 Nav_Fine_Classify_Lateral_Gain = 0.06
 Nav_Fine_Lateral_Gain = 0.12        #FINE 横移系数
@@ -746,7 +746,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             t = float(cam_error_y - Nav_Coarse_Exit_Y) / 40.0
             t = max(0.0, min(1.0, t))
             fwd_gain = Nav_Fine_Forward_Gain + t * (Nav_Coarse_Forward_Gain - Nav_Fine_Forward_Gain)
-            lat_gain = Nav_Fine_Lateral_Gain + t * (Nav_Coarse_Lateral_Gain - Nav_Fine_Lateral_Gain)
+            lat_gain = Nav_Fine_Classify_Lateral_Gain + t * (Nav_Coarse_Lateral_Gain - Nav_Fine_Classify_Lateral_Gain)
         else:
             fwd_gain = Nav_Coarse_Forward_Gain
             lat_gain = Nav_Coarse_Lateral_Gain

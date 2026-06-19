@@ -115,6 +115,16 @@ RED_MODEL_SMALL_AREA = int(WORK_W * WORK_H * 0.045)
 RED_MODEL_MIN_RED_COVER100 = 25
 RED_BLOB_MIN_MODEL_COVER100 = 45
 
+# A small high-confidence model box can still be the real sandbag target in
+# the distance.  Do not filter that kind of complete, non-edge target just
+# because its red blob is compact.
+COMPACT_TARGET_PROTECT_SCORE = 0.85
+COMPACT_TARGET_PROTECT_MIN_AREA = 120
+COMPACT_TARGET_PROTECT_MODEL_COVER100 = 60
+COMPACT_TARGET_PROTECT_BLOB_COVER100 = 70
+COMPACT_TARGET_PROTECT_ASPECT_MIN100 = 45
+COMPACT_TARGET_PROTECT_ASPECT_MAX100 = 220
+
 # Full red-sandbag body protection. A complete large red target should not be
 # filtered as a brick even though it is red.
 REDBAG_PROTECT_MIN_AREA = int(WORK_W * WORK_H * 0.060)
@@ -419,19 +429,39 @@ def model_protects_redbag(model, red_blobs):
     return False, rb, model_cover100, blob_cover100
 
 
+def compact_model_target_protects(model, rb, model_cover100, blob_cover100):
+    if rb is None:
+        return False
+    if model[M_EDGE] or rb[RB_EDGE]:
+        return False
+    if model[M_SCORE] < COMPACT_TARGET_PROTECT_SCORE:
+        return False
+    if model[M_AREA] < COMPACT_TARGET_PROTECT_MIN_AREA:
+        return False
+    if model[M_AREA] > RED_MODEL_SMALL_AREA:
+        return False
+    if (
+        model[M_ASPECT100] < COMPACT_TARGET_PROTECT_ASPECT_MIN100
+        or model[M_ASPECT100] > COMPACT_TARGET_PROTECT_ASPECT_MAX100
+    ):
+        return False
+    return (
+        model_cover100 >= COMPACT_TARGET_PROTECT_MODEL_COVER100
+        and blob_cover100 >= COMPACT_TARGET_PROTECT_BLOB_COVER100
+    )
+
+
 def model_is_suspected_brick(model, red_blobs):
     protected, rb, model_cover100, blob_cover100 = model_protects_redbag(model, red_blobs)
     if protected:
         return False, "redbag_protect", rb, model_cover100, blob_cover100
     if rb is None:
         return False, "no_red_overlap", None, model_cover100, blob_cover100
+    if compact_model_target_protects(model, rb, model_cover100, blob_cover100):
+        return False, "compact_target_protect", rb, model_cover100, blob_cover100
     if not rb[RB_BRICKLIKE]:
         return False, "red_not_bricklike", rb, model_cover100, blob_cover100
-    weak_model = (
-        model[M_EDGE]
-        or model[M_AREA] <= RED_MODEL_SMALL_AREA
-        or rb[RB_EDGE]
-    )
+    weak_model = model[M_EDGE] or rb[RB_EDGE]
     enough_overlap = (
         model_cover100 >= RED_MODEL_MIN_RED_COVER100
         or blob_cover100 >= RED_BLOB_MIN_MODEL_COVER100
@@ -442,6 +472,8 @@ def model_is_suspected_brick(model, red_blobs):
         if model[M_AREA] <= RED_MODEL_SMALL_AREA:
             return True, "small_redbrick", rb, model_cover100, blob_cover100
         return True, "blob_edge_redbrick", rb, model_cover100, blob_cover100
+    if model[M_AREA] <= RED_MODEL_SMALL_AREA and enough_overlap:
+        return False, "small_complete_target", rb, model_cover100, blob_cover100
     return False, "weak_or_overlap_not_enough", rb, model_cover100, blob_cover100
 
 
@@ -506,7 +538,7 @@ def select_target_with_redbrick_filter(img, models, red_blobs, log_this_frame):
     protected_count = 0
     for model in models:
         filtered, reason, rb, model_cover100, blob_cover100 = model_is_suspected_brick(model, red_blobs)
-        protected = reason == "redbag_protect"
+        protected = reason == "redbag_protect" or reason == "compact_target_protect"
         if filtered:
             filtered_count += 1
         if protected:

@@ -37,14 +37,14 @@ GYRO_KP = 0.22
 GYRO_KI = 0.004
 GYRO_OUTPUT_LIMIT = 5.0
 Nav_Track_Gyro_Limit = 7.0
-Nav_Track_Gyro_Boost_Limit = 10.5
+Nav_Track_Gyro_Boost_Limit = 8.0
 Nav_Track_Yaw_Full_Speed = 2.5
 Nav_Track_Yaw_Slow = 8.0
 Nav_Track_Yaw_Stop = 16.0
 Nav_Track_Vx_Min_Scale = 0.55
 Nav_Track_Vy_Min_Scale = 0.0
-Nav_Track_Turn_Boost_Max = 24.0
-Nav_Track_Turn_Boost_Gain = 0.7
+Nav_Track_Turn_Boost_Max = 17.0
+Nav_Track_Turn_Boost_Gain = 0.2
 Nav_Track_Coarse_Yaw_Ok = 8.0
 Nav_Track_Fine_Yaw_Ok = 6.0
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True   #是否在启动时自动进行陀螺仪标定
@@ -112,6 +112,9 @@ Nav_Coarse_Forward_Gain = 0.075
 Nav_Coarse_Lateral_Gain = 0.035		#COARSE 横移系数
 Nav_Coarse_Forward_Limit = 6.5
 Nav_Coarse_Lateral_Limit = 4.0
+Nav_Coarse_Lateral_Far_Y = 235
+Nav_Coarse_Lateral_Full_Y = 190
+Nav_Coarse_Lateral_Far_Scale = 0.25
 Nav_Fine_Forward_Gain = 0.035
 Nav_Fine_Classify_Lateral_Gain = 0.06
 Nav_Fine_Lateral_Gain = 0.12        #FINE 横移系数
@@ -663,6 +666,18 @@ def apply_yaw_locked_nav_targets(vx, vy, vx_limit, vy_limit, yaw_err_abs):
     apply_nav_targets(vx * vx_scale, vy * vy_scale, vx_limit * vx_scale, vy_limit * vy_scale)
 
 
+def coarse_lateral_scale(err_y):
+    if err_y >= Nav_Coarse_Lateral_Far_Y:
+        return Nav_Coarse_Lateral_Far_Scale
+    if err_y <= Nav_Coarse_Lateral_Full_Y:
+        return 1.0
+    span = Nav_Coarse_Lateral_Far_Y - Nav_Coarse_Lateral_Full_Y
+    if span <= 0:
+        return 1.0
+    ratio = float(err_y - Nav_Coarse_Lateral_Full_Y) / span
+    return 1.0 - ratio * (1.0 - Nav_Coarse_Lateral_Far_Scale)
+
+
 def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
     global nav_detect_since_ms, nav_target_lost_since_ms, nav_search_turn_ok_since_ms
     global nav_coarse_ok_since_ms, nav_fine_ok_since_ms
@@ -788,11 +803,12 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         else:
             fwd_gain = Nav_Coarse_Forward_Gain
             lat_gain = Nav_Coarse_Lateral_Gain
+        lat_scale = coarse_lateral_scale(cam_error_y)
         apply_yaw_locked_nav_targets(
             cam_error_y * fwd_gain,
-            -cam_error_x * lat_gain,
+            -cam_error_x * lat_gain * lat_scale,
             Nav_Coarse_Forward_Limit,
-            Nav_Coarse_Lateral_Limit,
+            Nav_Coarse_Lateral_Limit * lat_scale,
             yaw_track_err_abs,
         )
         if seen and cam_error_y <= Nav_Coarse_Exit_Y and yaw_track_err_abs <= Nav_Track_Coarse_Yaw_Ok:

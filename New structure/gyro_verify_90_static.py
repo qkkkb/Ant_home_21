@@ -24,8 +24,8 @@ def log(msg):
     print(msg)
     if wireless is not None:
         try:
-            wireless.write(msg)
-            wireless.write("\r\n")
+            wireless.send_str(msg)
+            wireless.send_str("\r\n")
         except Exception:
             pass
 
@@ -110,6 +110,10 @@ def main():
         wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
     except Exception:
         wireless = None
+    if wireless is None:
+        log("WIRE FAIL")
+    else:
+        log("WIRE OK")
 
     key_start = Pin(cfg.BTN_START_PIN, Pin.IN, Pin.PULL_UP)
     key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)

@@ -36,7 +36,7 @@ GYRO_DEADBAND_DPS = 0.8  # 陀螺仪死区阈值
 GYRO_KP = 0.22
 GYRO_KI = 0.004
 GYRO_OUTPUT_LIMIT = 5.0
-Nav_Track_Gyro_Limit = 6.0
+Nav_Track_Gyro_Limit = 6.8
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True   #是否在启动时自动进行陀螺仪标定
 GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
@@ -102,6 +102,11 @@ Nav_Coarse_Forward_Gain = 0.075
 Nav_Coarse_Lateral_Gain = 0.030		#COARSE 横移系数
 Nav_Coarse_Forward_Limit = 6.5
 Nav_Coarse_Lateral_Limit = 3.2
+Nav_Coarse_Yaw_Guard_Soft = 5.0
+Nav_Coarse_Yaw_Guard_Hard = 10.0
+Nav_Coarse_Yaw_Guard_Release = 4.0
+Nav_Coarse_Yaw_Soft_Vy_Scale = 0.35
+Nav_Coarse_Yaw_Hard_Vx_Scale = 0.25
 Nav_Fine_Forward_Gain = 0.035
 Nav_Fine_Classify_Lateral_Gain = 0.06
 Nav_Fine_Lateral_Gain = 0.12        #FINE 横移系数
@@ -200,6 +205,7 @@ nav_detect_since_ms = 0
 nav_target_lost_since_ms = 0
 nav_search_turn_ok_since_ms = 0
 nav_coarse_ok_since_ms = 0
+coarse_yaw_guard_active = False
 nav_fine_ok_since_ms = 0
 nav_fine_last_x_sign = 0
 nav_fine_last_y_sign = 0
@@ -477,6 +483,7 @@ def nav_state_code(state):
 def nav_set_state(new_state, reason="", force=False):
     global nav_state, nav_detect_since_ms, nav_target_lost_since_ms, nav_search_turn_ok_since_ms
     global nav_coarse_ok_since_ms, nav_fine_ok_since_ms, nav_transition_ms
+    global coarse_yaw_guard_active
     global nav_fine_last_x_sign, nav_fine_last_y_sign
     global nav_fine_brake_since_ms, nav_fine_brake_vy, nav_fine_forward_brake_since_ms
     global nav_fine_forward_brake_armed
@@ -499,6 +506,7 @@ def nav_set_state(new_state, reason="", force=False):
     nav_target_lost_since_ms = 0
     nav_search_turn_ok_since_ms = 0
     nav_coarse_ok_since_ms = 0
+    coarse_yaw_guard_active = False
     nav_fine_ok_since_ms = 0
     nav_fine_last_x_sign = 0
     nav_fine_last_y_sign = 0
@@ -629,6 +637,7 @@ def apply_nav_targets(vx, vy, vx_limit, vy_limit):
 def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
     global nav_detect_since_ms, nav_target_lost_since_ms, nav_search_turn_ok_since_ms
     global nav_coarse_ok_since_ms, nav_fine_ok_since_ms
+    global coarse_yaw_guard_active
     global nav_fine_last_x_sign, nav_fine_last_y_sign
     global nav_fine_brake_since_ms, nav_fine_brake_vy, nav_fine_forward_brake_since_ms
     global nav_fine_forward_brake_armed
@@ -741,6 +750,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
 
     if nav_state == NAV_STATE_COARSE:
         nav_ready_for_push = False
+        coarse_yaw_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg))
         blend_start = Nav_Coarse_Exit_Y + 40
         if cam_error_y < blend_start:
             t = float(cam_error_y - Nav_Coarse_Exit_Y) / 40.0
@@ -756,7 +766,16 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             Nav_Coarse_Forward_Limit,
             Nav_Coarse_Lateral_Limit,
         )
-        if seen and cam_error_y <= Nav_Coarse_Exit_Y:
+        if coarse_yaw_err_abs >= Nav_Coarse_Yaw_Guard_Hard:
+            coarse_yaw_guard_active = True
+        elif coarse_yaw_err_abs <= Nav_Coarse_Yaw_Guard_Release:
+            coarse_yaw_guard_active = False
+        if coarse_yaw_guard_active:
+            cam_target_vx *= Nav_Coarse_Yaw_Hard_Vx_Scale
+            cam_target_vy = 0.0
+        elif coarse_yaw_err_abs > Nav_Coarse_Yaw_Guard_Soft:
+            cam_target_vy *= Nav_Coarse_Yaw_Soft_Vy_Scale
+        if seen and cam_error_y <= Nav_Coarse_Exit_Y and (not coarse_yaw_guard_active):
             if nav_coarse_ok_since_ms == 0:
                 nav_coarse_ok_since_ms = now
             elif utime.ticks_diff(now, nav_coarse_ok_since_ms) >= Nav_Coarse_Ok_Ms:

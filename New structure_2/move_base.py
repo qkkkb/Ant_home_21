@@ -1,4 +1,4 @@
-BODY_X_SIGN = 1.0
+BODY_X_SIGN = -1.0
 
 
 def calc_wheel_spd(move, vx, vy, vz):

@@ -64,6 +64,8 @@ GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
 
 GC_DIV = 50
+DEBUG_LOG_ENABLE = True
+DEBUG_LOG_PERIOD_MS = 200
 USE_MASTER_MOTION_FEEDFORWARD = True
 WHEEL_TARGET_STOP_EPS = 0.05
 WHEEL_TARGET_IDLE_EPS = 0.35
@@ -247,6 +249,7 @@ pit_flag = False
 start_time = utime.ticks_ms()
 last_status_ms = start_time
 loop_count = 0
+debug_log_last_ms = start_time
 last_pwm_fl = 0
 last_pwm_fr = 0
 last_pwm_b = 0
@@ -1098,6 +1101,24 @@ def poll_coop_uart():
         pass
 
 
+def debug_due(now):
+    global debug_log_last_ms
+    if not DEBUG_LOG_ENABLE:
+        return False
+    if utime.ticks_diff(now, debug_log_last_ms) < DEBUG_LOG_PERIOD_MS:
+        return False
+    debug_log_last_ms = now
+    return True
+
+
+def debug_send(text):
+    try:
+        wireless.send_str(text)
+        wireless.send_str("\r\n")
+    except Exception:
+        pass
+
+
 def update_follow_targets(yaw_deg, gyro_z):
     global cam_target_vx, cam_target_vy, target_lost_since_ms
     global last_turn_rate_cmd, last_vz_cmd
@@ -1733,6 +1754,27 @@ def calc_speed_closed_loop():
         reset_speed_outputs()
         set_three_pwm_zero()
         last_hard_stop = True
+        now_log = utime.ticks_ms()
+        if debug_due(now_log):
+            debug_send(
+                "S %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
+                % (
+                    0,
+                    1 if cam_target_seen() else 0,
+                    1 if master_motion_fresh() else 0,
+                    master_flags,
+                    1,
+                    0,
+                    0,
+                    0,
+                    cam_error_x,
+                    cam_error_y,
+                    cam_error_angle,
+                    0,
+                    0,
+                    0,
+                )
+            )
         return None
 
     if ENABLE_IMU:
@@ -1773,6 +1815,42 @@ def calc_speed_closed_loop():
 
         s_fl, s_fr, s_b = set_three_pwm_follow(
             u_fl, u_fr, u_b, t_fl, t_fr, t_b, last_stall_boost
+        )
+
+    now_log = utime.ticks_ms()
+    if debug_due(now_log):
+        debug_send(
+            "S %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
+            % (
+                1,
+                1 if last_follow_seen else 0,
+                1 if master_motion_fresh() else 0,
+                master_flags,
+                1 if last_hard_stop else 0,
+                1 if last_stall_boost else 0,
+                1 if last_angle_priority_active else 0,
+                1 if last_back_priority_active else 0,
+                cam_error_x,
+                cam_error_y,
+                cam_error_angle,
+                int(cam_target_vx),
+                int(cam_target_vy),
+                int(vz_cmd),
+            )
+        )
+        debug_send("E %d %d %d %d %d %d" % (e_fl, e_fr, e_b, int(t_fl), int(t_fr), int(t_b)))
+        debug_send("P %d %d %d %d %d %d" % (s_fl, s_fr, s_b, int(u_fl), int(u_fr), int(u_b)))
+        debug_send(
+            "G %d %d %d %d %d %d %d"
+            % (
+                int(gyro_z),
+                int(yaw_deg),
+                int(last_visual_vx),
+                int(last_visual_vy),
+                int(last_ff_vx),
+                int(last_ff_vy),
+                int(last_ff_wz),
+            )
         )
 
 key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)

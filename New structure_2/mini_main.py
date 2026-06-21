@@ -23,7 +23,7 @@ sensor.skip_frames(time=800)
 
 
 # ================= UART =================
-uart = UART(12, 9600)
+uart = UART(2, 9600)
 uart.init(9600, timeout_char=1000)
 
 TRACK_TRIGGER = b"TRACK\n"

@@ -68,6 +68,15 @@ GC_DIV = 50
 USE_MASTER_MOTION_FEEDFORWARD = True
 FOLLOW_WIRELESS_TUNE_LOG_ENABLE = True
 FOLLOW_TUNE_LOG_INTERVAL_MS = 100
+_TUNE_FRAME_LEN = 62
+_TUNE_EVENT_FRAME_LEN = 7
+_TUNE_MSG_LOG = 0x31
+_TUNE_MSG_EVENT = 0x32
+_TUNE_EVENT_BOOT = 1
+_TUNE_EVENT_IMU_BEGIN = 2
+_TUNE_EVENT_IMU_DONE = 3
+_TUNE_EVENT_C9 = 4
+_TUNE_EVENT_GO = 5
 WHEEL_TARGET_STOP_EPS = 0.05
 WHEEL_TARGET_IDLE_EPS = 0.35
 FOLLOW_START_PWM = 6200
@@ -274,6 +283,8 @@ last_push_mode_active = False
 push_enter_ms = 0
 last_follow_mode_key = -1
 last_tune_log_ms = 0
+tune_log_seq = 0
+tune_log_buf = None
 last_hard_stop = False
 last_stall_count = 0
 last_stall_boost = False
@@ -1660,32 +1671,59 @@ def coop_flash_rx():
     coop_rx_led_until_ms = utime.ticks_add(utime.ticks_ms(), COOP_LED_PULSE_MS)
 
 
-def wireless_send_const(text):
+def init_wireless_tune_log():
+    global tune_log_buf
+    if FOLLOW_WIRELESS_TUNE_LOG_ENABLE:
+        tune_log_buf = bytearray(_TUNE_FRAME_LEN)
+
+
+def tune_log_next_seq():
+    global tune_log_seq
+    tune_log_seq = (tune_log_seq + 1) & 0xFF
+    if tune_log_seq == 0:
+        tune_log_seq = 1
+    return tune_log_seq
+
+
+def tune_put_u8(idx, value):
+    tune_log_buf[idx] = int(value) & 0xFF
+
+
+def tune_put_i16(idx, value):
+    value = int(value)
+    if value > 32767:
+        value = 32767
+    elif value < -32768:
+        value = -32768
+    if value < 0:
+        value += 65536
+    tune_log_buf[idx] = value & 0xFF
+    tune_log_buf[idx + 1] = (value >> 8) & 0xFF
+
+
+def tune_send(length):
+    checksum = 0
+    i = 2
+    while i < length - 1:
+        checksum = (checksum + tune_log_buf[i]) & 0xFF
+        i += 1
+    tune_log_buf[length - 1] = checksum
     try:
-        wireless.send_str(text)
+        wireless.send_bytearray(tune_log_buf, length)
     except Exception:
         pass
 
 
-def wireless_send_i(value):
-    try:
-        wireless.send_str(str(int(value)))
-    except Exception:
-        pass
-
-
-def wireless_send_scaled(value, scale):
-    try:
-        wireless.send_str(str(int(value * scale)))
-    except Exception:
-        pass
-
-
-def wireless_event(text):
-    if not FOLLOW_WIRELESS_TUNE_LOG_ENABLE:
+def wireless_event(event_code):
+    if tune_log_buf is None:
         return
-    wireless_send_const(text)
-    wireless_send_const("\r\n")
+    tune_put_u8(0, 0xA5)
+    tune_put_u8(1, 0x5A)
+    tune_put_u8(2, 3)
+    tune_put_u8(3, _TUNE_MSG_EVENT)
+    tune_put_u8(4, tune_log_next_seq())
+    tune_put_u8(5, event_code)
+    tune_send(_TUNE_EVENT_FRAME_LEN)
 
 
 def wireless_tune_log(
@@ -1707,85 +1745,63 @@ def wireless_tune_log(
 ):
     global last_tune_log_ms
 
-    if not FOLLOW_WIRELESS_TUNE_LOG_ENABLE:
+    if tune_log_buf is None:
         return
     now = utime.ticks_ms()
     if utime.ticks_diff(now, last_tune_log_ms) < FOLLOW_TUNE_LOG_INTERVAL_MS:
         return
     last_tune_log_ms = now
-    wireless_send_const("S ")
-    wireless_send_i(1 if car_started else 0)
-    wireless_send_const(" ")
-    wireless_send_i(1 if last_follow_seen else 0)
-    wireless_send_const(" ")
-    wireless_send_i(1 if master_motion_rx_fresh() else 0)
-    wireless_send_const(" ")
-    wireless_send_i(master_flags)
-    wireless_send_const(" ")
-    wireless_send_i(1 if last_hard_stop else 0)
-    wireless_send_const(" ")
-    wireless_send_i(1 if last_stall_boost else 0)
-    wireless_send_const(" ")
-    wireless_send_i(1 if last_angle_priority_active else 0)
-    wireless_send_const(" ")
-    wireless_send_i(1 if last_back_priority_active else 0)
-    wireless_send_const("\r\n")
+    flags = 0
+    if car_started:
+        flags |= 0x01
+    if last_follow_seen:
+        flags |= 0x02
+    if master_motion_rx_fresh():
+        flags |= 0x04
+    if last_hard_stop:
+        flags |= 0x08
+    if last_stall_boost:
+        flags |= 0x10
+    if last_angle_priority_active:
+        flags |= 0x20
+    if last_back_priority_active:
+        flags |= 0x40
 
-    wireless_send_const("E ")
-    wireless_send_i(cam_error_x)
-    wireless_send_const(" ")
-    wireless_send_i(cam_error_y)
-    wireless_send_const(" ")
-    wireless_send_i(cam_error_angle)
-    wireless_send_const(" ")
-    wireless_send_scaled(last_visual_vx, 10)
-    wireless_send_const(" ")
-    wireless_send_scaled(last_visual_vy, 10)
-    wireless_send_const(" ")
-    wireless_send_scaled(last_vz_cmd, 10)
-    wireless_send_const("\r\n")
-
-    wireless_send_const("T ")
-    wireless_send_i(t_fl)
-    wireless_send_const(" ")
-    wireless_send_i(t_fr)
-    wireless_send_const(" ")
-    wireless_send_i(t_b)
-    wireless_send_const(" ")
-    wireless_send_i(e_fl)
-    wireless_send_const(" ")
-    wireless_send_i(e_fr)
-    wireless_send_const(" ")
-    wireless_send_i(e_b)
-    wireless_send_const("\r\n")
-
-    wireless_send_const("P ")
-    wireless_send_i(s_fl)
-    wireless_send_const(" ")
-    wireless_send_i(s_fr)
-    wireless_send_const(" ")
-    wireless_send_i(s_b)
-    wireless_send_const(" ")
-    wireless_send_i(u_fl)
-    wireless_send_const(" ")
-    wireless_send_i(u_fr)
-    wireless_send_const(" ")
-    wireless_send_i(u_b)
-    wireless_send_const("\r\n")
-
-    wireless_send_const("G ")
-    wireless_send_scaled(gyro_z, 10)
-    wireless_send_const(" ")
-    wireless_send_scaled(gyro_limit, 10)
-    wireless_send_const(" ")
-    wireless_send_scaled(yaw_deg, 10)
-    wireless_send_const(" ")
-    wireless_send_scaled(last_ff_vx, 10)
-    wireless_send_const(" ")
-    wireless_send_scaled(last_ff_vy, 10)
-    wireless_send_const(" ")
-    wireless_send_scaled(last_ff_wz, 10)
-    wireless_send_const("\r\n")
+    tune_put_u8(0, 0xA5)
+    tune_put_u8(1, 0x5A)
+    tune_put_u8(2, 58)
+    tune_put_u8(3, _TUNE_MSG_LOG)
+    tune_put_u8(4, tune_log_next_seq())
+    tune_put_u8(5, flags)
+    tune_put_u8(6, master_flags)
+    tune_put_i16(7, cam_error_x)
+    tune_put_i16(9, cam_error_y)
+    tune_put_i16(11, cam_error_angle)
+    tune_put_i16(13, last_visual_vx * 10)
+    tune_put_i16(15, last_visual_vy * 10)
+    tune_put_i16(17, cam_target_vx * 10)
+    tune_put_i16(19, cam_target_vy * 10)
+    tune_put_i16(21, last_vz_cmd * 10)
+    tune_put_i16(23, last_ff_vx * 10)
+    tune_put_i16(25, last_ff_vy * 10)
+    tune_put_i16(27, last_ff_wz * 10)
+    tune_put_i16(29, t_fl * 10)
+    tune_put_i16(31, t_fr * 10)
+    tune_put_i16(33, t_b * 10)
+    tune_put_i16(35, e_fl)
+    tune_put_i16(37, e_fr)
+    tune_put_i16(39, e_b)
+    tune_put_i16(41, s_fl)
+    tune_put_i16(43, s_fr)
+    tune_put_i16(45, s_b)
+    tune_put_i16(47, u_fl)
+    tune_put_i16(49, u_fr)
+    tune_put_i16(51, u_b)
+    tune_put_i16(53, gyro_z * 10)
+    tune_put_i16(55, gyro_limit * 10)
+    tune_put_i16(57, yaw_deg * 10)
+    tune_put_i16(59, last_turn_rate_cmd * 10)
+    tune_send(_TUNE_FRAME_LEN)
 
 
 def calibrate_gyro_before_launch():
@@ -1812,13 +1828,13 @@ def start_follow(reason):
     if car_started:
         return
     if reason == "C9":
-        wireless_event("C9")
+        wireless_event(_TUNE_EVENT_C9)
     calibrate_gyro_before_launch()
     clear_cam_target_state()
     car_started = True
     start_time = utime.ticks_ms()
     cam_uart.write(ART_MODE_TRACK_CMD)
-    wireless_event("GO")
+    wireless_event(_TUNE_EVENT_GO)
 
 
 def check_c9_start():
@@ -1936,7 +1952,8 @@ enc_fr = encoder(cfg.ENC_FR_A, cfg.ENC_FR_B, cfg.ENC_FR_INVERT)
 enc_b = encoder(cfg.ENC_B_A, cfg.ENC_B_B, cfg.ENC_B_INVERT)
 
 wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
-wireless_event("B")
+init_wireless_tune_log()
+wireless_event(_TUNE_EVENT_BOOT)
 coop_rx_buf = array('b', [0] * 32)
 cam_uart = UART(cfg.CAM_UART_ID, cfg.CAM_UART_BAUD)
 cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
@@ -1944,7 +1961,7 @@ cam_uart.write(ART_MODE_TRACK_CMD)
 
 imu_runtime = None
 if ENABLE_IMU:
-    wireless_event("I0")
+    wireless_event(_TUNE_EVENT_IMU_BEGIN)
     imu_runtime = LSM6DSV16XYawRuntime(
         sign=GYRO_SIGN,
         offset_z=GYRO_OFFSET_Z,
@@ -1952,7 +1969,7 @@ if ENABLE_IMU:
         deadband_dps=GYRO_DEADBAND_DPS,
         tick_period_ms=TICK_PERIOD_MS,
     )
-    wireless_event("I1")
+    wireless_event(_TUNE_EVENT_IMU_DONE)
 
 pit1 = ticker(1)
 pit1.capture_list(enc_fl, enc_fr, enc_b)

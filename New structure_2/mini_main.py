@@ -73,7 +73,7 @@ EMA_ALPHA_DEN = 4
 SEND_NO_TARGET_WHEN_EMPTY = False
 DRAW_DEBUG = False
 DRAW_ROI_DEBUG = False
-CALIB_LOG_ENABLE = False
+CALIB_LOG_ENABLE = True
 CALIB_LOG_INTERVAL = 5
 CALIB_LOG_BLOBS = False
 GC_FRAME_MASK = 0x3F
@@ -390,7 +390,7 @@ def process_frame(img):
     if should_calib_log():
         print(
             "IR CALIB HIT center=(%d,%d) span_x=%d pair_dy=%d pair_len=%d "
-            "dist=(%d,%d) angle_raw=%d err=(%d,%d,%d) "
+            "len_err_y=%d center_err_y=%d angle_raw=%d err=(%d,%d,%d) "
             "target_center_x=%d target_center_y=%d roi=%s threshold=%s exposure_us=%d "
             "target_dx=%d target_dy=%d target_len=%d"
             % (

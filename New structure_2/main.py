@@ -1660,6 +1660,34 @@ def coop_flash_rx():
     coop_rx_led_until_ms = utime.ticks_add(utime.ticks_ms(), COOP_LED_PULSE_MS)
 
 
+def wireless_send_const(text):
+    try:
+        wireless.send_str(text)
+    except Exception:
+        pass
+
+
+def wireless_send_i(value):
+    try:
+        wireless.send_str(str(int(value)))
+    except Exception:
+        pass
+
+
+def wireless_send_scaled(value, scale):
+    try:
+        wireless.send_str(str(int(value * scale)))
+    except Exception:
+        pass
+
+
+def wireless_event(text):
+    if not FOLLOW_WIRELESS_TUNE_LOG_ENABLE:
+        return
+    wireless_send_const(text)
+    wireless_send_const("\r\n")
+
+
 def wireless_tune_log(
     e_fl,
     e_fr,
@@ -1685,66 +1713,79 @@ def wireless_tune_log(
     if utime.ticks_diff(now, last_tune_log_ms) < FOLLOW_TUNE_LOG_INTERVAL_MS:
         return
     last_tune_log_ms = now
-    try:
-        wireless.send_str(
-            "FT seen=%d err=%d,%d,%d vis=%.2f,%.2f out=%.2f,%.2f,%.2f "
-            % (
-                1 if last_follow_seen else 0,
-                cam_error_x,
-                cam_error_y,
-                cam_error_angle,
-                last_visual_vx,
-                last_visual_vy,
-                cam_target_vx,
-                cam_target_vy,
-                last_vz_cmd,
-            )
-        )
-        wireless.send_str(
-            "ff=%.2f,%.2f,%.2f wz=%.2f,%.2f,%.2f "
-            % (
-                last_ff_vx,
-                last_ff_vy,
-                last_ff_wz,
-                last_ff_wz,
-                last_turn_rate_cmd,
-                last_vz_cmd,
-            )
-        )
-        wireless.send_str(
-            "tar=%.1f,%.1f,%.1f enc=%d,%d,%d pid=%d,%d,%d "
-            % (
-                t_fl,
-                t_fr,
-                t_b,
-                int(e_fl),
-                int(e_fr),
-                int(e_b),
-                int(u_fl),
-                int(u_fr),
-                int(u_b),
-            )
-        )
-        wireless.send_str(
-            "pwm=%d,%d,%d stop=%d boost=%d ap=%d bp=%d "
-            "g=%.2f glim=%.1f yaw=%.1f mf=%d rx=%d\r\n"
-            % (
-                int(s_fl),
-                int(s_fr),
-                int(s_b),
-                1 if last_hard_stop else 0,
-                1 if last_stall_boost else 0,
-                1 if last_angle_priority_active else 0,
-                1 if last_back_priority_active else 0,
-                gyro_z,
-                gyro_limit,
-                yaw_deg,
-                int(master_flags),
-                1 if master_motion_rx_fresh() else 0,
-            )
-        )
-    except Exception:
-        pass
+    wireless_send_const("S ")
+    wireless_send_i(1 if car_started else 0)
+    wireless_send_const(" ")
+    wireless_send_i(1 if last_follow_seen else 0)
+    wireless_send_const(" ")
+    wireless_send_i(1 if master_motion_rx_fresh() else 0)
+    wireless_send_const(" ")
+    wireless_send_i(master_flags)
+    wireless_send_const(" ")
+    wireless_send_i(1 if last_hard_stop else 0)
+    wireless_send_const(" ")
+    wireless_send_i(1 if last_stall_boost else 0)
+    wireless_send_const(" ")
+    wireless_send_i(1 if last_angle_priority_active else 0)
+    wireless_send_const(" ")
+    wireless_send_i(1 if last_back_priority_active else 0)
+    wireless_send_const("\r\n")
+
+    wireless_send_const("E ")
+    wireless_send_i(cam_error_x)
+    wireless_send_const(" ")
+    wireless_send_i(cam_error_y)
+    wireless_send_const(" ")
+    wireless_send_i(cam_error_angle)
+    wireless_send_const(" ")
+    wireless_send_scaled(last_visual_vx, 10)
+    wireless_send_const(" ")
+    wireless_send_scaled(last_visual_vy, 10)
+    wireless_send_const(" ")
+    wireless_send_scaled(last_vz_cmd, 10)
+    wireless_send_const("\r\n")
+
+    wireless_send_const("T ")
+    wireless_send_i(t_fl)
+    wireless_send_const(" ")
+    wireless_send_i(t_fr)
+    wireless_send_const(" ")
+    wireless_send_i(t_b)
+    wireless_send_const(" ")
+    wireless_send_i(e_fl)
+    wireless_send_const(" ")
+    wireless_send_i(e_fr)
+    wireless_send_const(" ")
+    wireless_send_i(e_b)
+    wireless_send_const("\r\n")
+
+    wireless_send_const("P ")
+    wireless_send_i(s_fl)
+    wireless_send_const(" ")
+    wireless_send_i(s_fr)
+    wireless_send_const(" ")
+    wireless_send_i(s_b)
+    wireless_send_const(" ")
+    wireless_send_i(u_fl)
+    wireless_send_const(" ")
+    wireless_send_i(u_fr)
+    wireless_send_const(" ")
+    wireless_send_i(u_b)
+    wireless_send_const("\r\n")
+
+    wireless_send_const("G ")
+    wireless_send_scaled(gyro_z, 10)
+    wireless_send_const(" ")
+    wireless_send_scaled(gyro_limit, 10)
+    wireless_send_const(" ")
+    wireless_send_scaled(yaw_deg, 10)
+    wireless_send_const(" ")
+    wireless_send_scaled(last_ff_vx, 10)
+    wireless_send_const(" ")
+    wireless_send_scaled(last_ff_vy, 10)
+    wireless_send_const(" ")
+    wireless_send_scaled(last_ff_wz, 10)
+    wireless_send_const("\r\n")
 
 
 def calibrate_gyro_before_launch():
@@ -1770,11 +1811,14 @@ def start_follow(reason):
 
     if car_started:
         return
+    if reason == "C9":
+        wireless_event("C9")
     calibrate_gyro_before_launch()
     clear_cam_target_state()
     car_started = True
     start_time = utime.ticks_ms()
     cam_uart.write(ART_MODE_TRACK_CMD)
+    wireless_event("GO")
 
 
 def check_c9_start():
@@ -1892,6 +1936,7 @@ enc_fr = encoder(cfg.ENC_FR_A, cfg.ENC_FR_B, cfg.ENC_FR_INVERT)
 enc_b = encoder(cfg.ENC_B_A, cfg.ENC_B_B, cfg.ENC_B_INVERT)
 
 wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
+wireless_event("B")
 coop_rx_buf = array('b', [0] * 32)
 cam_uart = UART(cfg.CAM_UART_ID, cfg.CAM_UART_BAUD)
 cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
@@ -1899,6 +1944,7 @@ cam_uart.write(ART_MODE_TRACK_CMD)
 
 imu_runtime = None
 if ENABLE_IMU:
+    wireless_event("I0")
     imu_runtime = LSM6DSV16XYawRuntime(
         sign=GYRO_SIGN,
         offset_z=GYRO_OFFSET_Z,
@@ -1906,6 +1952,7 @@ if ENABLE_IMU:
         deadband_dps=GYRO_DEADBAND_DPS,
         tick_period_ms=TICK_PERIOD_MS,
     )
+    wireless_event("I1")
 
 pit1 = ticker(1)
 pit1.capture_list(enc_fl, enc_fr, enc_b)

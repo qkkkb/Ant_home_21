@@ -128,12 +128,13 @@ Nav_Push_Orbit_Skip_Yaw = 15.0
 Nav_Push_Orbit_Opposite_Yaw = 165.0
 Nav_Push_Orient_Max_Ms = 15000
 Nav_Push_Orbit_Slow_Yaw = 40.0
-Nav_Push_Orbit_Fast_Vy = 5.0
+Nav_Push_Orbit_Fast_Vy = 6.8
+Nav_Push_Orbit_Slow_Vy = 5.2
 Nav_Push_Orbit_Fast_Rate = 125.0
 Nav_Push_Orbit_Slow_Rate = 65.0
 Nav_Push_Orbit_Gyro_Limit = 20.0
-Nav_Push_Orbit_Radius_Base = 1.55   #orbit 基础半径系数，实际轨迹半径=该系数 * 车轮轴距；如果轨迹过大或过小可以调整该值
-Nav_Push_Orbit_Radius_Gain = 0.006
+Nav_Push_Orbit_Radius_Base = 2.0   #orbit 基础半径系数，实际轨迹半径=该系数 * 车轮轴距；如果轨迹过大或过小可以调整该值
+Nav_Push_Orbit_Radius_Gain = 0.010
 Nav_Push_Orbit_Stop_Gyro_Th = 3.0   #orbit 过程中如果陀螺仪读数小于该值则认为已经接近目标角度，可以停止转向加速前进
 Nav_Push_Orbit_Brake_Max_Ms = 1000
 Nav_Push_Prepare_Reorient_Yaw = 10.0
@@ -374,7 +375,7 @@ def get_push_orbit_motion(yaw_err_abs):
     else:
         span = Nav_Push_Orbit_Slow_Yaw - Nav_Push_Orient_Ok_Yaw
         ratio = (yaw_err_abs - Nav_Push_Orient_Ok_Yaw) / span
-        vy_base = Nav_Push_Orbit_Fast_Vy * ratio
+        vy_base = Nav_Push_Orbit_Slow_Vy + (Nav_Push_Orbit_Fast_Vy - Nav_Push_Orbit_Slow_Vy) * ratio
         turn_rate_mag = Nav_Push_Orbit_Slow_Rate + (Nav_Push_Orbit_Fast_Rate - Nav_Push_Orbit_Slow_Rate) * ratio
     return vy_base * push_orbit_radius_ratio, turn_rate_mag
 

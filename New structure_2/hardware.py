@@ -1,0 +1,18 @@
+from machine import Pin, PWM
+
+
+class Motor:
+    def __init__(self, ph_pin, pwm_pin, freq=13000, invert=False):
+        self.invert = invert
+        self.ph = Pin(ph_pin, Pin.OUT, value=0)
+        self.pwm = PWM(pwm_pin, freq, duty_u16=0)
+
+    def duty(self, value):
+        if value == 0:
+            self.pwm.duty_u16(0)
+            return
+        dir_val = 1 if value > 0 else 0
+        if self.invert:
+            dir_val = 1 - dir_val
+        self.ph.value(dir_val)
+        self.pwm.duty_u16(abs(value))

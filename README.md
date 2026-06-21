@@ -8,6 +8,7 @@
 Ant_Home/
   Control/    主车控制程序，包含运动闭环、视觉串口、IMU、单车目标推送/回库状态机和测试脚本
   New structure/  新车部署目录，包含 LSM6DSV16X 入口、运行依赖和电机极性/运动映射无线测试脚本
+  New structure_2/  新结构从车调参目录，由 NO.2 复制并独立适配红外视觉与 LSM6DSV16X 陀螺仪
   NO.2/       第二辆车/从车控制程序，可接收主车运动反馈供红外视觉跟随使用
   Vision/     视觉端程序，包含 OpenMV/ART 目标检测、分类、黄线检测和 IPM 标定脚本
   AGENTS.md   协作、Git、README 和 MicroPython 内存优化约束
@@ -19,6 +20,8 @@ Ant_Home/
 `Control/` 是主车控制模块。当前真实运行入口主要是 `Control/main.py`，它负责三轮底盘速度闭环、陀螺仪 yaw/gyro rate 控制、ART 视觉串口解析、目标推送/回库状态机和按键启停；`Control/coop_master.py` 负责主车运动反馈广播。当前 `COOP_ENABLE = False`，主车不恢复完整双车协同状态机，也不等待从车协同；`MSG_MASTER_MOTION` 运动反馈广播保持开启。详细说明见 `Control/README.md`。
 
 `New structure/` 是新车部署用目录。`main_lsm6dsv16x_95.py` 保留基于 `95eb1b3` 的主控逻辑并适配 LSM6DSV16X 陀螺仪运行时；`move_base_polarity_wireless_test.py` 通过 `C14` 选动作、`C9` 执行动作，配合 `move_base.calc_wheel_spd()` 校验新车电机极性和运动映射，无线串口只做备用控制和纯 ASCII 日志输出，并打印 `TAR/PWM/DIR/ENC/ESIGN` 便于调极性。当前新车 `config.py` 按 `move_base` 逻辑轮位映射为 FL=`C29/C28` INV=1、FR=`C31/C30` INV=1、B=`D5/D4` INV=1，编码器映射为 FL=`C0/C1` INV=0、FR=`C2/C3` INV=0、B=`D13/D14` INV=0，测试期望编码器符号与目标轮速符号一致。
+
+`New structure_2/` 是新结构从车调参目录。它从 `NO.2/` 复制从车控制和红外视觉代码，用于在不影响已验证从车版本的前提下重新标定视觉中心、灯点几何和 LSM6DSV16X 陀螺仪调用。
 
 `NO.2/` 保存第二辆车相关程序。其中 `NO.2/main.py` 保留从主车接收运动反馈的链路，便于从车红外视觉按主车实际运动量做跟随控制。
 

@@ -62,6 +62,13 @@ DIST_PAIR_LEN_WEIGHT = 4
 DIST_CENTER_Y_WEIGHT = 1
 PAIR_LEN_WEIGHT = 4
 PAIR_ANGLE_WEIGHT = 1
+DIST_X_COMP_DEADBAND = 8
+DIST_X_COMP_RIGHT_GAIN_NUM = 6
+DIST_X_COMP_RIGHT_GAIN_DEN = 5
+DIST_X_COMP_RIGHT_LIMIT = 28
+DIST_X_COMP_LEFT_GAIN_NUM = 1
+DIST_X_COMP_LEFT_GAIN_DEN = 5
+DIST_X_COMP_LEFT_LIMIT = 8
 
 MAX_PAIR_BLOBS = 10
 ROI_PAD_X = 36
@@ -73,7 +80,7 @@ EMA_ALPHA_DEN = 4
 SEND_NO_TARGET_WHEN_EMPTY = False
 DRAW_DEBUG = False
 DRAW_ROI_DEBUG = False
-CALIB_LOG_ENABLE = True
+CALIB_LOG_ENABLE = False
 CALIB_LOG_INTERVAL = 5
 CALIB_LOG_BLOBS = False
 GC_FRAME_MASK = 0x3F
@@ -314,6 +321,26 @@ def update_ema(err_x, err_y, err_angle):
     return ema_err_x, ema_err_y, ema_err_angle
 
 
+def compensate_distance_by_lateral(err_x, err_y):
+    if err_x < -DIST_X_COMP_DEADBAND:
+        comp = (
+            (-err_x - DIST_X_COMP_DEADBAND)
+            * DIST_X_COMP_RIGHT_GAIN_NUM
+        ) // DIST_X_COMP_RIGHT_GAIN_DEN
+        if comp > DIST_X_COMP_RIGHT_LIMIT:
+            comp = DIST_X_COMP_RIGHT_LIMIT
+        return err_y - comp
+    if err_x > DIST_X_COMP_DEADBAND:
+        comp = (
+            (err_x - DIST_X_COMP_DEADBAND)
+            * DIST_X_COMP_LEFT_GAIN_NUM
+        ) // DIST_X_COMP_LEFT_GAIN_DEN
+        if comp > DIST_X_COMP_LEFT_LIMIT:
+            comp = DIST_X_COMP_LEFT_LIMIT
+        return err_y + comp
+    return err_y
+
+
 def should_calib_log():
     if not CALIB_LOG_ENABLE:
         return False
@@ -378,6 +405,7 @@ def process_frame(img):
         err_angle = (angle_raw * ERROR_OUTPUT_SCALE) // pair_len
     else:
         err_angle = 0
+    err_y = compensate_distance_by_lateral(int(err_x), int(err_y))
     err_x, err_y, err_angle = update_ema(int(err_x), int(err_y), int(err_angle))
     send_error(err_x, err_y, err_angle)
 

@@ -1,5 +1,4 @@
 from machine import Pin, UART
-from array import array
 import gc
 import utime
 from smartcar import ticker, encoder
@@ -66,17 +65,6 @@ GYRO_CALIBRATE_DELAY_MS = 2
 
 GC_DIV = 50
 USE_MASTER_MOTION_FEEDFORWARD = True
-FOLLOW_WIRELESS_TUNE_LOG_ENABLE = True
-FOLLOW_TUNE_LOG_INTERVAL_MS = 100
-_TUNE_FRAME_LEN = 62
-_TUNE_EVENT_FRAME_LEN = 7
-_TUNE_MSG_LOG = 0x31
-_TUNE_MSG_EVENT = 0x32
-_TUNE_EVENT_BOOT = 1
-_TUNE_EVENT_IMU_BEGIN = 2
-_TUNE_EVENT_IMU_DONE = 3
-_TUNE_EVENT_C9 = 4
-_TUNE_EVENT_GO = 5
 WHEEL_TARGET_STOP_EPS = 0.05
 WHEEL_TARGET_IDLE_EPS = 0.35
 FOLLOW_START_PWM = 6200
@@ -236,11 +224,13 @@ cam_error_angle = 0
 cam_target_vx = 0.0
 cam_target_vy = 0.0
 cam_last_rx_ms = 0
-cam_rx_buf = bytearray()
 cam_has_target = False
-cam_rx_started = False
 cam_valid_target_since_ms = 0
 target_lost_since_ms = 0
+cam_uart_buf = None
+cam_parse_state = 0
+cam_parse_b1 = 0
+cam_parse_b2 = 0
 
 master_vx = 0.0
 master_vy = 0.0
@@ -282,9 +272,6 @@ spin_latch_until_ms = 0
 last_push_mode_active = False
 push_enter_ms = 0
 last_follow_mode_key = -1
-last_tune_log_ms = 0
-tune_log_seq = 0
-tune_log_buf = None
 last_hard_stop = False
 last_stall_count = 0
 last_stall_boost = False
@@ -475,7 +462,7 @@ def update_cam_target(err_x, err_y, err_angle=0):
 
 
 def clear_cam_target_state():
-    global cam_error_x, cam_error_y, cam_last_rx_ms, cam_rx_buf
+    global cam_error_x, cam_error_y, cam_last_rx_ms, cam_parse_state
     global cam_error_angle
     global cam_has_target, cam_valid_target_since_ms, target_lost_since_ms
     global last_cmd_vx, last_cmd_vy, last_cmd_wz, last_ap_vz_cmd
@@ -507,7 +494,7 @@ def clear_cam_target_state():
     cam_valid_target_since_ms = 0
     target_lost_since_ms = 0
     cam_last_rx_ms = 0
-    cam_rx_buf = bytearray()
+    cam_parse_state = 0
 
 
 def cam_packet_fresh():
@@ -1032,50 +1019,59 @@ def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z, spin_priority=False):
 
 
 def poll_art_uart():
-    global cam_rx_buf, cam_has_target, cam_rx_started, cam_valid_target_since_ms
+    global cam_parse_state, cam_parse_b1, cam_parse_b2
+    global cam_has_target, cam_valid_target_since_ms
     global cam_last_rx_ms, target_lost_since_ms
 
     pending = cam_uart.any()
-    if pending:
-        if pending > 32:
-            pending = 32
-        data = cam_uart.read(pending)
-        if data:
-            cam_rx_buf += data
-            while len(cam_rx_buf) >= 3:
-                if cam_rx_buf[0] != Cam_Frame_Head:
-                    cam_rx_buf = cam_rx_buf[1:]
-                    continue
-                if not cam_rx_started:
-                    cam_rx_started = True
-                frame_len = 3
-                if cam_rx_buf[1] == No_Target_Marker and cam_rx_buf[2] == No_Target_Marker:
-                    cam_has_target = False
-                    cam_valid_target_since_ms = 0
-                    cam_last_rx_ms = utime.ticks_ms()
-                elif cam_rx_buf[1] in (Line_Packet_Tag, Classify_Packet_Tag):
-                    cam_last_rx_ms = utime.ticks_ms()
-                else:
-                    if len(cam_rx_buf) < 4:
-                        return
-                    if cam_rx_buf[3] == Cam_Frame_Head:
-                        err_angle = 0
-                    else:
-                        err_angle = (int(cam_rx_buf[3]) - Cam_Error_Offset) * Cam_Error_Scale
-                        frame_len = 4
-                    cam_has_target = True
-                    target_lost_since_ms = 0
-                    if cam_valid_target_since_ms == 0:
-                        cam_valid_target_since_ms = utime.ticks_ms()
-                    update_cam_target(
-                        (int(cam_rx_buf[1]) - Cam_Error_Offset) * Cam_Error_Scale,
-                        (int(cam_rx_buf[2]) - Cam_Error_Offset) * Cam_Error_Scale,
-                        err_angle,
-                    )
-                cam_rx_buf = cam_rx_buf[frame_len:]
+    if not pending:
+        return
+    if pending > 32:
+        pending = 32
+    n = cam_uart.readinto(cam_uart_buf, pending)
+    if not n:
+        return
 
-    if len(cam_rx_buf) > 20:
-        cam_rx_buf = bytearray()
+    i = 0
+    while i < n:
+        b = cam_uart_buf[i]
+        i += 1
+
+        if cam_parse_state == 0:
+            if b == Cam_Frame_Head:
+                cam_parse_state = 1
+        elif cam_parse_state == 1:
+            if b != Cam_Frame_Head:
+                cam_parse_b1 = b
+                cam_parse_state = 2
+        elif cam_parse_state == 2:
+            cam_parse_b2 = b
+            if cam_parse_b1 == No_Target_Marker and b == No_Target_Marker:
+                cam_has_target = False
+                cam_valid_target_since_ms = 0
+                cam_last_rx_ms = utime.ticks_ms()
+                cam_parse_state = 0
+            elif cam_parse_b1 == Line_Packet_Tag or cam_parse_b1 == Classify_Packet_Tag:
+                cam_last_rx_ms = utime.ticks_ms()
+                cam_parse_state = 0
+            else:
+                cam_parse_state = 3
+        else:
+            if b == Cam_Frame_Head:
+                err_angle = 0
+                cam_parse_state = 1
+            else:
+                err_angle = (b - Cam_Error_Offset) * Cam_Error_Scale
+                cam_parse_state = 0
+            cam_has_target = True
+            target_lost_since_ms = 0
+            if cam_valid_target_since_ms == 0:
+                cam_valid_target_since_ms = utime.ticks_ms()
+            update_cam_target(
+                (cam_parse_b1 - Cam_Error_Offset) * Cam_Error_Scale,
+                (cam_parse_b2 - Cam_Error_Offset) * Cam_Error_Scale,
+                err_angle,
+            )
 
 
 def handle_coop_frame(msg_type, seq, payload, payload_len):
@@ -1671,139 +1667,6 @@ def coop_flash_rx():
     coop_rx_led_until_ms = utime.ticks_add(utime.ticks_ms(), COOP_LED_PULSE_MS)
 
 
-def init_wireless_tune_log():
-    global tune_log_buf
-    if FOLLOW_WIRELESS_TUNE_LOG_ENABLE:
-        tune_log_buf = bytearray(_TUNE_FRAME_LEN)
-
-
-def tune_log_next_seq():
-    global tune_log_seq
-    tune_log_seq = (tune_log_seq + 1) & 0xFF
-    if tune_log_seq == 0:
-        tune_log_seq = 1
-    return tune_log_seq
-
-
-def tune_put_u8(idx, value):
-    tune_log_buf[idx] = int(value) & 0xFF
-
-
-def tune_put_i16(idx, value):
-    value = int(value)
-    if value > 32767:
-        value = 32767
-    elif value < -32768:
-        value = -32768
-    if value < 0:
-        value += 65536
-    tune_log_buf[idx] = value & 0xFF
-    tune_log_buf[idx + 1] = (value >> 8) & 0xFF
-
-
-def tune_send(length):
-    checksum = 0
-    i = 2
-    while i < length - 1:
-        checksum = (checksum + tune_log_buf[i]) & 0xFF
-        i += 1
-    tune_log_buf[length - 1] = checksum
-    try:
-        wireless.send_bytearray(tune_log_buf, length)
-    except Exception:
-        pass
-
-
-def wireless_event(event_code):
-    if tune_log_buf is None:
-        return
-    tune_put_u8(0, 0xA5)
-    tune_put_u8(1, 0x5A)
-    tune_put_u8(2, 3)
-    tune_put_u8(3, _TUNE_MSG_EVENT)
-    tune_put_u8(4, tune_log_next_seq())
-    tune_put_u8(5, event_code)
-    tune_send(_TUNE_EVENT_FRAME_LEN)
-
-
-def wireless_tune_log(
-    e_fl,
-    e_fr,
-    e_b,
-    t_fl,
-    t_fr,
-    t_b,
-    u_fl,
-    u_fr,
-    u_b,
-    s_fl,
-    s_fr,
-    s_b,
-    gyro_z,
-    gyro_limit,
-    yaw_deg,
-):
-    global last_tune_log_ms
-
-    if tune_log_buf is None:
-        return
-    now = utime.ticks_ms()
-    if utime.ticks_diff(now, last_tune_log_ms) < FOLLOW_TUNE_LOG_INTERVAL_MS:
-        return
-    last_tune_log_ms = now
-    flags = 0
-    if car_started:
-        flags |= 0x01
-    if last_follow_seen:
-        flags |= 0x02
-    if master_motion_rx_fresh():
-        flags |= 0x04
-    if last_hard_stop:
-        flags |= 0x08
-    if last_stall_boost:
-        flags |= 0x10
-    if last_angle_priority_active:
-        flags |= 0x20
-    if last_back_priority_active:
-        flags |= 0x40
-
-    tune_put_u8(0, 0xA5)
-    tune_put_u8(1, 0x5A)
-    tune_put_u8(2, 58)
-    tune_put_u8(3, _TUNE_MSG_LOG)
-    tune_put_u8(4, tune_log_next_seq())
-    tune_put_u8(5, flags)
-    tune_put_u8(6, master_flags)
-    tune_put_i16(7, cam_error_x)
-    tune_put_i16(9, cam_error_y)
-    tune_put_i16(11, cam_error_angle)
-    tune_put_i16(13, last_visual_vx * 10)
-    tune_put_i16(15, last_visual_vy * 10)
-    tune_put_i16(17, cam_target_vx * 10)
-    tune_put_i16(19, cam_target_vy * 10)
-    tune_put_i16(21, last_vz_cmd * 10)
-    tune_put_i16(23, last_ff_vx * 10)
-    tune_put_i16(25, last_ff_vy * 10)
-    tune_put_i16(27, last_ff_wz * 10)
-    tune_put_i16(29, t_fl * 10)
-    tune_put_i16(31, t_fr * 10)
-    tune_put_i16(33, t_b * 10)
-    tune_put_i16(35, e_fl)
-    tune_put_i16(37, e_fr)
-    tune_put_i16(39, e_b)
-    tune_put_i16(41, s_fl)
-    tune_put_i16(43, s_fr)
-    tune_put_i16(45, s_b)
-    tune_put_i16(47, u_fl)
-    tune_put_i16(49, u_fr)
-    tune_put_i16(51, u_b)
-    tune_put_i16(53, gyro_z * 10)
-    tune_put_i16(55, gyro_limit * 10)
-    tune_put_i16(57, yaw_deg * 10)
-    tune_put_i16(59, last_turn_rate_cmd * 10)
-    tune_send(_TUNE_FRAME_LEN)
-
-
 def calibrate_gyro_before_launch():
     if (
         AUTO_CALIBRATE_GYRO_ON_LAUNCH
@@ -1822,19 +1685,16 @@ def calibrate_gyro_before_launch():
             pit1.start(TICK_PERIOD_MS)
 
 
-def start_follow(reason):
+def start_follow():
     global car_started, start_time
 
     if car_started:
         return
-    if reason == "C9":
-        wireless_event(_TUNE_EVENT_C9)
     calibrate_gyro_before_launch()
     clear_cam_target_state()
     car_started = True
     start_time = utime.ticks_ms()
     cam_uart.write(ART_MODE_TRACK_CMD)
-    wireless_event(_TUNE_EVENT_GO)
 
 
 def check_c9_start():
@@ -1844,7 +1704,7 @@ def check_c9_start():
     if current_c9 == 0 and last_c9_state == 1:
         utime.sleep_ms(10)
         if key_start.value() == 0:
-            start_follow("C9")
+            start_follow()
     last_c9_state = current_c9
 
 
@@ -1915,26 +1775,6 @@ def calc_speed_closed_loop():
             u_fl, u_fr, u_b, t_fl, t_fr, t_b, last_stall_boost
         )
 
-    if FOLLOW_WIRELESS_TUNE_LOG_ENABLE:
-        wireless_tune_log(
-            e_fl,
-            e_fr,
-            e_b,
-            t_fl,
-            t_fr,
-            t_b,
-            u_fl,
-            u_fr,
-            u_b,
-            s_fl,
-            s_fr,
-            s_b,
-            gyro_z,
-            gyro_pid.gyro_output_limit if gyro_pid is not None else 0.0,
-            yaw_deg,
-        )
-
-
 key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
 key_start = Pin(cfg.BTN_START_PIN, Pin.IN, Pin.PULL_UP)
 led_straight = Pin(cfg.LED_STRAIGHT_PIN, Pin.OUT, value=0)
@@ -1952,16 +1792,14 @@ enc_fr = encoder(cfg.ENC_FR_A, cfg.ENC_FR_B, cfg.ENC_FR_INVERT)
 enc_b = encoder(cfg.ENC_B_A, cfg.ENC_B_B, cfg.ENC_B_INVERT)
 
 wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
-init_wireless_tune_log()
-wireless_event(_TUNE_EVENT_BOOT)
-coop_rx_buf = array('b', [0] * 32)
+coop_rx_buf = bytearray(32)
 cam_uart = UART(cfg.CAM_UART_ID, cfg.CAM_UART_BAUD)
 cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
+cam_uart_buf = bytearray(32)
 cam_uart.write(ART_MODE_TRACK_CMD)
 
 imu_runtime = None
 if ENABLE_IMU:
-    wireless_event(_TUNE_EVENT_IMU_BEGIN)
     imu_runtime = LSM6DSV16XYawRuntime(
         sign=GYRO_SIGN,
         offset_z=GYRO_OFFSET_Z,
@@ -1969,7 +1807,6 @@ if ENABLE_IMU:
         deadband_dps=GYRO_DEADBAND_DPS,
         tick_period_ms=TICK_PERIOD_MS,
     )
-    wireless_event(_TUNE_EVENT_IMU_DONE)
 
 pit1 = ticker(1)
 pit1.capture_list(enc_fl, enc_fr, enc_b)
@@ -2005,7 +1842,7 @@ try:
         update_nav_led_display()
 
         if (not car_started) and cam_target_seen():
-            start_follow("signal")
+            start_follow()
 
         if pit_flag:
             pit_flag = False

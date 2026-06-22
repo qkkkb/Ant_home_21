@@ -216,7 +216,7 @@ Master_Motion_Timeout_Ms = 250
 Follow_Master_Extra_Vx = 10.0
 Follow_Master_Extra_Vy = 8.0
 Camera_Right_Yaw_Cos = 0.5
-Camera_Right_Yaw_Sin = 0.8660254
+Camera_Right_Yaw_Sin = -0.8660254
 # ====================== Runtime state ======================
 car_started = False
 last_c9_state = 1

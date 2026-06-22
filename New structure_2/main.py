@@ -78,6 +78,8 @@ FOLLOW_START_PWM_MID_TARGET = 2.8
 FOLLOW_STALL_BOOST_TARGET = 2.8
 FOLLOW_RUN_PWM_LIMIT = 40000
 FOLLOW_STALL_BOOST_FRAMES = 3
+FOLLOW_ACTIVE_BRAKE_ENCODER_EPS = 2
+FOLLOW_ACTIVE_BRAKE_PWM_LIMIT = 22000
 
 
 # ====================== Camera protocol ======================
@@ -142,6 +144,9 @@ Follow_Push_Visual_Forward_Scale = 1.12
 Follow_Push_Visual_Lateral_Scale = 1.56
 Follow_Normal_Visual_Forward_Scale = 0.98
 Follow_Normal_Visual_Lateral_Scale = 1.20
+Follow_Normal_Close_X_Error = 12
+Follow_Normal_Close_Y_Error = 8
+Follow_Normal_Feedforward_Fade_Error = 12
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Wz_Feedforward_Gain = 1.60
 Follow_Wz_Feedforward_Limit = 15.0
@@ -434,6 +439,19 @@ def push_ff_scale(error_y, error_x, now):
         if elapsed < Follow_Push_Enter_Soft_Ms:
             scale *= elapsed / Follow_Push_Enter_Soft_Ms
     return scale
+
+
+def normal_forward_ff_scale(error_x, error_y):
+    if error_y <= 0:
+        return 0.0
+    if (
+        -Follow_Normal_Close_X_Error <= error_x <= Follow_Normal_Close_X_Error
+        and error_y <= Follow_Normal_Close_Y_Error
+    ):
+        return 0.0
+    if error_y >= Follow_Normal_Feedforward_Fade_Error:
+        return 1.0
+    return error_y / Follow_Normal_Feedforward_Fade_Error
 
 
 def gyro_limit_for_turn(turn_rate_cmd, priority=False, spin_priority=False):
@@ -1246,6 +1264,8 @@ def update_follow_targets(yaw_deg, gyro_z):
     position_priority_active = False
     back_priority_active = False
     orbit_close_guard_active = False
+    normal_mode_active = False
+    normal_close_guard_active = False
     orbit_close_vy_limit = Follow_Lateral_Limit
     prev_angle_priority_active = last_angle_priority_active
 
@@ -1254,6 +1274,18 @@ def update_follow_targets(yaw_deg, gyro_z):
         use_motion_feedforward = fresh_motion
         if push_mode_active and ff_vx > 0.0:
             ff_vx *= push_ff_scale(cam_error_y, cam_error_x, now)
+        normal_mode_active = (
+            (not orbit_mode_active)
+            and (not push_mode_active)
+            and (not spin_mode_active)
+        )
+        normal_close_guard_active = (
+            normal_mode_active
+            and -Follow_Normal_Close_X_Error <= cam_error_x <= Follow_Normal_Close_X_Error
+            and -Follow_Normal_Close_Y_Error <= cam_error_y <= Follow_Normal_Close_Y_Error
+        )
+        if normal_mode_active and ff_vx > 0.0:
+            ff_vx *= normal_forward_ff_scale(cam_error_x, cam_error_y)
         orbit_close_guard_active = (
             orbit_mode_active
             and cam_error_y <= -Follow_Forward_Deadband
@@ -1363,6 +1395,11 @@ def update_follow_targets(yaw_deg, gyro_z):
                 vx = vx_limit
     if back_priority_active and vx <= 0.0 and last_cmd_vx > 0.0:
         last_cmd_vx = 0.0
+    if normal_close_guard_active:
+        if -Follow_Forward_Deadband <= cam_error_y <= Follow_Forward_Deadband:
+            last_cmd_vx = 0.0
+        if -Follow_Lateral_Deadband <= cam_error_x <= Follow_Lateral_Deadband:
+            last_cmd_vy = 0.0
     if (
         push_mode_active
         and seen
@@ -1649,6 +1686,29 @@ def set_three_pwm_zero():
     return 0, 0, 0
 
 
+def brake_pwm_for_encoder(actual_speed):
+    if actual_speed > FOLLOW_ACTIVE_BRAKE_ENCODER_EPS:
+        return -FOLLOW_ACTIVE_BRAKE_PWM_LIMIT
+    if actual_speed < -FOLLOW_ACTIVE_BRAKE_ENCODER_EPS:
+        return FOLLOW_ACTIVE_BRAKE_PWM_LIMIT
+    return 0
+
+
+def set_three_pwm_active_brake(e_fl, e_fr, e_b):
+    global last_pwm_fl, last_pwm_fr, last_pwm_b
+
+    s_fl = brake_pwm_for_encoder(e_fl)
+    s_fr = brake_pwm_for_encoder(e_fr)
+    s_b = brake_pwm_for_encoder(e_b)
+    apply_motor_duty(s_fl, motor_fl)
+    apply_motor_duty(s_fr, motor_fr)
+    apply_motor_duty(s_b, motor_b)
+    last_pwm_fl = s_fl
+    last_pwm_fr = s_fr
+    last_pwm_b = s_b
+    return s_fl, s_fr, s_b
+
+
 def wheel_targets_zero(t_fl, t_fr, t_b):
     return (
         -WHEEL_TARGET_STOP_EPS <= t_fl <= WHEEL_TARGET_STOP_EPS
@@ -1659,6 +1719,14 @@ def wheel_targets_zero(t_fl, t_fr, t_b):
 
 def encoders_stalled(e_fl, e_fr, e_b):
     return e_fl == 0 and e_fr == 0 and e_b == 0
+
+
+def encoders_stopped_for_brake(e_fl, e_fr, e_b):
+    return (
+        -FOLLOW_ACTIVE_BRAKE_ENCODER_EPS <= e_fl <= FOLLOW_ACTIVE_BRAKE_ENCODER_EPS
+        and -FOLLOW_ACTIVE_BRAKE_ENCODER_EPS <= e_fr <= FOLLOW_ACTIVE_BRAKE_ENCODER_EPS
+        and -FOLLOW_ACTIVE_BRAKE_ENCODER_EPS <= e_b <= FOLLOW_ACTIVE_BRAKE_ENCODER_EPS
+    )
 
 
 def wheel_target_idle(target):
@@ -1798,7 +1866,10 @@ def calc_speed_closed_loop():
 
     if wheel_targets_zero(t_fl, t_fr, t_b):
         reset_speed_outputs()
-        s_fl, s_fr, s_b = set_three_pwm_zero()
+        if encoders_stopped_for_brake(e_fl, e_fr, e_b):
+            s_fl, s_fr, s_b = set_three_pwm_zero()
+        else:
+            s_fl, s_fr, s_b = set_three_pwm_active_brake(e_fl, e_fr, e_b)
         u_fl = 0.0
         u_fr = 0.0
         u_b = 0.0

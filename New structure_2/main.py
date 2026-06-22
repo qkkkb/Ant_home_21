@@ -122,9 +122,9 @@ Follow_Orbit_Close_Back_Gain = 1.65
 Follow_Orbit_Close_Full_Error = 8
 Follow_Orbit_Close_Vy_Limit = 10.5
 Follow_Feedforward_Forward_Gain = 3.20
-Follow_Feedforward_Lateral_Gain = 1.18
+Follow_Feedforward_Lateral_Gain = 0.70
 Follow_Feedforward_Forward_Limit = 34.0
-Follow_Feedforward_Lateral_Limit = 24.0
+Follow_Feedforward_Lateral_Limit = 12.0
 Follow_Push_Feedforward_Forward_Gain = 3.45
 Follow_Push_Feedforward_Lateral_Gain = 1.55
 Follow_Push_Feedforward_Forward_Limit = 56.0
@@ -843,13 +843,13 @@ def solve_follow_pose_twist(
         else:
             target_ff_vx = ff_vx + ff_wz * Follow_Target_Point_Wz_To_Vx
             target_ff_vy = ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
-            vx = add_feedforward_direct(
+            vx = add_feedforward_assist(
                 vx,
                 target_ff_vx,
                 Follow_Feedforward_Forward_Gain,
                 Follow_Feedforward_Forward_Limit,
             )
-            vy = add_feedforward_direct(
+            vy = add_feedforward_assist(
                 vy,
                 target_ff_vy,
                 Follow_Feedforward_Lateral_Gain,

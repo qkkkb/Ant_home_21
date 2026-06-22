@@ -215,6 +215,8 @@ Follow_Orbit_Brake_Output_Limit = 8.0
 Master_Motion_Timeout_Ms = 250
 Follow_Master_Extra_Vx = 10.0
 Follow_Master_Extra_Vy = 8.0
+Camera_Right_Yaw_Cos = 0.5
+Camera_Right_Yaw_Sin = 0.8660254
 # ====================== Runtime state ======================
 car_started = False
 last_c9_state = 1
@@ -626,8 +628,8 @@ def update_orbit_follow_mode(
 
 
 def rotate_camera_velocity_to_body(cam_vx, cam_vy):
-    body_vx = cam_vx
-    body_vy = cam_vy
+    body_vx = cam_vx * Camera_Right_Yaw_Cos + cam_vy * Camera_Right_Yaw_Sin
+    body_vy = -cam_vx * Camera_Right_Yaw_Sin + cam_vy * Camera_Right_Yaw_Cos
     return body_vx, body_vy
 
 

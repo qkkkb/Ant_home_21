@@ -141,6 +141,7 @@ def run_chassis_tests(pwm):
     run_test("FWD", pwm, pwm, -pwm, 0)
     run_test("LAT", pwm, half_pwm, half_pwm, -pwm)
     run_test("SPIN", pwm, pwm, pwm, pwm)
+    run_test("SPIN_NEG", pwm, -pwm, -pwm, -pwm)
 
 
 def run_single_wheel_tests():
@@ -148,6 +149,7 @@ def run_single_wheel_tests():
     run_test("W_FL", pwm, pwm, 0, 0)
     run_test("W_FR", pwm, 0, pwm, 0)
     run_test("W_B", pwm, 0, 0, pwm)
+    run_test("W_B_NEG", pwm, 0, 0, -pwm)
 
 
 key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)

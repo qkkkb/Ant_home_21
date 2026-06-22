@@ -52,18 +52,26 @@ def speed_ctrl(pid, actual_speed, tar_spd):
     pid.err = tar_spd - actual_speed
     pid.delta_tar = tar_spd - pid.tar_spd_last
 
-    pid.delta_ud = pid.c1 * pid.delta_ud + pid.c2 * pid.delta_tar + pid.c3 * pid.delta_tar_last
-    pid.output += pid.kp * (pid.err - pid.err_last) + pid.ki * pid.err + pid.delta_ud
+    next_delta_ud = pid.c1 * pid.delta_ud + pid.c2 * pid.delta_tar + pid.c3 * pid.delta_tar_last
+    delta_output = pid.kp * (pid.err - pid.err_last) + pid.ki * pid.err + next_delta_ud
+    next_output = pid.output + delta_output
 
     pid.tar_spd_last = tar_spd
     pid.delta_tar_last = pid.delta_tar
     pid.err_last = pid.err
 
     pwm_max = globals().get("PWM_MAX", 24000.0)
-    if pid.output > pwm_max:
+    if next_output > pwm_max:
         pid.output = pwm_max
-    elif pid.output < -pwm_max:
+        if delta_output < 0.0:
+            pid.delta_ud = next_delta_ud
+    elif next_output < -pwm_max:
         pid.output = -pwm_max
+        if delta_output > 0.0:
+            pid.delta_ud = next_delta_ud
+    else:
+        pid.output = next_output
+        pid.delta_ud = next_delta_ud
     return pid.output
 
 

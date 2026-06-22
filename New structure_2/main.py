@@ -76,7 +76,7 @@ FOLLOW_STALL_BOOST_PWM = 8800
 FOLLOW_START_PWM_LOW_TARGET = 1.2
 FOLLOW_START_PWM_MID_TARGET = 2.8
 FOLLOW_STALL_BOOST_TARGET = 2.8
-FOLLOW_RUN_PWM_LIMIT = 32000
+FOLLOW_RUN_PWM_LIMIT = 40000
 FOLLOW_STALL_BOOST_FRAMES = 3
 
 
@@ -186,13 +186,13 @@ Follow_Angle_XY_Min_Scale = 0.38
 Follow_Spin_XY_Min_Scale = 0.94
 Follow_Orbit_XY_Max_Scale = 0.64
 Follow_Spin_XY_Max_Scale = 1.00
-Follow_Pose_Wheel_Target_Limit = 46.0
+Follow_Pose_Wheel_Target_Limit = 56.0
 Follow_Command_Ramp_Vx = 16.0
 Follow_Command_Ramp_Vy = 14.0
 Follow_Push_Command_Ramp_Vx = 26.0
 Follow_Push_Command_Ramp_Vy = 20.0
-Follow_Orbit_Command_Ramp_Vx = 22.0
-Follow_Orbit_Command_Ramp_Vy = 18.0
+Follow_Orbit_Command_Ramp_Vx = 28.0
+Follow_Orbit_Command_Ramp_Vy = 24.0
 Follow_Command_Ramp_Wz = 11.0
 Follow_Orbit_Command_Ramp_Wz = 12.0
 Follow_Spin_Command_Ramp_Wz = 64.0

@@ -1254,6 +1254,16 @@ def update_follow_targets(yaw_deg, gyro_z):
         use_motion_feedforward = fresh_motion
         if push_mode_active and ff_vx > 0.0:
             ff_vx *= push_ff_scale(cam_error_y, cam_error_x, now)
+        if (
+            ff_vx > 0.0
+            and (not orbit_mode_active)
+            and (not push_mode_active)
+            and (not spin_mode_active)
+        ):
+            if cam_error_y <= 0:
+                ff_vx = 0.0
+            elif cam_error_y < 8:
+                ff_vx *= cam_error_y / 8.0
         orbit_close_guard_active = (
             orbit_mode_active
             and cam_error_y <= -Follow_Forward_Deadband

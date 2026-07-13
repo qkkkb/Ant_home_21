@@ -801,7 +801,7 @@ def solve_follow_pose_twist(
                 Follow_Orbit_Wz_Feedforward_Limit,
             )
         elif push_mode:
-            vx = add_feedforward_direct(
+            vx = add_feedforward_assist(
                 vx,
                 ff_vx,
                 Follow_Push_Feedforward_Forward_Gain,

@@ -801,13 +801,13 @@ def solve_follow_pose_twist(
                 Follow_Orbit_Wz_Feedforward_Limit,
             )
         elif push_mode:
-            vx = add_feedforward_assist(
+            vx = add_feedforward_direct(
                 vx,
                 ff_vx,
                 Follow_Push_Feedforward_Forward_Gain,
                 Follow_Push_Feedforward_Forward_Limit,
             )
-            vy = add_feedforward_assist(
+            vy = add_feedforward_direct(
                 vy,
                 ff_vy,
                 Follow_Push_Feedforward_Lateral_Gain,
@@ -1259,7 +1259,9 @@ def update_follow_targets(yaw_deg, gyro_z):
         target_lost_since_ms = 0
         use_motion_feedforward = fresh_motion
         if push_mode_active and ff_vx > 0.0:
-            ff_vx *= push_ff_scale(cam_error_y, cam_error_x, now)
+            scale = push_ff_scale(cam_error_y, cam_error_x, now)
+            ff_vx *= scale
+            ff_vy *= scale
         orbit_close_guard_active = (
             orbit_mode_active
             and cam_error_y <= -Follow_Forward_Deadband

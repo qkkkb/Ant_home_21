@@ -121,9 +121,9 @@ Follow_Orbit_Close_Back_Max_Vx = 28.0
 Follow_Orbit_Close_Back_Gain = 1.65
 Follow_Orbit_Close_Full_Error = 8
 Follow_Orbit_Close_Vy_Limit = 10.5
-Follow_Feedforward_Forward_Gain = 3.20
+Follow_Feedforward_Forward_Gain = 1.00
 Follow_Feedforward_Lateral_Gain = 0.0
-Follow_Feedforward_Forward_Limit = 12.0
+Follow_Feedforward_Forward_Limit = 20.0
 Follow_Feedforward_Lateral_Limit = 0.0
 Follow_Push_Feedforward_Forward_Gain = 3.45
 Follow_Push_Feedforward_Lateral_Gain = 1.55
@@ -1254,14 +1254,6 @@ def update_follow_targets(yaw_deg, gyro_z):
         use_motion_feedforward = fresh_motion
         if push_mode_active and ff_vx > 0.0:
             ff_vx *= push_ff_scale(cam_error_y, cam_error_x, now)
-        if (
-            ff_vx > 0.0
-            and (not orbit_mode_active)
-            and (not push_mode_active)
-            and (not spin_mode_active)
-            and cam_error_y <= 8
-        ):
-            ff_vx = 0.0
         orbit_close_guard_active = (
             orbit_mode_active
             and cam_error_y <= -Follow_Forward_Deadband

@@ -215,7 +215,8 @@ Follow_Orbit_Brake_Output_Limit = 8.0
 Master_Motion_Timeout_Ms = 250
 Follow_Master_Extra_Vx = 0.0
 Follow_Master_Extra_Vy = 0.0
-Follow_Master_Frame_45_Scale = 0.7071068
+Follow_Master_Frame_Cos = 0.8660254
+Follow_Master_Frame_Sin = 0.5
 Camera_Right_Yaw_Cos = 0.5
 Camera_Right_Yaw_Sin = -0.8660254
 # ====================== Runtime state ======================
@@ -1140,8 +1141,14 @@ def update_follow_targets(yaw_deg, gyro_z):
     seen = cam_target_seen()
     fresh_motion = master_motion_fresh()
     if fresh_motion:
-        ff_vx = (master_vx + master_vy) * Follow_Master_Frame_45_Scale
-        ff_vy = (master_vy - master_vx) * Follow_Master_Frame_45_Scale
+        ff_vx = (
+            master_vx * Follow_Master_Frame_Cos
+            + master_vy * Follow_Master_Frame_Sin
+        )
+        ff_vy = (
+            master_vy * Follow_Master_Frame_Cos
+            - master_vx * Follow_Master_Frame_Sin
+        )
     else:
         ff_vx = 0.0
         ff_vy = 0.0

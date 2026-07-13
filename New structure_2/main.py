@@ -1509,9 +1509,6 @@ def update_follow_targets(yaw_deg, gyro_z):
         cam_target_vy,
         vz_cmd,
         priority_turn_mode,
-        priority_turn_mode
-        and (not spin_mode_active)
-        and (orbit_mode_active or push_mode_active),
     )
     last_cmd_vx = cam_target_vx
     last_cmd_vy = cam_target_vy

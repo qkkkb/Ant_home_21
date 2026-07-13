@@ -794,7 +794,7 @@ def solve_follow_pose_twist(
                 Follow_Orbit_Feedforward_Lateral_Gain,
                 Follow_Orbit_Feedforward_Lateral_Limit,
             )
-            wz = add_feedforward_direct(
+            wz = add_feedforward_assist(
                 wz,
                 ff_wz,
                 Follow_Orbit_Wz_Feedforward_Gain,

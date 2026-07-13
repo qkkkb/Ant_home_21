@@ -23,7 +23,7 @@ class SpeedPID:
         self.delta_ud = 0.0
         self.kd = 30.0
         self.gama = 0.25
-        self.kp = 1200.0
+        self.kp = 1800.0
         self.ki = 3.0
 
     def init_c(self):

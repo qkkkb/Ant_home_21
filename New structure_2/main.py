@@ -807,7 +807,7 @@ def solve_follow_pose_twist(
                 Follow_Push_Feedforward_Forward_Gain,
                 Follow_Push_Feedforward_Forward_Limit,
             )
-            vy = add_feedforward_direct(
+            vy = add_feedforward_assist(
                 vy,
                 ff_vy,
                 Follow_Push_Feedforward_Lateral_Gain,

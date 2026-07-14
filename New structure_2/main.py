@@ -1141,8 +1141,8 @@ def update_follow_targets(yaw_deg, gyro_z):
     seen = cam_target_seen()
     fresh_motion = master_motion_fresh()
     if fresh_motion:
-        ff_vx = master_vx * 0.8660254 + master_vy * 0.5
-        ff_vy = master_vy * 0.8660254 - master_vx * 0.5
+        ff_vx = master_vx * 0.5 + master_vy * 0.8660254
+        ff_vy = master_vy * 0.5 - master_vx * 0.8660254
     else:
         ff_vx = 0.0
         ff_vy = 0.0

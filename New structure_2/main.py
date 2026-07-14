@@ -770,13 +770,13 @@ def solve_follow_pose_twist(
     )
     cam_vx = calc_follow_forward(error_y, position_priority)
     cam_vy = calc_follow_lateral(error_x, position_priority)
-    body_vx, body_vy = rotate_camera_velocity_to_body(cam_vx, cam_vy)
     if push_mode:
-        body_vx *= Follow_Push_Visual_Forward_Scale
-        body_vy *= Follow_Push_Visual_Lateral_Scale
+        cam_vx *= Follow_Push_Visual_Forward_Scale
+        cam_vy *= Follow_Push_Visual_Lateral_Scale
     elif (not orbit_mode) and (not spin_mode):
-        body_vx *= Follow_Normal_Visual_Forward_Scale
-        body_vy *= Follow_Normal_Visual_Lateral_Scale
+        cam_vx *= Follow_Normal_Visual_Forward_Scale
+        cam_vy *= Follow_Normal_Visual_Lateral_Scale
+    body_vx, body_vy = rotate_camera_velocity_to_body(cam_vx, cam_vy)
     vx = body_vx
     vy = body_vy
     wz = vision_wz

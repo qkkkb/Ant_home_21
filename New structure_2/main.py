@@ -129,7 +129,6 @@ Follow_Push_Feedforward_Forward_Gain = 1.00
 Follow_Push_Feedforward_Lateral_Gain = 1.00
 Follow_Push_Feedforward_Forward_Limit = 18.0
 Follow_Push_Feedforward_Lateral_Limit = 16.0
-Follow_Push_Angle_Priority_Error = 56
 Follow_Push_Feedforward_Fade_Error = 8
 Follow_Push_Feedforward_Min_Scale = 1.00
 Follow_Push_Lateral_Ff_Fade_Error = 14
@@ -1244,12 +1243,6 @@ def update_follow_targets(yaw_deg, gyro_z):
         orbit_mode_active,
         spin_mode_active,
     ) if seen else (orbit_mode_active or spin_mode_active)
-    if (
-        push_mode_active
-        and cam_error_angle < Follow_Push_Angle_Priority_Error
-        and cam_error_angle > -Follow_Push_Angle_Priority_Error
-    ):
-        angle_pose_mode_active = False
     body_vx = 0.0
     body_vy = 0.0
     turn_rate_cmd = 0.0

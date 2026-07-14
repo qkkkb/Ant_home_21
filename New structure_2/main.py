@@ -1168,6 +1168,7 @@ def update_follow_targets(yaw_deg, gyro_z):
         or (
             fresh_motion
             and (not explicit_orbit)
+            and (not explicit_push)
             and (
                 spin_ff_wz >= Follow_Spin_Mode_FfWz_On
                 or spin_ff_wz <= -Follow_Spin_Mode_FfWz_On

@@ -168,7 +168,7 @@ Follow_Orbit_Pose_Angle_Limit = 74.0
 Follow_Orbit_Pose_Angle_Min_Error = 14
 Follow_Orbit_Pose_Angle_Min_Turn = 30.0
 Follow_Normal_Pose_Angle_Deadband = 4
-Follow_Normal_Pose_Angle_Active_Error = 10
+Follow_Normal_Pose_Angle_Active_Error = 18
 Follow_Spin_Target_Point_Wz_To_Vx = 0.00
 Follow_Spin_Target_Point_Wz_To_Vy = 0.00
 Follow_Spin_Feedforward_Forward_Gain = 0.95
@@ -306,11 +306,16 @@ def angle_abs_value(error_angle):
 
 
 def angle_pose_mode_needed(error_angle, orbit_mode=False, spin_mode=False):
+    if orbit_mode or spin_mode:
+        return True
+    if last_angle_priority_active:
+        return (
+            error_angle > Follow_Normal_Pose_Angle_Deadband
+            or error_angle < -Follow_Normal_Pose_Angle_Deadband
+        )
     return (
-        orbit_mode
-        or spin_mode
-        or error_angle >= Follow_Angle_XY_Mode_On_Error
-        or error_angle <= -Follow_Angle_XY_Mode_On_Error
+        error_angle >= Follow_Normal_Pose_Angle_Active_Error
+        or error_angle <= -Follow_Normal_Pose_Angle_Active_Error
     )
 
 
@@ -843,7 +848,7 @@ def solve_follow_pose_twist(
         else:
             target_ff_vx = ff_vx + ff_wz * Follow_Target_Point_Wz_To_Vx
             target_ff_vy = ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
-            if error_y < -Follow_Forward_Deadband:
+            if error_y <= Follow_Back_Close_Error_Y:
                 target_ff_vx = 0.0
             vx = add_feedforward_direct(
                 vx,

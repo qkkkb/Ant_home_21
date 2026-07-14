@@ -129,9 +129,6 @@ Follow_Push_Feedforward_Forward_Gain = 1.00
 Follow_Push_Feedforward_Lateral_Gain = 1.00
 Follow_Push_Feedforward_Forward_Limit = 18.0
 Follow_Push_Feedforward_Lateral_Limit = 16.0
-Follow_Push_Target_Error_X = -18
-Follow_Push_Target_Error_Y = 2
-Follow_Push_Target_Error_Angle = 22
 Follow_Push_Feedforward_Fade_Error = 8
 Follow_Push_Feedforward_Min_Scale = 1.00
 Follow_Push_Lateral_Ff_Fade_Error = 14
@@ -467,6 +464,10 @@ def gyro_limit_for_turn(turn_rate_cmd, priority=False, spin_priority=False):
 def update_cam_target(err_x, err_y, err_angle=0):
     global cam_error_x, cam_error_y, cam_error_angle, cam_last_rx_ms
 
+    if (master_flags & MASTER_MOTION_FLAG_PUSH) != 0:
+        err_x += 18
+        err_y -= 2
+        err_angle -= 22
     cam_error_x = int(err_x)
     cam_error_y = int(err_y)
     cam_error_angle = int(err_angle)
@@ -1241,15 +1242,8 @@ def update_follow_targets(yaw_deg, gyro_z):
         and last_cmd_wz * follow_ff_wz < 0.0
     ):
         reset_turn_loop_state()
-    control_error_x = cam_error_x
-    control_error_y = cam_error_y
-    control_error_angle = cam_error_angle
-    if push_mode_active:
-        control_error_x -= Follow_Push_Target_Error_X
-        control_error_y -= Follow_Push_Target_Error_Y
-        control_error_angle -= Follow_Push_Target_Error_Angle
     angle_pose_mode_active = angle_pose_mode_needed(
-        control_error_angle,
+        cam_error_angle,
         orbit_mode_active,
         spin_mode_active,
     ) if seen else (orbit_mode_active or spin_mode_active)
@@ -1268,19 +1262,19 @@ def update_follow_targets(yaw_deg, gyro_z):
         target_lost_since_ms = 0
         use_motion_feedforward = fresh_motion
         if push_mode_active and ff_vx > 0.0:
-            scale = push_ff_scale(control_error_y, control_error_x, now)
+            scale = push_ff_scale(cam_error_y, cam_error_x, now)
             ff_vx *= scale
             ff_vy *= scale
         orbit_close_guard_active = (
             orbit_mode_active
-            and control_error_y <= -Follow_Forward_Deadband
+            and cam_error_y <= -Follow_Forward_Deadband
         )
         back_priority_active = (
             orbit_close_guard_active
-            or control_error_y < -Follow_Distance_Emergency_Close_Error
+            or cam_error_y < -Follow_Distance_Emergency_Close_Error
         )
         if orbit_close_guard_active:
-            orbit_close_vy_limit = orbit_close_lateral_limit(control_error_y)
+            orbit_close_vy_limit = orbit_close_lateral_limit(cam_error_y)
         (
             vx,
             vy,
@@ -1290,9 +1284,9 @@ def update_follow_targets(yaw_deg, gyro_z):
             angle_priority_active,
             position_priority_active,
         ) = solve_follow_pose_twist(
-            control_error_x,
-            control_error_y,
-            control_error_angle,
+            cam_error_x,
+            cam_error_y,
+            cam_error_angle,
             ff_vx,
             ff_vy,
             follow_ff_wz,
@@ -1325,7 +1319,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     if seen:
         if back_priority_active:
             if orbit_close_guard_active:
-                back_vx = orbit_close_back_target(control_error_y)
+                back_vx = orbit_close_back_target(cam_error_y)
                 if vx > back_vx:
                     vx = back_vx
                 vy = clamp(
@@ -1337,7 +1331,7 @@ def update_follow_targets(yaw_deg, gyro_z):
                 vx = 0.0
         elif angle_pose_mode_active:
             xy_scale = angle_xy_lock_scale(
-                control_error_angle,
+                cam_error_angle,
                 orbit_mode_active,
                 spin_mode_active,
             )
@@ -1355,7 +1349,7 @@ def update_follow_targets(yaw_deg, gyro_z):
         fresh_motion
         and seen
         and ff_vx <= Follow_Back_Close_Master_Vx
-        and control_error_y <= Follow_Back_Close_Error_Y
+        and cam_error_y <= Follow_Back_Close_Error_Y
         and vy > Follow_Back_Close_Toward_Vy_Limit
     ):
         vy = Follow_Back_Close_Toward_Vy_Limit
@@ -1363,13 +1357,13 @@ def update_follow_targets(yaw_deg, gyro_z):
         push_mode_active
         and seen
         and vx > Follow_Push_Close_Positive_Vx_Limit
-        and control_error_y < Follow_Push_Close_Positive_Vx_Open_Error
+        and cam_error_y < Follow_Push_Close_Positive_Vx_Open_Error
     ):
-        if control_error_y <= Follow_Push_Close_Positive_Vx_Error:
+        if cam_error_y <= Follow_Push_Close_Positive_Vx_Error:
             vx = Follow_Push_Close_Positive_Vx_Limit
         else:
             vx_limit = Follow_Push_Close_Positive_Vx_Limit + (
-                (control_error_y - Follow_Push_Close_Positive_Vx_Error)
+                (cam_error_y - Follow_Push_Close_Positive_Vx_Error)
                 * (Follow_Forward_Limit - Follow_Push_Close_Positive_Vx_Limit)
                 / (
                     Follow_Push_Close_Positive_Vx_Open_Error
@@ -1383,7 +1377,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     if (
         push_mode_active
         and seen
-        and control_error_y <= 0
+        and cam_error_y <= 0
         and vx <= 0.0
         and last_cmd_vx > 0.0
     ):

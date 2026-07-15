@@ -134,9 +134,6 @@ Follow_Push_Feedforward_Min_Scale = 1.00
 Follow_Push_Lateral_Ff_Fade_Error = 14
 Follow_Push_Lateral_Ff_Min_Scale = 0.35
 Follow_Push_Enter_Soft_Ms = 220
-Follow_Push_Close_Positive_Vx_Error = -2
-Follow_Push_Close_Positive_Vx_Open_Error = 0
-Follow_Push_Close_Positive_Vx_Limit = 10.0
 Follow_Push_Visual_Forward_Scale = 0.60
 Follow_Push_Visual_Lateral_Scale = 1.00
 Follow_Normal_Visual_Forward_Scale = 0.60
@@ -1268,7 +1265,6 @@ def update_follow_targets(yaw_deg, gyro_z):
         use_motion_feedforward = fresh_motion
         if push_mode_active and ff_vx > 0.0:
             scale = push_ff_scale(cam_error_y, cam_error_x, now)
-            ff_vx *= scale
             ff_vy *= scale
         orbit_close_guard_active = (
             orbit_mode_active
@@ -1276,7 +1272,10 @@ def update_follow_targets(yaw_deg, gyro_z):
         )
         back_priority_active = (
             orbit_close_guard_active
-            or cam_error_y < -Follow_Distance_Emergency_Close_Error
+            or (
+                (not push_mode_active)
+                and cam_error_y < -Follow_Distance_Emergency_Close_Error
+            )
         )
         if orbit_close_guard_active:
             orbit_close_vy_limit = orbit_close_lateral_limit(cam_error_y)
@@ -1358,25 +1357,6 @@ def update_follow_targets(yaw_deg, gyro_z):
         and vy > Follow_Back_Close_Toward_Vy_Limit
     ):
         vy = Follow_Back_Close_Toward_Vy_Limit
-    if (
-        push_mode_active
-        and seen
-        and vx > Follow_Push_Close_Positive_Vx_Limit
-        and cam_error_y < Follow_Push_Close_Positive_Vx_Open_Error
-    ):
-        if cam_error_y <= Follow_Push_Close_Positive_Vx_Error:
-            vx = Follow_Push_Close_Positive_Vx_Limit
-        else:
-            vx_limit = Follow_Push_Close_Positive_Vx_Limit + (
-                (cam_error_y - Follow_Push_Close_Positive_Vx_Error)
-                * (Follow_Forward_Limit - Follow_Push_Close_Positive_Vx_Limit)
-                / (
-                    Follow_Push_Close_Positive_Vx_Open_Error
-                    - Follow_Push_Close_Positive_Vx_Error
-                )
-            )
-            if vx > vx_limit:
-                vx = vx_limit
     if back_priority_active and vx <= 0.0 and last_cmd_vx > 0.0:
         last_cmd_vx = 0.0
     if (

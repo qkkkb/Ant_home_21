@@ -113,10 +113,7 @@ Follow_Distance_Far_Boost_Error = 6
 Follow_Distance_Far_Boost_Gain = 0.70
 Follow_Distance_Close_Gain = 0.62
 Follow_Distance_Close_Limit = 22.0
-Follow_Distance_Emergency_Close_Error = 32
-Follow_Back_Close_Master_Vx = -0.8
-Follow_Back_Close_Error_Y = -6
-Follow_Back_Close_Toward_Vy_Limit = 12.0
+Follow_Ahead_Error_Y = 6
 Follow_Orbit_Close_Back_Max_Vx = 28.0
 Follow_Orbit_Close_Back_Gain = 1.65
 Follow_Orbit_Close_Full_Error = 8
@@ -758,6 +755,8 @@ def solve_follow_pose_twist(
     push_mode=False,
     spin_mode=False,
 ):
+    if (not orbit_mode) and (not spin_mode):
+        error_x += error_angle
     vision_wz = calc_follow_angle(error_angle, orbit_mode, spin_mode)
     active_error = (
         Follow_Pose_Angle_Active_Error
@@ -853,7 +852,7 @@ def solve_follow_pose_twist(
         else:
             target_ff_vx = ff_vx + ff_wz * Follow_Target_Point_Wz_To_Vx
             target_ff_vy = ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
-            if error_y <= Follow_Back_Close_Error_Y:
+            if error_y >= Follow_Ahead_Error_Y and target_ff_vx > 0.0:
                 target_ff_vx = 0.0
             vx = add_feedforward_direct(
                 vx,
@@ -1270,13 +1269,7 @@ def update_follow_targets(yaw_deg, gyro_z):
             orbit_mode_active
             and cam_error_y <= -Follow_Forward_Deadband
         )
-        back_priority_active = (
-            orbit_close_guard_active
-            or (
-                (not push_mode_active)
-                and cam_error_y < -Follow_Distance_Emergency_Close_Error
-            )
-        )
+        back_priority_active = orbit_close_guard_active
         if orbit_close_guard_active:
             orbit_close_vy_limit = orbit_close_lateral_limit(cam_error_y)
         (
@@ -1349,14 +1342,6 @@ def update_follow_targets(yaw_deg, gyro_z):
         vy_limit = follow_limit(vy_limit, ff_vy, Follow_Master_Extra_Vy)
     vx = clamp(vx, -vx_limit, vx_limit)
     vy = clamp(vy, -vy_limit, vy_limit)
-    if (
-        fresh_motion
-        and seen
-        and ff_vx <= Follow_Back_Close_Master_Vx
-        and cam_error_y <= Follow_Back_Close_Error_Y
-        and vy > Follow_Back_Close_Toward_Vy_Limit
-    ):
-        vy = Follow_Back_Close_Toward_Vy_Limit
     if back_priority_active and vx <= 0.0 and last_cmd_vx > 0.0:
         last_cmd_vx = 0.0
     if (

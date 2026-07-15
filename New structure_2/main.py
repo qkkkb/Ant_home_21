@@ -470,9 +470,9 @@ def update_cam_target(err_x, err_y, err_angle=0):
             0,
             Follow_Push_Enter_Soft_Ms,
         )
-        err_x += 18 * elapsed // Follow_Push_Enter_Soft_Ms
-        err_y -= 2 * elapsed // Follow_Push_Enter_Soft_Ms
-        err_angle -= 22 * elapsed // Follow_Push_Enter_Soft_Ms
+        err_x += 13 * elapsed // Follow_Push_Enter_Soft_Ms
+        err_y -= 3 * elapsed // Follow_Push_Enter_Soft_Ms
+        err_angle -= 8 * elapsed // Follow_Push_Enter_Soft_Ms
     cam_error_x = int(err_x)
     cam_error_y = int(err_y)
     cam_error_angle = int(err_angle)

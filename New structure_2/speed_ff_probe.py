@@ -12,11 +12,11 @@ from models import SpeedPID
 
 
 _LOG_PERIOD_MS = const(200)
-_TEST_MS = const(6000)
+_TEST_MS = const(1600)
 _STEP_PHASE_MS = const(800)
 _STOP_MS = const(700)
 _START_DELAY_MS = const(600)
-_STEADY_MS = const(1000)
+_STEADY_MS = const(400)
 _PWM_FF_PER_SPEED = const(4000)
 _PWM_LIMIT = const(40000)
 
@@ -423,8 +423,14 @@ def run_step_stage(mode_name, ff_enabled):
 
 def run_suite():
     pid_fl.ki = 25.0
-    send_line("K PID FL 25")
-    run_stage("PID", False, "FL", 4)
+    pid_fr.ki = 25.0
+    pid_b.ki = 25.0
+    send_line("K PID ALL 25")
+    run_stage("PID", False, "FWD", 6)
+    run_stage("PID", False, "LAT", 6)
+    run_stage("PID", False, "ROT", 6)
+    run_stage("PID", False, "MIX", 10)
+    run_step_stage("PID", False)
 
 
 def init_hardware():

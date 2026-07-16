@@ -877,10 +877,44 @@ def max_wheel_abs(wheel_fr, wheel_fl, wheel_b):
     return max_abs
 
 
-def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False):
+def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_turn=False):
     global debug_event_mask
 
     if Follow_Pose_Wheel_Target_Limit <= 0.0:
+        return vx, vy, vz
+
+    if preserve_turn:
+        limit = Follow_Pose_Wheel_Target_Limit
+        if vz > limit:
+            debug_event_mask |= 8192
+            vz = limit
+        elif vz < -limit:
+            debug_event_mask |= 8192
+            vz = -limit
+        wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
+        wheel_max = wheel_fr
+        wheel_min = wheel_fr
+        if wheel_fl > wheel_max:
+            wheel_max = wheel_fl
+        if wheel_fl < wheel_min:
+            wheel_min = wheel_fl
+        if wheel_b > wheel_max:
+            wheel_max = wheel_b
+        if wheel_b < wheel_min:
+            wheel_min = wheel_b
+        scale = 1.0
+        if wheel_max > 0.001:
+            scale = (limit - vz) / wheel_max
+        if wheel_min < -0.001:
+            tmp = (-limit - vz) / wheel_min
+            if tmp < scale:
+                scale = tmp
+        if scale < 0.0:
+            scale = 0.0
+        if scale < 1.0:
+            debug_event_mask |= 8192
+            vx *= scale
+            vy *= scale
         return vx, vy, vz
 
     if preserve_pose_ratio:
@@ -1482,7 +1516,11 @@ def update_follow_targets(gyro_z):
         cam_target_vx,
         cam_target_vy,
         vz_cmd,
-        orbit_mode_active or spin_mode_active,
+        priority_turn_mode,
+        priority_turn_mode
+        and (not orbit_mode_active)
+        and (not spin_mode_active)
+        and (vz_cmd >= 0.001 or vz_cmd <= -0.001),
     )
     last_cmd_vx = cam_target_vx
     last_cmd_vy = cam_target_vy

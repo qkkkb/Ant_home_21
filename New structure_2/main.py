@@ -886,6 +886,10 @@ def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_
     if Follow_Pose_Wheel_Target_Limit <= 0.0:
         return vx, vy, vz
 
+    if last_push_mode_active:
+        preserve_pose_ratio = False
+        preserve_turn = False
+
     if preserve_turn:
         limit = Follow_Pose_Wheel_Target_Limit
         if vz > limit:
@@ -1524,12 +1528,9 @@ def update_follow_targets(gyro_z):
         cam_target_vx,
         cam_target_vy,
         vz_cmd,
-        priority_turn_mode
-        and (not push_mode_active)
-        and (not push_settle_active),
+        priority_turn_mode,
         priority_turn_mode
         and (not orbit_mode_active)
-        and (not push_mode_active)
         and (vz_cmd >= 0.001 or vz_cmd <= -0.001),
     )
     last_cmd_vx = cam_target_vx

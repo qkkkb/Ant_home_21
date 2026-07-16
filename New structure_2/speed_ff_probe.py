@@ -12,11 +12,11 @@ from models import SpeedPID
 
 
 _LOG_PERIOD_MS = const(200)
-_TEST_MS = const(1600)
+_TEST_MS = const(12000)
 _STEP_PHASE_MS = const(800)
 _STOP_MS = const(700)
 _START_DELAY_MS = const(600)
-_STEADY_MS = const(400)
+_STEADY_MS = const(2000)
 _PWM_FF_PER_SPEED = const(4000)
 _PWM_LIMIT = const(40000)
 
@@ -266,7 +266,11 @@ def set_stage_targets(axis_name, target):
     global target_fl, target_fr, target_b
 
     value = float(target)
-    if axis_name == "FWD":
+    if axis_name == "FL":
+        target_fl = value
+        target_fr = 0.0
+        target_b = 0.0
+    elif axis_name == "FWD":
         target_fl = value
         target_fr = -value
         target_b = 0.0
@@ -418,17 +422,7 @@ def run_step_stage(mode_name, ff_enabled):
 
 
 def run_suite():
-    run_stage("PID", False, "FWD", 6)
-    run_stage("PID", False, "LAT", 6)
-    run_stage("PID", False, "ROT", 6)
-    run_stage("PID", False, "MIX", 10)
-    run_step_stage("PID", False)
-
-    run_stage("FF4K", True, "FWD", 6)
-    run_stage("FF4K", True, "LAT", 6)
-    run_stage("FF4K", True, "ROT", 6)
-    run_stage("FF4K", True, "MIX", 10)
-    run_step_stage("FF4K", True)
+    run_stage("PID", False, "FL", 4)
 
 
 def init_hardware():

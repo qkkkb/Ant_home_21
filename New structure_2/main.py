@@ -77,6 +77,7 @@ FOLLOW_START_PWM_LOW_TARGET = 1.2
 FOLLOW_START_PWM_MID_TARGET = 2.8
 FOLLOW_STALL_BOOST_TARGET = 2.8
 FOLLOW_RUN_PWM_LIMIT = 40000
+FOLLOW_WHEEL_PWM_FEEDFORWARD = 3800.0
 FOLLOW_STALL_BOOST_FRAMES = 3
 
 
@@ -175,7 +176,7 @@ Follow_Angle_XY_Min_Scale = 0.75
 Follow_Spin_XY_Min_Scale = 0.94
 Follow_Orbit_XY_Max_Scale = 0.50
 Follow_Spin_XY_Max_Scale = 1.00
-Follow_Pose_Wheel_Target_Limit = 20.0
+Follow_Pose_Wheel_Target_Limit = 10.0
 Follow_Command_Ramp_Vx = 2.0
 Follow_Command_Ramp_Vy = 3.0
 Follow_Push_Command_Ramp_Vx = 2.0
@@ -1635,7 +1636,15 @@ def speed_ctrl_follow(pid, actual_speed, target_speed):
     if wheel_target_idle(target_speed):
         speed_reset(pid)
         return 0.0
-    return speed_ctrl(pid, actual_speed, target_speed)
+    output = speed_ctrl(pid, actual_speed, target_speed)
+    feedforward = target_speed * FOLLOW_WHEEL_PWM_FEEDFORWARD
+    if target_speed > 0.0 and actual_speed <= target_speed and output < feedforward:
+        output = feedforward
+        pid.output = output
+    elif target_speed < 0.0 and actual_speed >= target_speed and output > feedforward:
+        output = feedforward
+        pid.output = output
+    return output
 
 
 def update_nav_led_display():

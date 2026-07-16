@@ -551,7 +551,8 @@ def update_orbit_follow_mode(
         orbit_follow_active = False
         orbit_follow_exit_since_ms = 0
         return False
-    if explicit_push and not orbit_follow_active:
+    if explicit_push:
+        orbit_follow_active = False
         orbit_follow_exit_since_ms = 0
         return False
 

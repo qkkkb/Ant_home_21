@@ -113,10 +113,6 @@ Follow_Distance_Far_Boost_Gain = 0.70
 Follow_Distance_Close_Gain = 0.62
 Follow_Distance_Close_Limit = 22.0
 Follow_Normal_StandOff_Error_Y = 7
-Follow_Orbit_Close_Back_Max_Vx = 28.0
-Follow_Orbit_Close_Back_Gain = 1.65
-Follow_Orbit_Close_Full_Error = 8
-Follow_Orbit_Close_Vy_Limit = 10.5
 Follow_Feedforward_Forward_Gain = 1.00
 Follow_Feedforward_Lateral_Gain = 1.00
 Follow_Feedforward_Forward_Limit = 20.0
@@ -368,30 +364,6 @@ def orbit_close_depth(error_y):
     if depth < 0:
         return 0.0
     return depth
-
-
-def orbit_close_back_target(error_y):
-    depth = orbit_close_depth(error_y)
-    if depth <= 0.0:
-        depth = 1.0
-    return -clamp(
-        depth * Follow_Orbit_Close_Back_Gain,
-        0.0,
-        Follow_Orbit_Close_Back_Max_Vx,
-    )
-
-
-def orbit_close_lateral_limit(error_y):
-    depth = orbit_close_depth(error_y)
-    if depth <= 0.0:
-        return Follow_Lateral_Limit
-    if depth >= Follow_Orbit_Close_Full_Error:
-        return Follow_Orbit_Close_Vy_Limit
-    return Follow_Lateral_Limit - (
-        (Follow_Lateral_Limit - Follow_Orbit_Close_Vy_Limit)
-        * depth
-        / Follow_Orbit_Close_Full_Error
-    )
 
 
 def gyro_limit_for_turn(turn_rate_cmd, priority=False, spin_priority=False):
@@ -1245,22 +1217,11 @@ def update_follow_targets(gyro_z):
     use_motion_feedforward = False
     angle_priority_active = False
     position_priority_active = False
-    back_priority_active = False
-    orbit_close_guard_active = False
-    orbit_close_vy_limit = Follow_Lateral_Limit
     prev_angle_priority_active = last_angle_priority_active
 
     if seen:
         target_lost_since_ms = 0
         use_motion_feedforward = fresh_motion and (not push_settle_active)
-        orbit_close_guard_active = (
-            orbit_mode_active
-            and (not push_settle_active)
-            and cam_error_y <= -Follow_Forward_Deadband
-        )
-        back_priority_active = orbit_close_guard_active
-        if orbit_close_guard_active:
-            orbit_close_vy_limit = orbit_close_lateral_limit(cam_error_y)
         (
             vx,
             vy,
@@ -1286,7 +1247,7 @@ def update_follow_targets(gyro_z):
         if angle_pose_mode_active:
             position_priority_active = True
         last_angle_priority_active = angle_priority_active or angle_pose_mode_active
-        last_back_priority_active = back_priority_active
+        last_back_priority_active = False
     else:
         if target_lost_since_ms == 0:
             target_lost_since_ms = now
@@ -1307,19 +1268,7 @@ def update_follow_targets(gyro_z):
         last_back_priority_active = False
 
     if seen:
-        if back_priority_active:
-            if orbit_close_guard_active:
-                back_vx = orbit_close_back_target(cam_error_y)
-                if vx > back_vx:
-                    vx = back_vx
-                vy = clamp(
-                    vy,
-                    -orbit_close_vy_limit,
-                    orbit_close_vy_limit,
-                )
-            elif vx > 0.0:
-                vx = 0.0
-        elif angle_pose_mode_active:
+        if angle_pose_mode_active:
             xy_scale = angle_xy_lock_scale(
                 cam_error_angle,
                 orbit_mode_active,
@@ -1356,8 +1305,6 @@ def update_follow_targets(gyro_z):
         vy_limit = follow_limit(vy_limit, ff_vy, Follow_Master_Extra_Vy)
     vx = clamp(vx, -vx_limit, vx_limit)
     vy = clamp(vy, -vy_limit, vy_limit)
-    if back_priority_active and vx <= 0.0 and last_cmd_vx > 0.0:
-        last_cmd_vx = 0.0
     if (
         push_mode_active
         and seen
@@ -1366,12 +1313,6 @@ def update_follow_targets(gyro_z):
         and last_cmd_vx > 0.0
     ):
         last_cmd_vx = 0.0
-    if orbit_close_guard_active:
-        last_cmd_vy = clamp(
-            last_cmd_vy,
-            -orbit_close_vy_limit,
-            orbit_close_vy_limit,
-        )
     if push_mode_active:
         vx_ramp = Follow_Push_Command_Ramp_Vx
         vy_ramp = Follow_Push_Command_Ramp_Vy
@@ -1525,8 +1466,8 @@ def update_follow_targets(gyro_z):
         cam_target_vx,
         cam_target_vy,
         vz_cmd,
-        priority_turn_mode,
-        priority_turn_mode
+        priority_turn_mode or normal_brake_active,
+        (priority_turn_mode or normal_brake_active)
         and (not orbit_mode_active)
         and (not spin_mode_active)
         and (vz_cmd >= 0.001 or vz_cmd <= -0.001),

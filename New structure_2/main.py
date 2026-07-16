@@ -231,6 +231,7 @@ master_wz = 0.0
 master_yaw = 0.0
 master_flags = 0
 master_last_rx_ms = 0
+master_last_seq = 0
 
 coop_parser = CoopFrameParser()
 COOP_LED_PULSE_MS = 40
@@ -269,6 +270,10 @@ last_follow_mode_key = -1
 last_hard_stop = False
 last_stall_count = 0
 last_stall_boost = False
+# Bits 0-2: low target reset; 3-5: reverse reset; 6: mode reset;
+# 7: explicit camera loss; 8: camera timeout edge; 9: push FF cut;
+# 10-12: final PWM saturation; 13: pose limiter; 14: gyro limit.
+debug_event_mask = 0
 
 
 def clamp(value, low, high):
@@ -714,6 +719,8 @@ def solve_follow_pose_twist(
     push_mode=False,
     spin_mode=False,
 ):
+    global debug_event_mask
+
     if (not orbit_mode) and (not spin_mode):
         error_x += error_angle
     vision_wz = calc_follow_angle(error_angle, orbit_mode, spin_mode)
@@ -784,6 +791,7 @@ def solve_follow_pose_twist(
                 13 * error_x + 16 * error_y >= Follow_Ahead_Error_Y * 29
                 and ff_vx > 0.0
             ):
+                debug_event_mask |= 512
                 ff_vx = 0.0
                 ff_vy = 0.0
             vx = add_feedforward_direct(
@@ -880,14 +888,18 @@ def max_wheel_abs(wheel_fr, wheel_fl, wheel_b):
 
 
 def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_turn=False):
+    global debug_event_mask
+
     if Follow_Pose_Wheel_Target_Limit <= 0.0:
         return vx, vy, vz
 
     if preserve_turn:
         limit = Follow_Pose_Wheel_Target_Limit
         if vz > limit:
+            debug_event_mask |= 8192
             vz = limit
         elif vz < -limit:
+            debug_event_mask |= 8192
             vz = -limit
         wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
         scale = 1.0
@@ -914,6 +926,7 @@ def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_
         if scale < 0.0:
             scale = 0.0
         if scale < 1.0:
+            debug_event_mask |= 8192
             vx *= scale
             vy *= scale
         return vx, vy, vz
@@ -922,6 +935,7 @@ def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_
         wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, vz)
         target_max = max_wheel_abs(wheel_fr, wheel_fl, wheel_b)
         if target_max > Follow_Pose_Wheel_Target_Limit:
+            debug_event_mask |= 8192
             scale = Follow_Pose_Wheel_Target_Limit / target_max
             vx *= scale
             vy *= scale
@@ -931,12 +945,15 @@ def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_
     wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
     pos_max = max_wheel_abs(wheel_fr, wheel_fl, wheel_b)
     if pos_max > Follow_Pose_Wheel_Target_Limit:
+        debug_event_mask |= 8192
         pos_scale = Follow_Pose_Wheel_Target_Limit / pos_max
         vx *= pos_scale
         vy *= pos_scale
         wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
 
     if -0.001 < vz < 0.001:
+        if vz != 0.0:
+            debug_event_mask |= 8192
         return vx, vy, 0.0
 
     if vz > 0.0:
@@ -950,6 +967,7 @@ def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_
         if remain < 0.0:
             remain = 0.0
         if vz > remain:
+            debug_event_mask |= 8192
             vz = remain
     else:
         remain = Follow_Pose_Wheel_Target_Limit + wheel_fr
@@ -962,6 +980,7 @@ def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_
         if remain < 0.0:
             remain = 0.0
         if -vz > remain:
+            debug_event_mask |= 8192
             vz = -remain
 
     return vx, vy, vz
@@ -1012,6 +1031,7 @@ def poll_art_uart():
     global cam_parse_state, cam_parse_b1, cam_parse_b2
     global cam_has_target, cam_valid_target_since_ms
     global cam_last_rx_ms, target_lost_since_ms
+    global debug_event_mask
 
     pending = cam_uart.any()
     if not pending:
@@ -1037,6 +1057,7 @@ def poll_art_uart():
         elif cam_parse_state == 2:
             cam_parse_b2 = b
             if cam_parse_b1 == No_Target_Marker and b == No_Target_Marker:
+                debug_event_mask |= 128
                 cam_has_target = False
                 cam_valid_target_since_ms = 0
                 cam_last_rx_ms = utime.ticks_ms()
@@ -1066,7 +1087,7 @@ def poll_art_uart():
 
 def handle_coop_frame(msg_type, seq, payload, payload_len):
     global master_vx, master_vy, master_wz, master_yaw
-    global master_flags, master_last_rx_ms
+    global master_flags, master_last_rx_ms, master_last_seq
 
     if msg_type != MSG_MASTER_MOTION or payload_len < 9:
         return
@@ -1075,6 +1096,7 @@ def handle_coop_frame(msg_type, seq, payload, payload_len):
     master_wz = decode_i16(payload, 4) / 10.0
     master_yaw = decode_i16(payload, 6) / 10.0
     master_flags = payload[8]
+    master_last_seq = seq
     master_last_rx_ms = utime.ticks_ms()
     coop_flash_rx()
 
@@ -1119,9 +1141,12 @@ def update_follow_targets(yaw_deg, gyro_z):
     global last_back_priority_active
     global last_push_mode_active, push_enter_ms
     global last_follow_mode_key
+    global debug_event_mask
 
     now = utime.ticks_ms()
     seen = cam_target_seen()
+    if last_follow_seen and not seen:
+        debug_event_mask |= 256
     fresh_motion = master_motion_fresh()
     if fresh_motion:
         ff_vx = master_vx * 0.5 + master_vy * 0.8660254
@@ -1192,6 +1217,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     else:
         mode_key = 0
     if last_follow_mode_key != mode_key:
+        debug_event_mask |= 64
         speed_reset(pid_fl)
         speed_reset(pid_fr)
         speed_reset(pid_b)
@@ -1456,6 +1482,19 @@ def update_follow_targets(yaw_deg, gyro_z):
             -GYRO_OUTPUT_BASE_LIMIT,
             GYRO_OUTPUT_BASE_LIMIT,
         )
+    if ENABLE_GYRO_LOOP and gyro_pid is not None:
+        gyro_output_limit = gyro_pid.gyro_output_limit
+        if (
+            (not orbit_mode_active)
+            and (not spin_mode_active)
+            and GYRO_OUTPUT_BASE_LIMIT < gyro_output_limit
+        ):
+            gyro_output_limit = GYRO_OUTPUT_BASE_LIMIT
+        if gyro_output_limit > 0.0 and (
+            vz_cmd >= gyro_output_limit - 0.001
+            or vz_cmd <= -gyro_output_limit + 0.001
+        ):
+            debug_event_mask |= 16384
     cam_target_vx, cam_target_vy, vz_cmd = limit_pose_twist_for_wheels(
         cam_target_vx,
         cam_target_vy,
@@ -1627,11 +1666,15 @@ def wheel_target_idle(target):
     return -FOLLOW_START_PWM_LOW_TARGET < target < FOLLOW_START_PWM_LOW_TARGET
 
 
-def speed_ctrl_follow(pid, actual_speed, target_speed):
+def speed_ctrl_follow(pid, actual_speed, target_speed, idle_event, reverse_event):
+    global debug_event_mask
+
     if wheel_target_idle(target_speed):
+        debug_event_mask |= idle_event
         speed_reset(pid)
         return 0.0
     if pid.tar_spd_last * target_speed < 0.0:
+        debug_event_mask |= reverse_event
         speed_reset(pid)
     return speed_ctrl(pid, actual_speed, target_speed)
 
@@ -1674,11 +1717,13 @@ def calibrate_gyro_before_launch():
 
 def start_follow():
     global car_started, start_time
+    global debug_event_mask
 
     if car_started:
         return
     calibrate_gyro_before_launch()
     clear_cam_target_state()
+    debug_event_mask = 0
     car_started = True
     start_time = utime.ticks_ms()
     cam_uart.write(ART_MODE_TRACK_CMD)
@@ -1715,6 +1760,7 @@ def calc_speed_closed_loop():
     global last_pwm_fl, last_pwm_fr, last_pwm_b
     global last_hard_stop
     global last_stall_count, last_stall_boost
+    global debug_event_mask
 
     if not car_started:
         reset_speed_outputs()
@@ -1777,17 +1823,34 @@ def calc_speed_closed_loop():
             last_stall_count = 0
         last_stall_boost = last_stall_count >= FOLLOW_STALL_BOOST_FRAMES
 
-        u_fl = speed_ctrl_follow(pid_fl, e_fl, t_fl)
-        u_fr = speed_ctrl_follow(pid_fr, e_fr, t_fr)
-        u_b = speed_ctrl_follow(pid_b, e_b, t_b)
+        u_fl = speed_ctrl_follow(pid_fl, e_fl, t_fl, 1, 8)
+        u_fr = speed_ctrl_follow(pid_fr, e_fr, t_fr, 2, 16)
+        u_b = speed_ctrl_follow(pid_b, e_b, t_b, 4, 32)
 
         s_fl, s_fr, s_b = set_three_pwm_follow(
             u_fl, u_fr, u_b, t_fl, t_fr, t_b, last_stall_boost
         )
 
+    if s_fl >= FOLLOW_RUN_PWM_LIMIT or s_fl <= -FOLLOW_RUN_PWM_LIMIT:
+        debug_event_mask |= 1024
+    if s_fr >= FOLLOW_RUN_PWM_LIMIT or s_fr <= -FOLLOW_RUN_PWM_LIMIT:
+        debug_event_mask |= 2048
+    if s_b >= FOLLOW_RUN_PWM_LIMIT or s_b <= -FOLLOW_RUN_PWM_LIMIT:
+        debug_event_mask |= 4096
+
     now_log = utime.ticks_ms()
     if debug_due(now_log):
         log_id = now_log & 0x7FFF
+        master_age_ms = (
+            utime.ticks_diff(now_log, master_last_rx_ms)
+            if master_last_rx_ms
+            else -1
+        )
+        cam_age_ms = (
+            utime.ticks_diff(now_log, cam_last_rx_ms)
+            if cam_last_rx_ms
+            else -1
+        )
         debug_send(
             "S %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
             % (
@@ -1817,7 +1880,7 @@ def calc_speed_closed_loop():
             % (log_id, s_fl, s_fr, s_b, int(u_fl), int(u_fr), int(u_b))
         )
         debug_send(
-            "G %d %d %d %d %d %d %d %d %d"
+            "G %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
             % (
                 log_id,
                 int(gyro_z),
@@ -1828,8 +1891,19 @@ def calc_speed_closed_loop():
                 int(last_ff_vy),
                 int(last_ff_wz),
                 int(last_turn_rate_cmd),
+                int(cam_target_vx - last_visual_vx),
+                int(cam_target_vy - last_visual_vy),
+                int(round(master_vx * 10.0)),
+                int(round(master_vy * 10.0)),
+                int(round(master_wz * 10.0)),
+                last_follow_mode_key,
+                master_age_ms,
+                cam_age_ms,
+                master_last_seq,
+                debug_event_mask,
             )
         )
+        debug_event_mask = 0
 
 key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
 key_start = Pin(cfg.BTN_START_PIN, Pin.IN, Pin.PULL_UP)

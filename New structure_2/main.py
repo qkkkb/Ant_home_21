@@ -271,7 +271,7 @@ last_hard_stop = False
 last_stall_count = 0
 last_stall_boost = False
 # Bits 0-2: low target reset; 3-5: reverse reset; 6: mode reset;
-# 7: explicit camera loss; 8: camera timeout edge; 9: reserved push FF cut;
+# 7: explicit camera loss; 8: camera timeout edge; 9: push-settle FF gate;
 # 10-12: final PWM saturation; 13: pose limiter; 14: gyro limit.
 debug_event_mask = 0
 
@@ -1193,6 +1193,9 @@ def update_follow_targets(yaw_deg, gyro_z):
             Follow_Normal_Wz_Feedforward_Limit,
         )
     push_mode_active = explicit_push and (not orbit_mode_active) and (not spin_mode_active)
+    push_settle_active = explicit_push and orbit_mode_active
+    if push_settle_active and fresh_motion:
+        debug_event_mask |= 512
     if push_mode_active:
         if not last_push_mode_active:
             push_enter_ms = now
@@ -1253,7 +1256,7 @@ def update_follow_targets(yaw_deg, gyro_z):
 
     if seen:
         target_lost_since_ms = 0
-        use_motion_feedforward = fresh_motion
+        use_motion_feedforward = fresh_motion and (not push_settle_active)
         orbit_close_guard_active = (
             orbit_mode_active
             and cam_error_y <= -Follow_Forward_Deadband
@@ -1290,7 +1293,11 @@ def update_follow_targets(yaw_deg, gyro_z):
     else:
         if target_lost_since_ms == 0:
             target_lost_since_ms = now
-        if fresh_motion and utime.ticks_diff(now, target_lost_since_ms) <= Follow_Target_Lost_Hold_Ms:
+        if (
+            fresh_motion
+            and (not push_settle_active)
+            and utime.ticks_diff(now, target_lost_since_ms) <= Follow_Target_Lost_Hold_Ms
+        ):
             vx = ff_vx * Follow_Hold_Feedforward_Gain
             vy = ff_vy * Follow_Hold_Feedforward_Gain
             use_motion_feedforward = True
@@ -1321,8 +1328,12 @@ def update_follow_targets(yaw_deg, gyro_z):
                 orbit_mode_active,
                 spin_mode_active,
             )
-            vx *= xy_scale
-            vy *= xy_scale
+            if orbit_mode_active or spin_mode_active:
+                vx *= xy_scale
+                vy *= xy_scale
+            else:
+                vx = body_vx + (vx - body_vx) * xy_scale
+                vy = body_vy + (vy - body_vy) * xy_scale
 
     vx_limit = Follow_Forward_Limit
     vy_limit = Follow_Lateral_Limit

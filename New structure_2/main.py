@@ -126,7 +126,9 @@ Follow_Push_Visual_Forward_Scale = 0.60
 Follow_Push_Visual_Lateral_Scale = 1.00
 Follow_Normal_Visual_Forward_Scale = 0.60
 Follow_Normal_Visual_Lateral_Scale = 1.00
+Follow_Normal_Hold_Feedforward_Gain = 1.00
 Follow_Hold_Feedforward_Gain = 1.70
+Follow_Normal_Wz_Feedforward_Gain = 1.00
 Follow_Wz_Feedforward_Gain = 1.60
 Follow_Wz_Feedforward_Limit = 15.0
 Follow_Orbit_Wz_Feedforward_Gain = 1.00
@@ -182,6 +184,7 @@ Follow_Orbit_Command_Ramp_Wz = 18.0
 Follow_Spin_Command_Ramp_Wz = 64.0
 Follow_Spin_Gyro_Output_Ramp = 12.0
 Follow_Pose_Gyro_Output_Ramp = 12.0
+Follow_Normal_Target_Lost_Hold_Ms = 500
 Follow_Target_Lost_Hold_Ms = 250
 Follow_Orbit_Mode_FfWz_On = 18.0
 Follow_Orbit_Mode_FfWz_Off = 7.0
@@ -189,7 +192,8 @@ Follow_Orbit_Mode_Angle_Off = 4
 Follow_Orbit_Mode_Gyro_Off = 6.0
 Follow_Orbit_Mode_Exit_Ms = 120
 Follow_Orbit_Mode_FfWz_Filter = 0.22
-Follow_Normal_Wz_Feedforward_Limit = 2.4
+Follow_Normal_Wz_Feedforward_Limit = 15.0
+Follow_Push_Wz_Feedforward_Input_Limit = 2.4
 Follow_Spin_Mode_FfWz_On = 32.0
 Follow_Spin_Latch_Min_Wz = 26.0
 Follow_Spin_Command_Hold_Ms = 900
@@ -810,11 +814,11 @@ def solve_follow_pose_twist(
                 Follow_Feedforward_Lateral_Gain,
                 Follow_Feedforward_Lateral_Limit,
             )
-            wz = add_feedforward_assist(
+            wz = add_feedforward_direct(
                 wz,
                 ff_wz,
-                Follow_Wz_Feedforward_Gain,
-                Follow_Wz_Feedforward_Limit,
+                Follow_Normal_Wz_Feedforward_Gain,
+                Follow_Normal_Wz_Feedforward_Limit,
             )
     if orbit_mode and Follow_Orbit_Turn_Rate_Limit > 0.0:
         wz = clamp(
@@ -1150,6 +1154,12 @@ def update_follow_targets(gyro_z):
         follow_ff_wz = filtered_wz
     elif spin_mode_active:
         follow_ff_wz = spin_ff_wz
+    elif explicit_push:
+        follow_ff_wz = clamp(
+            filtered_wz,
+            -Follow_Push_Wz_Feedforward_Input_Limit,
+            Follow_Push_Wz_Feedforward_Input_Limit,
+        )
     else:
         follow_ff_wz = clamp(
             filtered_wz,
@@ -1251,14 +1261,24 @@ def update_follow_targets(gyro_z):
     else:
         if target_lost_since_ms == 0:
             target_lost_since_ms = now
-        if (
-            fresh_motion
-            and (not push_settle_active)
-            and utime.ticks_diff(now, target_lost_since_ms) <= Follow_Target_Lost_Hold_Ms
-        ):
-            vx = ff_vx * Follow_Hold_Feedforward_Gain
-            vy = ff_vy * Follow_Hold_Feedforward_Gain
-            use_motion_feedforward = True
+        if fresh_motion and (not push_settle_active):
+            if mode_key == 0:
+                use_motion_feedforward = (
+                    utime.ticks_diff(now, target_lost_since_ms)
+                    <= Follow_Normal_Target_Lost_Hold_Ms
+                )
+            else:
+                use_motion_feedforward = (
+                    utime.ticks_diff(now, target_lost_since_ms)
+                    <= Follow_Target_Lost_Hold_Ms
+                )
+        if use_motion_feedforward:
+            if mode_key == 0:
+                vx = ff_vx * Follow_Normal_Hold_Feedforward_Gain
+                vy = ff_vy * Follow_Normal_Hold_Feedforward_Gain
+            else:
+                vx = ff_vx * Follow_Hold_Feedforward_Gain
+                vy = ff_vy * Follow_Hold_Feedforward_Gain
         else:
             vx = 0.0
             vy = 0.0
@@ -1342,8 +1362,10 @@ def update_follow_targets(gyro_z):
                 -Follow_Spin_Wz_Feedforward_Limit,
                 Follow_Spin_Wz_Feedforward_Limit,
             )
-        else:
+        elif push_mode_active:
             turn_rate_cmd = follow_ff_wz * Follow_Wz_Feedforward_Gain
+        else:
+            turn_rate_cmd = follow_ff_wz * Follow_Normal_Wz_Feedforward_Gain
     priority_turn_mode = orbit_mode_active or spin_mode_active or angle_pose_mode_active
     orbit_brake_active = (
         priority_turn_mode

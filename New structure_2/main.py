@@ -271,7 +271,7 @@ last_hard_stop = False
 last_stall_count = 0
 last_stall_boost = False
 # Bits 0-2: low target reset; 3-5: reverse reset; 6: mode reset;
-# 7: explicit camera loss; 8: camera timeout edge; 9: push-settle FF gate;
+# 7: explicit camera loss; 8: camera timeout edge; 9: push-settle orbit FF gate;
 # 10-12: final PWM saturation; 13: pose limiter; 14: gyro limit.
 debug_event_mask = 0
 
@@ -1196,7 +1196,7 @@ def update_follow_targets(yaw_deg, gyro_z):
     push_settle_active = explicit_push and orbit_mode_active
     if push_settle_active and fresh_motion:
         debug_event_mask |= 512
-    if push_mode_active:
+    if explicit_push and (not spin_mode_active):
         if not last_push_mode_active:
             push_enter_ms = now
         last_push_mode_active = True
@@ -1338,6 +1338,20 @@ def update_follow_targets(yaw_deg, gyro_z):
             else:
                 vx = body_vx + (vx - body_vx) * xy_scale
                 vy = body_vy + (vy - body_vy) * xy_scale
+
+    if push_settle_active and fresh_motion and seen:
+        vx = add_feedforward_direct(
+            vx,
+            ff_vx,
+            Follow_Push_Feedforward_Forward_Gain,
+            Follow_Push_Feedforward_Forward_Limit,
+        )
+        vy = add_feedforward_direct(
+            vy,
+            ff_vy,
+            Follow_Push_Feedforward_Lateral_Gain,
+            Follow_Push_Feedforward_Lateral_Limit,
+        )
 
     vx_limit = Follow_Forward_Limit
     vy_limit = Follow_Lateral_Limit

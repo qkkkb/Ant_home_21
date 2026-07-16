@@ -1259,6 +1259,7 @@ def update_follow_targets(yaw_deg, gyro_z):
         use_motion_feedforward = fresh_motion and (not push_settle_active)
         orbit_close_guard_active = (
             orbit_mode_active
+            and (not push_settle_active)
             and cam_error_y <= -Follow_Forward_Deadband
         )
         back_priority_active = orbit_close_guard_active
@@ -1328,7 +1329,10 @@ def update_follow_targets(yaw_deg, gyro_z):
                 orbit_mode_active,
                 spin_mode_active,
             )
-            if orbit_mode_active or spin_mode_active:
+            if push_settle_active:
+                vx = body_vx + (vx - body_vx) * xy_scale
+                vy = body_vy + (vy - body_vy) * xy_scale
+            elif orbit_mode_active or spin_mode_active:
                 vx *= xy_scale
                 vy *= xy_scale
             else:

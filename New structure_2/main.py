@@ -112,13 +112,13 @@ Follow_Distance_Far_Boost_Error = 6
 Follow_Distance_Far_Boost_Gain = 0.70
 Follow_Distance_Close_Gain = 0.62
 Follow_Distance_Close_Limit = 22.0
-Follow_Normal_StandOff_Error_Y = 4
+Follow_Normal_StandOff_Error_Y = 6
 Follow_Orbit_Close_Back_Max_Vx = 28.0
 Follow_Orbit_Close_Back_Gain = 1.65
 Follow_Orbit_Close_Full_Error = 8
 Follow_Orbit_Close_Vy_Limit = 10.5
-Follow_Feedforward_Forward_Gain = 0.60
-Follow_Feedforward_Lateral_Gain = 0.60
+Follow_Feedforward_Forward_Gain = 1.00
+Follow_Feedforward_Lateral_Gain = 1.00
 Follow_Feedforward_Forward_Limit = 20.0
 Follow_Feedforward_Lateral_Limit = 18.0
 Follow_Push_Feedforward_Forward_Gain = 1.00
@@ -163,9 +163,9 @@ Follow_Spin_Feedforward_Forward_Gain = 0.95
 Follow_Spin_Feedforward_Lateral_Gain = 1.05
 Follow_Spin_Feedforward_Forward_Limit = 12.0
 Follow_Spin_Feedforward_Lateral_Limit = 20.0
-Follow_Spin_Wz_Feedforward_Gain = 1.00
-Follow_Spin_Wz_Feedforward_Limit = 120.0
-Follow_Spin_Turn_Rate_Limit = 128.0
+Follow_Spin_Wz_Feedforward_Gain = 0.70
+Follow_Spin_Wz_Feedforward_Limit = 84.0
+Follow_Spin_Turn_Rate_Limit = 96.0
 Follow_Pose_Angle_Deadband = 4
 Follow_Pose_Angle_Active_Error = 6
 Follow_Angle_XY_Mode_On_Error = 10
@@ -728,7 +728,7 @@ def solve_follow_pose_twist(
         error_angle >= active_error
         or error_angle <= -active_error
     )
-    if (orbit_mode or spin_mode) and (not push_mode):
+    if orbit_mode or spin_mode:
         position_priority = position_priority_needed(
             error_x,
             error_y,
@@ -882,10 +882,6 @@ def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_
 
     if Follow_Pose_Wheel_Target_Limit <= 0.0:
         return vx, vy, vz
-
-    if last_push_mode_active:
-        preserve_pose_ratio = False
-        preserve_turn = False
 
     if preserve_turn:
         limit = Follow_Pose_Wheel_Target_Limit
@@ -1286,7 +1282,7 @@ def update_follow_targets(gyro_z):
             follow_ff_wz,
             use_motion_feedforward,
             orbit_mode_active,
-            push_mode_active or push_settle_active,
+            push_mode_active,
             spin_mode_active,
         )
         if orbit_mode_active:
@@ -1527,6 +1523,7 @@ def update_follow_targets(gyro_z):
         priority_turn_mode,
         priority_turn_mode
         and (not orbit_mode_active)
+        and (not spin_mode_active)
         and (vz_cmd >= 0.001 or vz_cmd <= -0.001),
     )
     last_cmd_vx = cam_target_vx

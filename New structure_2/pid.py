@@ -1,4 +1,4 @@
-PWM_MAX = 40000.0
+PWM_MAX = 60000.0
 
 
 def gyro_ctrl(pid, err_gyro):

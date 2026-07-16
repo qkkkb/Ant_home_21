@@ -257,7 +257,6 @@ last_cmd_vy = 0.0
 last_cmd_wz = 0.0
 last_ap_vz_cmd = 0.0
 last_angle_priority_active = False
-last_back_priority_active = False
 orbit_follow_active = False
 orbit_follow_exit_since_ms = 0
 filtered_ff_wz = 0.0
@@ -418,7 +417,6 @@ def clear_cam_target_state():
     global cam_has_target, cam_valid_target_since_ms, target_lost_since_ms
     global last_cmd_vx, last_cmd_vy, last_cmd_wz, last_ap_vz_cmd
     global last_angle_priority_active
-    global last_back_priority_active
     global orbit_follow_active, orbit_follow_exit_since_ms, filtered_ff_wz
     global spin_latched_wz, spin_latch_until_ms
     global last_push_mode_active, push_enter_ms
@@ -432,7 +430,6 @@ def clear_cam_target_state():
     last_cmd_wz = 0.0
     last_ap_vz_cmd = 0.0
     last_angle_priority_active = False
-    last_back_priority_active = False
     orbit_follow_active = False
     orbit_follow_exit_since_ms = 0
     filtered_ff_wz = 0.0
@@ -681,27 +678,13 @@ def add_feedforward_assist(base, feedforward, gain, limit):
     return base + assist
 
 
-def add_feedforward_direct(base, feedforward, gain, limit):
-    return base + clamp(feedforward * gain, -limit, limit)
-
-
-def close_feedforward_scale(error_y):
-    depth = -error_y - Follow_Close_Guard_Start_Error
-    if depth <= 0.0:
-        return 1.0
-    span = Follow_Close_Guard_Full_Error - Follow_Close_Guard_Start_Error
-    if depth >= span:
-        return 0.0
-    return 1.0 - depth / span
-
-
-def add_feedforward_guarded(base, feedforward, gain, limit, close_scale):
+def add_feedforward_direct(base, feedforward, gain, limit, conflict_scale=1.0):
     global debug_event_mask
 
     assist = clamp(feedforward * gain, -limit, limit)
-    if base * assist < -0.001 and close_scale < 1.0:
+    if base * assist < -0.001 and conflict_scale < 1.0:
         debug_event_mask |= 32768
-        assist *= close_scale
+        assist *= conflict_scale
     return base + assist
 
 
@@ -759,11 +742,11 @@ def solve_follow_pose_twist(
     wz = vision_wz
     if use_ff:
         if orbit_mode:
-            orbit_ff_scale = orbit_feedforward_position_scale(error_x, error_y)
+            ff_scale = orbit_feedforward_position_scale(error_x, error_y)
             target_ff_vx = ff_vx + ff_wz * Follow_Orbit_Target_Point_Wz_To_Vx
             target_ff_vy = ff_vy + ff_wz * Follow_Orbit_Target_Point_Wz_To_Vy
-            target_ff_vx *= orbit_ff_scale
-            target_ff_vy *= orbit_ff_scale
+            target_ff_vx *= ff_scale
+            target_ff_vy *= ff_scale
             vx = add_feedforward_assist(
                 vx,
                 target_ff_vx,
@@ -783,20 +766,20 @@ def solve_follow_pose_twist(
                 Follow_Orbit_Wz_Feedforward_Limit,
             )
         elif push_mode:
-            close_scale = close_feedforward_scale(error_y)
-            vx = add_feedforward_guarded(
+            ff_scale = clamp((error_y + Follow_Close_Guard_Full_Error) / (Follow_Close_Guard_Full_Error - Follow_Close_Guard_Start_Error), 0.0, 1.0)
+            vx = add_feedforward_direct(
                 vx,
                 ff_vx,
                 Follow_Push_Feedforward_Forward_Gain,
                 Follow_Push_Feedforward_Forward_Limit,
-                close_scale,
+                ff_scale,
             )
-            vy = add_feedforward_guarded(
+            vy = add_feedforward_direct(
                 vy,
                 ff_vy,
                 Follow_Push_Feedforward_Lateral_Gain,
                 Follow_Push_Feedforward_Lateral_Limit,
-                close_scale,
+                ff_scale,
             )
             wz = add_feedforward_assist(
                 wz,
@@ -826,22 +809,22 @@ def solve_follow_pose_twist(
                 Follow_Spin_Wz_Feedforward_Limit,
             )
         else:
-            close_scale = close_feedforward_scale(error_y)
+            ff_scale = clamp((error_y + Follow_Close_Guard_Full_Error) / (Follow_Close_Guard_Full_Error - Follow_Close_Guard_Start_Error), 0.0, 1.0)
             target_ff_vx = ff_vx + ff_wz * Follow_Target_Point_Wz_To_Vx
             target_ff_vy = ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
-            vx = add_feedforward_guarded(
+            vx = add_feedforward_direct(
                 vx,
                 target_ff_vx,
                 Follow_Feedforward_Forward_Gain,
                 Follow_Feedforward_Forward_Limit,
-                close_scale,
+                ff_scale,
             )
-            vy = add_feedforward_guarded(
+            vy = add_feedforward_direct(
                 vy,
                 target_ff_vy,
                 Follow_Feedforward_Lateral_Gain,
                 Follow_Feedforward_Lateral_Limit,
-                close_scale,
+                ff_scale,
             )
             wz = add_feedforward_direct(
                 wz,
@@ -882,14 +865,7 @@ def max_wheel_abs(wheel_fr, wheel_fl, wheel_b):
     return max_abs
 
 
-def limit_pose_twist_for_wheels(
-    vx,
-    vy,
-    vz,
-    preserve_pose_ratio=False,
-    preserve_turn=False,
-    turn_reserve=0.0,
-):
+def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_turn=False):
     global debug_event_mask
 
     if Follow_Pose_Wheel_Target_Limit <= 0.0:
@@ -925,23 +901,6 @@ def limit_pose_twist_for_wheels(
             scale = 0.0
         if scale < 1.0:
             debug_event_mask |= 8192
-            vx *= scale
-            vy *= scale
-        return vx, vy, vz
-
-    if turn_reserve > 0.0:
-        if vz > turn_reserve:
-            debug_event_mask |= 8192
-            vz = turn_reserve
-        elif vz < -turn_reserve:
-            debug_event_mask |= 8192
-            vz = -turn_reserve
-        wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
-        target_max = max_wheel_abs(wheel_fr, wheel_fl, wheel_b)
-        translation_limit = Follow_Pose_Wheel_Target_Limit - abs(vz)
-        if target_max > translation_limit:
-            debug_event_mask |= 8192
-            scale = translation_limit / target_max
             vx *= scale
             vy *= scale
         return vx, vy, vz
@@ -1151,7 +1110,6 @@ def update_follow_targets(gyro_z):
     global last_pwm_fl, last_pwm_fr, last_pwm_b
     global last_stall_count, last_stall_boost
     global last_angle_priority_active
-    global last_back_priority_active
     global last_push_mode_active, push_enter_ms
     global last_follow_mode_key
     global debug_event_mask
@@ -1257,7 +1215,6 @@ def update_follow_targets(gyro_z):
         last_cmd_wz = 0.0
         last_ap_vz_cmd = 0.0
         last_angle_priority_active = False
-        last_back_priority_active = False
         if ENABLE_GYRO_LOOP and gyro_pid is not None:
             gyro_pid.output = 0.0
             gyro_pid.err = 0.0
@@ -1310,7 +1267,6 @@ def update_follow_targets(gyro_z):
         if angle_pose_mode_active:
             position_priority_active = True
         last_angle_priority_active = angle_priority_active or angle_pose_mode_active
-        last_back_priority_active = False
     else:
         if target_lost_since_ms == 0:
             target_lost_since_ms = now
@@ -1338,7 +1294,6 @@ def update_follow_targets(gyro_z):
         if prev_angle_priority_active:
             reset_turn_loop_state()
         last_angle_priority_active = False
-        last_back_priority_active = False
 
     if seen:
         if angle_pose_mode_active:
@@ -1537,6 +1492,13 @@ def update_follow_targets(gyro_z):
             or vz_cmd <= -gyro_output_limit + 0.001
         ):
             debug_event_mask |= 16384
+    if normal_brake_active and (not priority_turn_mode):
+        if vz_cmd > Follow_Normal_Brake_Wheel_Reserve:
+            debug_event_mask |= 8192
+            vz_cmd = Follow_Normal_Brake_Wheel_Reserve
+        elif vz_cmd < -Follow_Normal_Brake_Wheel_Reserve:
+            debug_event_mask |= 8192
+            vz_cmd = -Follow_Normal_Brake_Wheel_Reserve
     cam_target_vx, cam_target_vy, vz_cmd = limit_pose_twist_for_wheels(
         cam_target_vx,
         cam_target_vy,
@@ -1546,7 +1508,6 @@ def update_follow_targets(gyro_z):
         and (not orbit_mode_active)
         and (not spin_mode_active)
         and (vz_cmd >= 0.001 or vz_cmd <= -0.001),
-        Follow_Normal_Brake_Wheel_Reserve if normal_brake_active else 0.0,
     )
     last_cmd_vx = cam_target_vx
     last_cmd_vy = cam_target_vy
@@ -1573,7 +1534,7 @@ def reset_speed_outputs():
     global last_pwm_fl, last_pwm_fr, last_pwm_b
     global last_stall_count, last_stall_boost
     global last_cmd_vx, last_cmd_vy, last_cmd_wz, last_ap_vz_cmd
-    global last_angle_priority_active, last_back_priority_active
+    global last_angle_priority_active
     global orbit_follow_active, orbit_follow_exit_since_ms, filtered_ff_wz
     global spin_latched_wz, spin_latch_until_ms
     global last_push_mode_active, push_enter_ms
@@ -1592,7 +1553,6 @@ def reset_speed_outputs():
     last_cmd_wz = 0.0
     last_ap_vz_cmd = 0.0
     last_angle_priority_active = False
-    last_back_priority_active = False
     orbit_follow_active = False
     orbit_follow_exit_since_ms = 0
     filtered_ff_wz = 0.0
@@ -1905,7 +1865,7 @@ def calc_speed_closed_loop():
                 1 if last_hard_stop else 0,
                 1 if last_stall_boost else 0,
                 1 if last_angle_priority_active else 0,
-                1 if last_back_priority_active else 0,
+                0,
                 cam_error_x,
                 cam_error_y,
                 cam_error_angle,

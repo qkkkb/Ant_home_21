@@ -119,8 +119,8 @@ Follow_Orbit_Close_Back_Max_Vx = 28.0
 Follow_Orbit_Close_Back_Gain = 1.65
 Follow_Orbit_Close_Full_Error = 8
 Follow_Orbit_Close_Vy_Limit = 10.5
-Follow_Feedforward_Forward_Gain = 1.00
-Follow_Feedforward_Lateral_Gain = 1.00
+Follow_Feedforward_Forward_Gain = 0.60
+Follow_Feedforward_Lateral_Gain = 0.60
 Follow_Feedforward_Forward_Limit = 20.0
 Follow_Feedforward_Lateral_Limit = 18.0
 Follow_Push_Feedforward_Forward_Gain = 1.00
@@ -1524,9 +1524,12 @@ def update_follow_targets(gyro_z):
         cam_target_vx,
         cam_target_vy,
         vz_cmd,
-        priority_turn_mode,
+        priority_turn_mode
+        and (not push_mode_active)
+        and (not push_settle_active),
         priority_turn_mode
         and (not orbit_mode_active)
+        and (not push_mode_active)
         and (vz_cmd >= 0.001 or vz_cmd <= -0.001),
     )
     last_cmd_vx = cam_target_vx

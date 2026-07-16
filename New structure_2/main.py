@@ -1411,7 +1411,7 @@ def update_follow_targets(yaw_deg, gyro_z):
         last_angle_priority_active = True
     if ENABLE_GYRO_LOOP and gyro_pid is not None:
         if abs(turn_rate_cmd) > 0.001 or orbit_brake_active:
-            if angle_priority_active:
+            if angle_priority_active and (orbit_mode_active or spin_mode_active):
                 gyro_pid.gyro_kp = GYRO_PRIORITY_KP
                 gyro_pid.gyro_ki = GYRO_PRIORITY_KI
                 gyro_pid.gyro_output_limit = gyro_limit_for_turn(
@@ -1456,6 +1456,12 @@ def update_follow_targets(yaw_deg, gyro_z):
         last_ap_vz_cmd = 0.0
         vz_cmd = turn_rate_cmd
 
+    if (not orbit_mode_active) and (not spin_mode_active):
+        vz_cmd = clamp(
+            vz_cmd,
+            -GYRO_OUTPUT_BASE_LIMIT,
+            GYRO_OUTPUT_BASE_LIMIT,
+        )
     cam_target_vx, cam_target_vy, vz_cmd = limit_pose_twist_for_wheels(
         cam_target_vx,
         cam_target_vy,

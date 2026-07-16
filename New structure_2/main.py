@@ -722,8 +722,6 @@ def solve_follow_pose_twist(
     push_mode=False,
     spin_mode=False,
 ):
-    if (not orbit_mode) and (not spin_mode):
-        error_x += error_angle
     vision_wz = calc_follow_angle(error_angle, orbit_mode, spin_mode)
     active_error = (
         Follow_Pose_Angle_Active_Error
@@ -781,7 +779,7 @@ def solve_follow_pose_twist(
                 Follow_Orbit_Feedforward_Lateral_Gain,
                 Follow_Orbit_Feedforward_Lateral_Limit,
             )
-            wz = add_feedforward_assist(
+            wz = add_feedforward_direct(
                 wz,
                 ff_wz,
                 Follow_Orbit_Wz_Feedforward_Gain,

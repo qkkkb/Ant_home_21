@@ -1579,6 +1579,8 @@ def follow_channel_pwm(cmd, target, stall_boost, last_pwm):
     min_pwm = follow_start_pwm_for_target(target, stall_boost)
     if min_pwm <= 0:
         return 0
+    if last_pwm * target < 0.0:
+        return 0
     return smooth_value(apply_start_pwm(cmd, min_pwm), last_pwm)
 
 
@@ -1622,13 +1624,15 @@ def encoders_stalled(e_fl, e_fr, e_b):
 
 
 def wheel_target_idle(target):
-    return -WHEEL_TARGET_IDLE_EPS <= target <= WHEEL_TARGET_IDLE_EPS
+    return -FOLLOW_START_PWM_LOW_TARGET < target < FOLLOW_START_PWM_LOW_TARGET
 
 
 def speed_ctrl_follow(pid, actual_speed, target_speed):
     if wheel_target_idle(target_speed):
         speed_reset(pid)
         return 0.0
+    if pid.tar_spd_last * target_speed < 0.0:
+        speed_reset(pid)
     return speed_ctrl(pid, actual_speed, target_speed)
 
 

@@ -828,12 +828,6 @@ def solve_follow_pose_twist(
         else:
             target_ff_vx = ff_vx + ff_wz * Follow_Target_Point_Wz_To_Vx
             target_ff_vy = ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
-            if (
-                13 * error_x + 16 * error_y >= Follow_Ahead_Error_Y * 29
-                and target_ff_vx > 0.0
-            ):
-                target_ff_vx = 0.0
-                target_ff_vy = 0.0
             vx = add_feedforward_direct(
                 vx,
                 target_ff_vx,

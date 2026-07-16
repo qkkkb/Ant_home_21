@@ -1411,9 +1411,18 @@ def update_follow_targets(gyro_z):
             or gyro_z <= -Follow_Orbit_Brake_Gyro_Threshold
         )
     )
+    normal_brake_active = (
+        (not orbit_mode_active)
+        and (not spin_mode_active)
+        and (
+            gyro_z >= Follow_Orbit_Brake_Gyro_Threshold
+            or gyro_z <= -Follow_Orbit_Brake_Gyro_Threshold
+        )
+        and abs(gyro_z) > abs(turn_rate_cmd) * GYRO_PRIORITY_OVERSPEED_RATIO
+    )
     if -0.001 < turn_rate_cmd < 0.001:
         turn_rate_cmd = 0.0
-        if orbit_brake_active:
+        if orbit_brake_active or normal_brake_active:
             last_cmd_wz = 0.0
         else:
             reset_turn_loop_state()
@@ -1447,8 +1456,8 @@ def update_follow_targets(gyro_z):
         angle_priority_active = True
         last_angle_priority_active = True
     if ENABLE_GYRO_LOOP and gyro_pid is not None:
-        if abs(turn_rate_cmd) > 0.001 or orbit_brake_active:
-            if angle_priority_active:
+        if abs(turn_rate_cmd) > 0.001 or orbit_brake_active or normal_brake_active:
+            if angle_priority_active or normal_brake_active:
                 gyro_pid.gyro_kp = GYRO_PRIORITY_KP
                 gyro_pid.gyro_ki = GYRO_PRIORITY_KI
                 gyro_pid.gyro_output_limit = gyro_limit_for_turn(

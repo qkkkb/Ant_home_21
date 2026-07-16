@@ -78,6 +78,8 @@ FOLLOW_START_PWM_MID_TARGET = 2.8
 FOLLOW_STALL_BOOST_TARGET = 2.8
 FOLLOW_RUN_PWM_LIMIT = 40000
 FOLLOW_STALL_BOOST_FRAMES = 3
+FOLLOW_WHEEL_PWM_FEEDFORWARD = 4000
+FOLLOW_WHEEL_SPEED_TARGET_LIMIT = 10
 
 
 # ====================== Camera protocol ======================
@@ -1581,6 +1583,18 @@ def follow_channel_pwm(cmd, target, stall_boost, last_pwm):
         return 0
     if last_pwm * target < 0.0:
         return 0
+
+    feedforward = target * FOLLOW_WHEEL_PWM_FEEDFORWARD
+    if feedforward > FOLLOW_RUN_PWM_LIMIT:
+        feedforward = FOLLOW_RUN_PWM_LIMIT
+    elif feedforward < -FOLLOW_RUN_PWM_LIMIT:
+        feedforward = -FOLLOW_RUN_PWM_LIMIT
+
+    if target > 0.0 and cmd < feedforward:
+        cmd = feedforward
+    elif target < 0.0 and cmd > feedforward:
+        cmd = feedforward
+
     return smooth_value(apply_start_pwm(cmd, min_pwm), last_pwm)
 
 
@@ -1755,12 +1769,22 @@ def calc_speed_closed_loop():
     vz_cmd = update_follow_targets(yaw_deg, gyro_z)
     calc_wheel_spd(move_cmd, cam_target_vx, cam_target_vy, vz_cmd)
 
-    e_fl = enc_fl.get()
-    e_fr = enc_fr.get()
-    e_b = enc_b.get()
     t_fl = move_cmd.speed_fl
     t_fr = move_cmd.speed_fr
     t_b = move_cmd.speed_b
+    u_fl = max_wheel_abs(t_fl, t_fr, t_b)
+    if u_fl > FOLLOW_WHEEL_SPEED_TARGET_LIMIT:
+        u_fl = FOLLOW_WHEEL_SPEED_TARGET_LIMIT / u_fl
+        t_fl *= u_fl
+        t_fr *= u_fl
+        t_b *= u_fl
+        move_cmd.speed_fl = t_fl
+        move_cmd.speed_fr = t_fr
+        move_cmd.speed_b = t_b
+
+    e_fl = enc_fl.get()
+    e_fr = enc_fr.get()
+    e_b = enc_b.get()
 
     if wheel_targets_zero(t_fl, t_fr, t_b):
         reset_speed_outputs()

@@ -261,17 +261,32 @@ def target_reached(actual, target):
     return True
 
 
-def run_stage(mode_name, ff_enabled, axis_name, target):
-    global target_fl, target_fr, target_b, use_ff_mode
+def set_stage_targets(axis_name, target):
+    global target_fl, target_fr, target_b
 
+    value = float(target)
     if axis_name == "FWD":
-        target_fl = float(target)
-        target_fr = -float(target)
+        target_fl = value
+        target_fr = -value
         target_b = 0.0
+    elif axis_name == "LAT":
+        target_fl = value * 0.5
+        target_fr = value * 0.5
+        target_b = -value
+    elif axis_name == "ROT":
+        target_fl = value
+        target_fr = value
+        target_b = value
     else:
-        target_fl = float(target) * 0.5
-        target_fr = float(target) * 0.5
-        target_b = -float(target)
+        target_fl = value * 0.75
+        target_fr = -value * 0.85
+        target_b = value
+
+
+def run_stage(mode_name, ff_enabled, axis_name, target):
+    global use_ff_mode
+
+    set_stage_targets(axis_name, target)
     use_ff_mode = ff_enabled
     reset_speed_loop()
 
@@ -327,6 +342,17 @@ def run_stage(mode_name, ff_enabled, axis_name, target):
                 % (pwm_fl, pwm_fr, pwm_b, int(raw_fl), int(raw_fr), int(raw_b))
             )
             send_line("F %d %d %d" % (ff_fl, ff_fr, ff_b))
+            send_line(
+                "V %d %d %d %d %d %d"
+                % (
+                    int((target_fl - target_fr) * 10 / 1.73205),
+                    int((target_fl + target_fr - 2 * target_b) * 10 / 3),
+                    int((target_fl + target_fr + target_b) * 10 / 3),
+                    int((actual_fl - actual_fr) * 10 / 1.73205),
+                    int((actual_fl + actual_fr - 2 * actual_b) * 10 / 3),
+                    int((actual_fl + actual_fr + actual_b) * 10 / 3),
+                )
+            )
         utime.sleep_ms(1)
 
     if steady_count > 0:
@@ -343,25 +369,14 @@ def run_stage(mode_name, ff_enabled, axis_name, target):
 
 def run_suite():
     run_stage("PID", False, "FWD", 6)
-    run_stage("PID", False, "FWD", 10)
     run_stage("PID", False, "LAT", 6)
-    run_stage("PID", False, "LAT", 10)
+    run_stage("PID", False, "ROT", 6)
+    run_stage("PID", False, "MIX", 10)
 
-    run_stage("FF4K", True, "FWD", 4)
     run_stage("FF4K", True, "FWD", 6)
-    run_stage("FF4K", True, "FWD", 8)
-    run_stage("FF4K", True, "FWD", 10)
-    run_stage("FF4K", True, "FWD", 12)
-    run_stage("FF4K", True, "FWD", 15)
-    run_stage("FF4K", True, "FWD", 20)
-
-    run_stage("FF4K", True, "LAT", 4)
     run_stage("FF4K", True, "LAT", 6)
-    run_stage("FF4K", True, "LAT", 8)
-    run_stage("FF4K", True, "LAT", 10)
-    run_stage("FF4K", True, "LAT", 12)
-    run_stage("FF4K", True, "LAT", 15)
-    run_stage("FF4K", True, "LAT", 20)
+    run_stage("FF4K", True, "ROT", 6)
+    run_stage("FF4K", True, "MIX", 10)
 
 
 def init_hardware():

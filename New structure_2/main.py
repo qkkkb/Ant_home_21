@@ -76,9 +76,7 @@ FOLLOW_START_PWM_LOW_TARGET = 1.2
 FOLLOW_START_PWM_MID_TARGET = 2.8
 FOLLOW_STALL_BOOST_TARGET = 2.8
 FOLLOW_RUN_PWM_LIMIT = 40000
-FOLLOW_SPEED_KI = 10.0
 FOLLOW_STALL_BOOST_FRAMES = 3
-_pid_mod.PWM_MAX = FOLLOW_RUN_PWM_LIMIT
 
 
 # ====================== Camera protocol ======================
@@ -231,7 +229,6 @@ master_vy = 0.0
 master_wz = 0.0
 master_flags = 0
 master_last_rx_ms = 0
-master_last_seq = 0
 
 coop_parser = CoopFrameParser()
 COOP_LED_PULSE_MS = 40
@@ -1084,7 +1081,7 @@ def poll_art_uart():
 
 def handle_coop_frame(msg_type, seq, payload, payload_len):
     global master_vx, master_vy, master_wz
-    global master_flags, master_last_rx_ms, master_last_seq
+    global master_flags, master_last_rx_ms
 
     if msg_type != MSG_MASTER_MOTION or payload_len < 9:
         return
@@ -1092,7 +1089,6 @@ def handle_coop_frame(msg_type, seq, payload, payload_len):
     master_vy = decode_i16(payload, 2) / 10.0
     master_wz = decode_i16(payload, 4) / 10.0
     master_flags = payload[8]
-    master_last_seq = seq
     master_last_rx_ms = utime.ticks_ms()
     coop_flash_rx()
 
@@ -1908,7 +1904,7 @@ def calc_speed_closed_loop():
             % (log_id, s_fl, s_fr, s_b, int(u_fl), int(u_fr), int(u_b))
         )
         debug_send(
-            "G %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
+            "G %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
             % (
                 log_id,
                 int(gyro_z),
@@ -1927,7 +1923,6 @@ def calc_speed_closed_loop():
                 last_follow_mode_key,
                 master_age_ms,
                 cam_age_ms,
-                master_last_seq,
                 debug_event_mask,
             )
         )
@@ -1975,9 +1970,6 @@ move_cmd = MoveBase()
 pid_fl = SpeedPID()
 pid_fr = SpeedPID()
 pid_b = SpeedPID()
-pid_fl.ki = FOLLOW_SPEED_KI
-pid_fr.ki = FOLLOW_SPEED_KI
-pid_b.ki = FOLLOW_SPEED_KI
 pid_fl.init_c()
 pid_fr.init_c()
 pid_b.init_c()

@@ -176,7 +176,7 @@ Follow_Angle_XY_Min_Scale = 0.75
 Follow_Spin_XY_Min_Scale = 0.94
 Follow_Orbit_XY_Max_Scale = 0.50
 Follow_Spin_XY_Max_Scale = 1.00
-Follow_Pose_Wheel_Target_Limit = 10.0
+Follow_Pose_Wheel_Target_Limit = 20.0
 Follow_Command_Ramp_Vx = 2.0
 Follow_Command_Ramp_Vy = 3.0
 Follow_Push_Command_Ramp_Vx = 2.0
@@ -1638,6 +1638,10 @@ def speed_ctrl_follow(pid, actual_speed, target_speed):
         return 0.0
     output = speed_ctrl(pid, actual_speed, target_speed)
     feedforward = target_speed * FOLLOW_WHEEL_PWM_FEEDFORWARD
+    if feedforward > FOLLOW_RUN_PWM_LIMIT:
+        feedforward = FOLLOW_RUN_PWM_LIMIT
+    elif feedforward < -FOLLOW_RUN_PWM_LIMIT:
+        feedforward = -FOLLOW_RUN_PWM_LIMIT
     if target_speed > 0.0 and actual_speed <= target_speed and output < feedforward:
         output = feedforward
         pid.output = output

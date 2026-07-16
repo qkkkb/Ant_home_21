@@ -121,6 +121,10 @@ Follow_Feedforward_Forward_Gain = 1.00
 Follow_Feedforward_Lateral_Gain = 1.00
 Follow_Feedforward_Forward_Limit = 20.0
 Follow_Feedforward_Lateral_Limit = 18.0
+Follow_Feedforward_Full_Pose_Error = 4
+Follow_Feedforward_Zero_Pose_Error = 10
+Follow_Feedforward_Scale_Down_Step = 0.10
+Follow_Feedforward_Scale_Up_Step = 0.02
 Follow_Push_Feedforward_Forward_Gain = 1.00
 Follow_Push_Feedforward_Lateral_Gain = 1.00
 Follow_Push_Feedforward_Forward_Limit = 18.0
@@ -249,6 +253,7 @@ last_visual_vy = 0.0
 last_ff_vx = 0.0
 last_ff_vy = 0.0
 last_ff_wz = 0.0
+follow_ff_scale = 1.0
 last_cmd_vx = 0.0
 last_cmd_vy = 0.0
 last_cmd_wz = 0.0
@@ -293,6 +298,31 @@ def angle_abs_value(error_angle):
     if error_angle < 0:
         return -error_angle
     return error_angle
+
+
+def update_follow_ff_scale(error_x, error_y, push_mode):
+    global follow_ff_scale
+
+    if not push_mode:
+        error_y -= Follow_Normal_StandOff_Error_Y
+    error_abs = angle_abs_value(error_x)
+    error_y_abs = angle_abs_value(error_y)
+    if error_y_abs > error_abs:
+        error_abs = error_y_abs
+    target_scale = clamp(
+        (Follow_Feedforward_Zero_Pose_Error - error_abs)
+        / (
+            Follow_Feedforward_Zero_Pose_Error
+            - Follow_Feedforward_Full_Pose_Error
+        ),
+        0.0,
+        1.0,
+    )
+    if target_scale < follow_ff_scale:
+        step = Follow_Feedforward_Scale_Down_Step
+    else:
+        step = Follow_Feedforward_Scale_Up_Step
+    follow_ff_scale = ramp_value(target_scale, follow_ff_scale, step)
 
 
 def angle_pose_mode_needed(error_angle, orbit_mode=False, spin_mode=False):
@@ -444,6 +474,7 @@ def clear_cam_target_state():
     global spin_latched_wz, spin_latch_until_ms
     global last_push_mode_active, push_enter_ms
     global last_follow_mode_key
+    global follow_ff_scale
 
     cam_error_x = 0
     cam_error_y = 0
@@ -462,6 +493,7 @@ def clear_cam_target_state():
     last_push_mode_active = False
     push_enter_ms = 0
     last_follow_mode_key = -1
+    follow_ff_scale = 1.0
     cam_has_target = False
     cam_valid_target_since_ms = 0
     target_lost_since_ms = 0
@@ -785,15 +817,15 @@ def solve_follow_pose_twist(
                 Follow_Orbit_Wz_Feedforward_Limit,
             )
         elif push_mode:
-            vx = add_feedforward_assist(
+            vx = add_feedforward_direct(
                 vx,
-                ff_vx,
+                ff_vx * follow_ff_scale,
                 Follow_Push_Feedforward_Forward_Gain,
                 Follow_Push_Feedforward_Forward_Limit,
             )
-            vy = add_feedforward_assist(
+            vy = add_feedforward_direct(
                 vy,
-                ff_vy,
+                ff_vy * follow_ff_scale,
                 Follow_Push_Feedforward_Lateral_Gain,
                 Follow_Push_Feedforward_Lateral_Limit,
             )
@@ -825,15 +857,19 @@ def solve_follow_pose_twist(
                 Follow_Spin_Wz_Feedforward_Limit,
             )
         else:
-            target_ff_vx = ff_vx + ff_wz * Follow_Target_Point_Wz_To_Vx
-            target_ff_vy = ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
-            vx = add_feedforward_assist(
+            target_ff_vx = (
+                ff_vx + ff_wz * Follow_Target_Point_Wz_To_Vx
+            ) * follow_ff_scale
+            target_ff_vy = (
+                ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
+            ) * follow_ff_scale
+            vx = add_feedforward_direct(
                 vx,
                 target_ff_vx,
                 Follow_Feedforward_Forward_Gain,
                 Follow_Feedforward_Forward_Limit,
             )
-            vy = add_feedforward_assist(
+            vy = add_feedforward_direct(
                 vy,
                 target_ff_vy,
                 Follow_Feedforward_Lateral_Gain,
@@ -1131,6 +1167,7 @@ def update_follow_targets(gyro_z):
     global last_push_mode_active, push_enter_ms
     global last_follow_mode_key
     global debug_event_mask
+    global follow_ff_scale
 
     now = utime.ticks_ms()
     seen = cam_target_seen()
@@ -1195,6 +1232,10 @@ def update_follow_targets(gyro_z):
         and (not spin_mode_active)
     )
     push_settle_active = explicit_push and orbit_mode_active
+    if orbit_mode_active or spin_mode_active:
+        follow_ff_scale = 1.0
+    elif seen:
+        update_follow_ff_scale(cam_error_x, cam_error_y, push_mode_active)
     if push_settle_active and fresh_motion:
         debug_event_mask |= 512
     if push_mode_active or push_settle_active:
@@ -1533,8 +1574,8 @@ def update_follow_targets(gyro_z):
     last_follow_seen = seen
     last_visual_vx = body_vx
     last_visual_vy = body_vy
-    last_ff_vx = ff_vx
-    last_ff_vy = ff_vy
+    last_ff_vx = ff_vx * follow_ff_scale
+    last_ff_vy = ff_vy * follow_ff_scale
     last_ff_wz = follow_ff_wz
     return vz_cmd
 

@@ -1521,11 +1521,8 @@ def update_follow_targets(gyro_z):
         cam_target_vx,
         cam_target_vy,
         vz_cmd,
-        priority_turn_mode,
-        priority_turn_mode
-        and (not orbit_mode_active)
-        and (not spin_mode_active)
-        and (vz_cmd >= 0.001 or vz_cmd <= -0.001),
+        orbit_mode_active or spin_mode_active,
+        False,
     )
     last_cmd_vx = cam_target_vx
     last_cmd_vy = cam_target_vy

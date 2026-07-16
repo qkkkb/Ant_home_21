@@ -19,6 +19,7 @@ from coop_protocol import (
 )
 
 
+_pid_mod.PWM_MAX = cfg.PWM_MAX
 speed_ctrl = _pid_mod.speed_ctrl
 gyro_ctrl = _pid_mod.gyro_ctrl
 speed_reset = _pid_mod.speed_reset
@@ -77,7 +78,6 @@ FOLLOW_START_PWM_MID_TARGET = 2.8
 FOLLOW_STALL_BOOST_TARGET = 2.8
 FOLLOW_RUN_PWM_LIMIT = 40000
 FOLLOW_STALL_BOOST_FRAMES = 3
-_pid_mod.PWM_MAX = FOLLOW_RUN_PWM_LIMIT
 
 
 # ====================== Camera protocol ======================

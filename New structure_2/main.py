@@ -1577,33 +1577,41 @@ def follow_start_pwm_for_target(target, stall_boost):
     return FOLLOW_START_PWM
 
 
-def follow_channel_pwm(cmd, target, stall_boost, last_pwm):
+def follow_channel_pwm(cmd, target, feedforward_target, stall_boost, last_pwm):
     min_pwm = follow_start_pwm_for_target(target, stall_boost)
     if min_pwm <= 0:
         return 0
     if last_pwm * target < 0.0:
         return 0
 
-    feedforward = target * FOLLOW_WHEEL_PWM_FEEDFORWARD
-    if feedforward > FOLLOW_RUN_PWM_LIMIT:
-        feedforward = FOLLOW_RUN_PWM_LIMIT
-    elif feedforward < -FOLLOW_RUN_PWM_LIMIT:
-        feedforward = -FOLLOW_RUN_PWM_LIMIT
+    if feedforward_target * target > 0.0:
+        if target > 0.0 and feedforward_target > target:
+            feedforward_target = target
+        elif target < 0.0 and feedforward_target < target:
+            feedforward_target = target
 
-    if target > 0.0 and cmd < feedforward:
-        cmd = feedforward
-    elif target < 0.0 and cmd > feedforward:
-        cmd = feedforward
+        feedforward = feedforward_target * FOLLOW_WHEEL_PWM_FEEDFORWARD
+        if feedforward > FOLLOW_RUN_PWM_LIMIT:
+            feedforward = FOLLOW_RUN_PWM_LIMIT
+        elif feedforward < -FOLLOW_RUN_PWM_LIMIT:
+            feedforward = -FOLLOW_RUN_PWM_LIMIT
+
+        if target > 0.0 and cmd < feedforward:
+            cmd = feedforward
+        elif target < 0.0 and cmd > feedforward:
+            cmd = feedforward
 
     return smooth_value(apply_start_pwm(cmd, min_pwm), last_pwm)
 
 
-def set_three_pwm_follow(u_fl, u_fr, u_b, t_fl, t_fr, t_b, stall_boost):
+def set_three_pwm_follow(
+    u_fl, u_fr, u_b, t_fl, t_fr, t_b, ff_fl, ff_fr, ff_b, stall_boost
+):
     global last_pwm_fl, last_pwm_fr, last_pwm_b
 
-    s_fl = follow_channel_pwm(u_fl, t_fl, stall_boost, last_pwm_fl)
-    s_fr = follow_channel_pwm(u_fr, t_fr, stall_boost, last_pwm_fr)
-    s_b = follow_channel_pwm(u_b, t_b, stall_boost, last_pwm_b)
+    s_fl = follow_channel_pwm(u_fl, t_fl, ff_fl, stall_boost, last_pwm_fl)
+    s_fr = follow_channel_pwm(u_fr, t_fr, ff_fr, stall_boost, last_pwm_fr)
+    s_b = follow_channel_pwm(u_b, t_b, ff_b, stall_boost, last_pwm_b)
     apply_motor_duty(s_fl, motor_fl)
     apply_motor_duty(s_fr, motor_fr)
     apply_motor_duty(s_b, motor_b)
@@ -1772,12 +1780,18 @@ def calc_speed_closed_loop():
     t_fl = move_cmd.speed_fl
     t_fr = move_cmd.speed_fr
     t_b = move_cmd.speed_b
+    ff_fl = t_fl - vz_cmd
+    ff_fr = t_fr - vz_cmd
+    ff_b = t_b - vz_cmd
     u_fl = max_wheel_abs(t_fl, t_fr, t_b)
     if u_fl > FOLLOW_WHEEL_SPEED_TARGET_LIMIT:
         u_fl = FOLLOW_WHEEL_SPEED_TARGET_LIMIT / u_fl
         t_fl *= u_fl
         t_fr *= u_fl
         t_b *= u_fl
+        ff_fl *= u_fl
+        ff_fr *= u_fl
+        ff_b *= u_fl
         move_cmd.speed_fl = t_fl
         move_cmd.speed_fr = t_fr
         move_cmd.speed_b = t_b
@@ -1806,7 +1820,16 @@ def calc_speed_closed_loop():
         u_b = speed_ctrl_follow(pid_b, e_b, t_b)
 
         s_fl, s_fr, s_b = set_three_pwm_follow(
-            u_fl, u_fr, u_b, t_fl, t_fr, t_b, last_stall_boost
+            u_fl,
+            u_fr,
+            u_b,
+            t_fl,
+            t_fr,
+            t_b,
+            ff_fl,
+            ff_fr,
+            ff_b,
+            last_stall_boost,
         )
 
     now_log = utime.ticks_ms()

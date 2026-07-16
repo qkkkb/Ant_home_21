@@ -271,7 +271,7 @@ last_hard_stop = False
 last_stall_count = 0
 last_stall_boost = False
 # Bits 0-2: low target reset; 3-5: reverse reset; 6: mode reset;
-# 7: explicit camera loss; 8: camera timeout edge; 9: push FF cut;
+# 7: explicit camera loss; 8: camera timeout edge; 9: reserved push FF cut;
 # 10-12: final PWM saturation; 13: pose limiter; 14: gyro limit.
 debug_event_mask = 0
 
@@ -551,8 +551,11 @@ def update_orbit_follow_mode(
 ):
     global orbit_follow_active, orbit_follow_exit_since_ms
 
-    if explicit_spin or explicit_push:
+    if explicit_spin:
         orbit_follow_active = False
+        orbit_follow_exit_since_ms = 0
+        return False
+    if explicit_push and not orbit_follow_active:
         orbit_follow_exit_since_ms = 0
         return False
 
@@ -719,8 +722,6 @@ def solve_follow_pose_twist(
     push_mode=False,
     spin_mode=False,
 ):
-    global debug_event_mask
-
     if (not orbit_mode) and (not spin_mode):
         error_x += error_angle
     vision_wz = calc_follow_angle(error_angle, orbit_mode, spin_mode)
@@ -787,13 +788,6 @@ def solve_follow_pose_twist(
                 Follow_Orbit_Wz_Feedforward_Limit,
             )
         elif push_mode:
-            if (
-                13 * error_x + 16 * error_y >= Follow_Ahead_Error_Y * 29
-                and ff_vx > 0.0
-            ):
-                debug_event_mask |= 512
-                ff_vx = 0.0
-                ff_vy = 0.0
             vx = add_feedforward_direct(
                 vx,
                 ff_vx,

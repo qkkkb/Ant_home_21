@@ -14,10 +14,11 @@ from models import SpeedPID
 _LOG_PERIOD_MS = const(200)
 _TEST_MS = const(1600)
 _STEP_PHASE_MS = const(800)
+_PWM_TEST_MS = const(600)
 _STOP_MS = const(700)
 _START_DELAY_MS = const(600)
 _STEADY_MS = const(400)
-_PWM_FF_PER_SPEED = const(4000)
+_PWM_STEADY_MS = const(200)
 _PWM_LIMIT = const(40000)
 
 _START_PWM = const(6200)
@@ -55,14 +56,10 @@ target_b = 0.0
 raw_fl = 0.0
 raw_fr = 0.0
 raw_b = 0.0
-ff_fl = 0
-ff_fr = 0
-ff_b = 0
 pwm_fl = 0
 pwm_fr = 0
 pwm_b = 0
 sat_mask = 0
-use_ff_mode = False
 
 
 def send_line(text):
@@ -122,19 +119,8 @@ def speed_output(pid, actual, target):
     return speed_ctrl(pid, actual, target)
 
 
-def feedforward_pwm(target):
-    if target_idle(target):
-        return 0
-    return int(target * _PWM_FF_PER_SPEED)
-
-
-def apply_channel(raw, feedforward, target, last):
+def apply_channel(raw, target, last):
     command = raw
-    if use_ff_mode:
-        if target > 0.0 and command < feedforward:
-            command = feedforward
-        elif target < 0.0 and command > feedforward:
-            command = feedforward
     minimum = start_pwm_for_target(target)
     if command > 0.0 and command < minimum:
         command = minimum
@@ -145,7 +131,7 @@ def apply_channel(raw, feedforward, target, last):
 
 def update_control():
     global pit_flag, actual_fl, actual_fr, actual_b
-    global raw_fl, raw_fr, raw_b, ff_fl, ff_fr, ff_b
+    global raw_fl, raw_fr, raw_b
     global pwm_fl, pwm_fr, pwm_b, sat_mask
 
     if not pit_flag:
@@ -158,39 +144,65 @@ def update_control():
     raw_fl = speed_output(pid_fl, actual_fl, target_fl)
     raw_fr = speed_output(pid_fr, actual_fr, target_fr)
     raw_b = speed_output(pid_b, actual_b, target_b)
-    ff_fl = feedforward_pwm(target_fl)
-    ff_fr = feedforward_pwm(target_fr)
-    ff_b = feedforward_pwm(target_b)
 
-    command = raw_fl
-    if use_ff_mode and (
-        (target_fl > 0.0 and command < ff_fl)
-        or (target_fl < 0.0 and command > ff_fl)
-    ):
-        command = ff_fl
     sat_mask = 0
-    if abs(command) >= _PWM_LIMIT:
+    if abs(raw_fl) >= _PWM_LIMIT:
         sat_mask |= 1
-    command = raw_fr
-    if use_ff_mode and (
-        (target_fr > 0.0 and command < ff_fr)
-        or (target_fr < 0.0 and command > ff_fr)
-    ):
-        command = ff_fr
-    if abs(command) >= _PWM_LIMIT:
+    if abs(raw_fr) >= _PWM_LIMIT:
         sat_mask |= 2
-    command = raw_b
-    if use_ff_mode and (
-        (target_b > 0.0 and command < ff_b)
-        or (target_b < 0.0 and command > ff_b)
-    ):
-        command = ff_b
-    if abs(command) >= _PWM_LIMIT:
+    if abs(raw_b) >= _PWM_LIMIT:
         sat_mask |= 4
 
-    pwm_fl = apply_channel(raw_fl, ff_fl, target_fl, pwm_fl)
-    pwm_fr = apply_channel(raw_fr, ff_fr, target_fr, pwm_fr)
-    pwm_b = apply_channel(raw_b, ff_b, target_b, pwm_b)
+    pwm_fl = apply_channel(raw_fl, target_fl, pwm_fl)
+    pwm_fr = apply_channel(raw_fr, target_fr, pwm_fr)
+    pwm_b = apply_channel(raw_b, target_b, pwm_b)
+    motor_fl.duty(pwm_fl)
+    motor_fr.duty(pwm_fr)
+    motor_b.duty(pwm_b)
+    return True
+
+
+def set_pwm_requests(axis_name, level):
+    global raw_fl, raw_fr, raw_b
+
+    if axis_name == "FL":
+        raw_fl = level
+        raw_fr = 0
+        raw_b = 0
+    elif axis_name == "FWD":
+        raw_fl = level
+        raw_fr = -level
+        raw_b = 0
+    elif axis_name == "LAT":
+        raw_fl = level // 2
+        raw_fr = level // 2
+        raw_b = -level
+    else:
+        raw_fl = level
+        raw_fr = level
+        raw_b = level
+
+
+def update_pwm_control():
+    global pit_flag, actual_fl, actual_fr, actual_b
+    global pwm_fl, pwm_fr, pwm_b, sat_mask
+
+    if not pit_flag:
+        return False
+    pit_flag = False
+    actual_fl = enc_fl.get()
+    actual_fr = enc_fr.get()
+    actual_b = enc_b.get()
+    pwm_fl = smooth_pwm(raw_fl, pwm_fl)
+    pwm_fr = smooth_pwm(raw_fr, pwm_fr)
+    pwm_b = smooth_pwm(raw_b, pwm_b)
+    sat_mask = 0
+    if abs(raw_fl) >= _PWM_LIMIT:
+        sat_mask |= 1
+    if abs(raw_fr) >= _PWM_LIMIT:
+        sat_mask |= 2
+    if abs(raw_b) >= _PWM_LIMIT:
+        sat_mask |= 4
     motor_fl.duty(pwm_fl)
     motor_fr.duty(pwm_fr)
     motor_b.duty(pwm_b)
@@ -221,7 +233,7 @@ def check_exit():
 
 
 def wait_for_start():
-    send_line("SPEED_FF_PROBE_READY press_C9_to_start C8_to_stop")
+    send_line("WHEEL_EXEC_PROBE_READY press_C9_to_start C8_to_stop")
     while key_start.value() != 0:
         check_exit()
         utime.sleep_ms(20)
@@ -230,8 +242,8 @@ def wait_for_start():
         check_exit()
         utime.sleep_ms(20)
     send_line(
-        "CFG tick=%d kff=%d pwm_limit=%d test_ms=%d"
-        % (cfg.TICK_PERIOD_MS, _PWM_FF_PER_SPEED, _PWM_LIMIT, _TEST_MS)
+        "CFG tick=%d ki=6 pwm_limit=%d pid_ms=%d pwm_ms=%d"
+        % (cfg.TICK_PERIOD_MS, _PWM_LIMIT, _TEST_MS, _PWM_TEST_MS)
     )
     utime.sleep_ms(_START_DELAY_MS)
 
@@ -318,7 +330,6 @@ def send_sample(elapsed):
         "P %d %d %d %d %d %d"
         % (pwm_fl, pwm_fr, pwm_b, int(raw_fl), int(raw_fr), int(raw_b))
     )
-    send_line("F %d %d %d" % (ff_fl, ff_fr, ff_b))
     send_line(
         "V %d %d %d %d %d %d"
         % (
@@ -332,11 +343,8 @@ def send_sample(elapsed):
     )
 
 
-def run_stage(mode_name, ff_enabled, axis_name, target):
-    global use_ff_mode
-
+def run_stage(mode_name, axis_name, target):
     set_stage_targets(axis_name, target)
-    use_ff_mode = ff_enabled
     reset_speed_loop()
 
     send_line(
@@ -389,11 +397,8 @@ def run_stage(mode_name, ff_enabled, axis_name, target):
     idle_ms(_STOP_MS)
 
 
-def run_step_stage(mode_name, ff_enabled):
-    global use_ff_mode
-
+def run_step_stage(mode_name):
     set_step_targets(False)
-    use_ff_mode = ff_enabled
     reset_speed_loop()
     send_line("B %s STEP A 5 -95 50" % mode_name)
     start_ms = utime.ticks_ms()
@@ -421,16 +426,78 @@ def run_step_stage(mode_name, ff_enabled):
     idle_ms(_STOP_MS)
 
 
+def send_pwm_sample(elapsed):
+    send_line("D %d %d" % (elapsed, sat_mask))
+    send_line("E %d %d %d" % (actual_fl, actual_fr, actual_b))
+    send_line(
+        "P %d %d %d %d %d %d"
+        % (pwm_fl, pwm_fr, pwm_b, int(raw_fl), int(raw_fr), int(raw_b))
+    )
+
+
+def run_pwm_stage(axis_name, level):
+    reset_speed_loop()
+    set_pwm_requests(axis_name, level)
+    send_line(
+        "B PWM %s %d %d %d %d"
+        % (axis_name, level, int(raw_fl), int(raw_fr), int(raw_b))
+    )
+    start_ms = utime.ticks_ms()
+    next_log_ms = start_ms
+    sum_fl = 0
+    sum_fr = 0
+    sum_b = 0
+    steady_count = 0
+    stage_sat_mask = 0
+
+    while utime.ticks_diff(utime.ticks_ms(), start_ms) < _PWM_TEST_MS:
+        check_exit()
+        if update_pwm_control():
+            elapsed = utime.ticks_diff(utime.ticks_ms(), start_ms)
+            if elapsed >= _PWM_TEST_MS - _PWM_STEADY_MS:
+                sum_fl += actual_fl
+                sum_fr += actual_fr
+                sum_b += actual_b
+                steady_count += 1
+            stage_sat_mask |= sat_mask
+        now_ms = utime.ticks_ms()
+        if utime.ticks_diff(now_ms, next_log_ms) >= 0:
+            next_log_ms = utime.ticks_add(now_ms, _LOG_PERIOD_MS)
+            send_pwm_sample(utime.ticks_diff(now_ms, start_ms))
+        utime.sleep_ms(1)
+
+    if steady_count > 0:
+        sum_fl //= steady_count
+        sum_fr //= steady_count
+        sum_b //= steady_count
+    send_line(
+        "R PWM %s %d %d %d %d %d"
+        % (axis_name, level, sum_fl, sum_fr, sum_b, stage_sat_mask)
+    )
+    idle_ms(_STOP_MS)
+
+
 def run_suite():
-    pid_fl.ki = 25.0
-    pid_fr.ki = 25.0
-    pid_b.ki = 25.0
-    send_line("K PID ALL 25")
-    run_stage("PID", False, "FWD", 6)
-    run_stage("PID", False, "LAT", 6)
-    run_stage("PID", False, "ROT", 6)
-    run_stage("PID", False, "MIX", 10)
-    run_step_stage("PID", False)
+    pid_fl.ki = 6.0
+    pid_fr.ki = 6.0
+    pid_b.ki = 6.0
+    send_line("K PID ALL 6 NO_KFF")
+    run_stage("PID", "FL", 4)
+    run_stage("PID", "FWD", 6)
+    run_stage("PID", "LAT", 6)
+    run_stage("PID", "ROT", 6)
+    run_stage("PID", "MIX", 10)
+    run_step_stage("PID")
+    level = 12000
+    while level <= _PWM_LIMIT:
+        run_pwm_stage("FL", level)
+        run_pwm_stage("FWD", level)
+        run_pwm_stage("LAT", level)
+        run_pwm_stage("ROT", level)
+        if level == 12000:
+            level = 20000
+        else:
+            level += 10000
 
 
 def init_hardware():
@@ -483,11 +550,11 @@ try:
     init_hardware()
     wait_for_start()
     idle_ms(_STOP_MS)
-    send_line("SPEED_FF_PROBE_START")
+    send_line("WHEEL_EXEC_PROBE_START")
     run_suite()
-    send_line("SPEED_FF_PROBE_DONE")
+    send_line("WHEEL_EXEC_PROBE_DONE")
 except KeyboardInterrupt:
-    send_line("SPEED_FF_PROBE_STOP")
+    send_line("WHEEL_EXEC_PROBE_STOP")
 finally:
     stop_motors()
     if pit1 is not None:

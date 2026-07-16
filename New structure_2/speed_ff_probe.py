@@ -13,6 +13,7 @@ from models import SpeedPID
 
 _LOG_PERIOD_MS = const(200)
 _TEST_MS = const(1600)
+_STEP_PHASE_MS = const(800)
 _STOP_MS = const(700)
 _START_DELAY_MS = const(600)
 _STEADY_MS = const(400)
@@ -283,6 +284,50 @@ def set_stage_targets(axis_name, target):
         target_b = value
 
 
+def set_step_targets(phase_b):
+    global target_fl, target_fr, target_b
+
+    if phase_b:
+        target_fl = 10.0
+        target_fr = -8.75
+        target_b = 0.0
+    else:
+        target_fl = 0.5
+        target_fr = -9.5
+        target_b = 5.0
+
+
+def send_sample(elapsed):
+    send_line("S %d %d" % (elapsed, sat_mask))
+    send_line(
+        "E %d %d %d %d %d %d"
+        % (
+            actual_fl,
+            actual_fr,
+            actual_b,
+            int(target_fl),
+            int(target_fr),
+            int(target_b),
+        )
+    )
+    send_line(
+        "P %d %d %d %d %d %d"
+        % (pwm_fl, pwm_fr, pwm_b, int(raw_fl), int(raw_fr), int(raw_b))
+    )
+    send_line("F %d %d %d" % (ff_fl, ff_fr, ff_b))
+    send_line(
+        "V %d %d %d %d %d %d"
+        % (
+            int((target_fl - target_fr) * 10 / 1.73205),
+            int((target_fl + target_fr - 2 * target_b) * 10 / 3),
+            int((target_fl + target_fr + target_b) * 10 / 3),
+            int((actual_fl - actual_fr) * 10 / 1.73205),
+            int((actual_fl + actual_fr - 2 * actual_b) * 10 / 3),
+            int((actual_fl + actual_fr + actual_b) * 10 / 3),
+        )
+    )
+
+
 def run_stage(mode_name, ff_enabled, axis_name, target):
     global use_ff_mode
 
@@ -325,34 +370,7 @@ def run_stage(mode_name, ff_enabled, axis_name, target):
         now_ms = utime.ticks_ms()
         if utime.ticks_diff(now_ms, next_log_ms) >= 0:
             next_log_ms = utime.ticks_add(now_ms, _LOG_PERIOD_MS)
-            send_line("S %d %d" % (utime.ticks_diff(now_ms, start_ms), sat_mask))
-            send_line(
-                "E %d %d %d %d %d %d"
-                % (
-                    actual_fl,
-                    actual_fr,
-                    actual_b,
-                    int(target_fl),
-                    int(target_fr),
-                    int(target_b),
-                )
-            )
-            send_line(
-                "P %d %d %d %d %d %d"
-                % (pwm_fl, pwm_fr, pwm_b, int(raw_fl), int(raw_fr), int(raw_b))
-            )
-            send_line("F %d %d %d" % (ff_fl, ff_fr, ff_b))
-            send_line(
-                "V %d %d %d %d %d %d"
-                % (
-                    int((target_fl - target_fr) * 10 / 1.73205),
-                    int((target_fl + target_fr - 2 * target_b) * 10 / 3),
-                    int((target_fl + target_fr + target_b) * 10 / 3),
-                    int((actual_fl - actual_fr) * 10 / 1.73205),
-                    int((actual_fl + actual_fr - 2 * actual_b) * 10 / 3),
-                    int((actual_fl + actual_fr + actual_b) * 10 / 3),
-                )
-            )
+            send_sample(utime.ticks_diff(now_ms, start_ms))
         utime.sleep_ms(1)
 
     if steady_count > 0:
@@ -367,16 +385,50 @@ def run_stage(mode_name, ff_enabled, axis_name, target):
     idle_ms(_STOP_MS)
 
 
+def run_step_stage(mode_name, ff_enabled):
+    global use_ff_mode
+
+    set_step_targets(False)
+    use_ff_mode = ff_enabled
+    reset_speed_loop()
+    send_line("B %s STEP A 5 -95 50" % mode_name)
+    start_ms = utime.ticks_ms()
+    next_log_ms = start_ms
+    phase_b = False
+    stage_sat_mask = 0
+
+    while utime.ticks_diff(utime.ticks_ms(), start_ms) < _STEP_PHASE_MS * 2:
+        check_exit()
+        elapsed = utime.ticks_diff(utime.ticks_ms(), start_ms)
+        if (not phase_b) and elapsed >= _STEP_PHASE_MS:
+            set_step_targets(True)
+            phase_b = True
+            send_line("C %s STEP B 100 -87 0" % mode_name)
+        if update_control():
+            stage_sat_mask |= sat_mask
+
+        now_ms = utime.ticks_ms()
+        if utime.ticks_diff(now_ms, next_log_ms) >= 0:
+            next_log_ms = utime.ticks_add(now_ms, _LOG_PERIOD_MS)
+            send_sample(utime.ticks_diff(now_ms, start_ms))
+        utime.sleep_ms(1)
+
+    send_line("R %s STEP %d" % (mode_name, stage_sat_mask))
+    idle_ms(_STOP_MS)
+
+
 def run_suite():
     run_stage("PID", False, "FWD", 6)
     run_stage("PID", False, "LAT", 6)
     run_stage("PID", False, "ROT", 6)
     run_stage("PID", False, "MIX", 10)
+    run_step_stage("PID", False)
 
     run_stage("FF4K", True, "FWD", 6)
     run_stage("FF4K", True, "LAT", 6)
     run_stage("FF4K", True, "ROT", 6)
     run_stage("FF4K", True, "MIX", 10)
+    run_step_stage("FF4K", True)
 
 
 def init_hardware():

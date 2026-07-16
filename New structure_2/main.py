@@ -126,10 +126,6 @@ Follow_Push_Feedforward_Forward_Gain = 1.00
 Follow_Push_Feedforward_Lateral_Gain = 1.00
 Follow_Push_Feedforward_Forward_Limit = 18.0
 Follow_Push_Feedforward_Lateral_Limit = 16.0
-Follow_Push_Feedforward_Fade_Error = 8
-Follow_Push_Feedforward_Min_Scale = 1.00
-Follow_Push_Lateral_Ff_Fade_Error = 14
-Follow_Push_Lateral_Ff_Min_Scale = 0.35
 Follow_Push_Enter_Soft_Ms = 220
 Follow_Push_Visual_Forward_Scale = 0.60
 Follow_Push_Visual_Lateral_Scale = 1.00
@@ -395,43 +391,6 @@ def orbit_close_lateral_limit(error_y):
         * depth
         / Follow_Orbit_Close_Full_Error
     )
-
-
-def push_ff_scale(error_y, error_x, now):
-    if error_y <= -Follow_Forward_Deadband:
-        scale = 0.0
-    elif error_y <= 0:
-        scale = Follow_Push_Feedforward_Min_Scale * (
-            (error_y + Follow_Forward_Deadband) / Follow_Forward_Deadband
-        )
-    elif error_y <= Follow_Forward_Deadband:
-        scale = Follow_Push_Feedforward_Min_Scale
-    elif error_y >= Follow_Push_Feedforward_Fade_Error:
-        scale = 1.0
-    else:
-        scale = Follow_Push_Feedforward_Min_Scale + (
-            (error_y - Follow_Forward_Deadband)
-            * (1.0 - Follow_Push_Feedforward_Min_Scale)
-            / (Follow_Push_Feedforward_Fade_Error - Follow_Forward_Deadband)
-        )
-
-    err_abs = abs(error_x)
-    if err_abs >= Follow_Push_Lateral_Ff_Fade_Error:
-        scale *= Follow_Push_Lateral_Ff_Min_Scale
-    elif err_abs > Follow_Lateral_Deadband:
-        scale *= 1.0 - (
-            (err_abs - Follow_Lateral_Deadband)
-            * (1.0 - Follow_Push_Lateral_Ff_Min_Scale)
-            / (Follow_Push_Lateral_Ff_Fade_Error - Follow_Lateral_Deadband)
-        )
-
-    if Follow_Push_Enter_Soft_Ms > 0 and push_enter_ms != 0:
-        elapsed = utime.ticks_diff(now, push_enter_ms)
-        if elapsed <= 0:
-            return 0.0
-        if elapsed < Follow_Push_Enter_Soft_Ms:
-            scale *= elapsed / Follow_Push_Enter_Soft_Ms
-    return scale
 
 
 def gyro_limit_for_turn(turn_rate_cmd, priority=False, spin_priority=False):
@@ -767,20 +726,31 @@ def solve_follow_pose_twist(
         error_angle >= active_error
         or error_angle <= -active_error
     )
-    position_priority = position_priority_needed(
-        error_x,
-        error_y,
-        angle_active and (not spin_mode),
-    )
-    cam_vx = calc_follow_forward(error_y, position_priority)
-    cam_vy = calc_follow_lateral(error_x, position_priority)
-    if push_mode:
-        cam_vx *= Follow_Push_Visual_Forward_Scale
-        cam_vy *= Follow_Push_Visual_Lateral_Scale
-    elif (not orbit_mode) and (not spin_mode):
-        cam_vx *= Follow_Normal_Visual_Forward_Scale
-        cam_vy *= Follow_Normal_Visual_Lateral_Scale
-    body_vx, body_vy = rotate_camera_velocity_to_body(cam_vx, cam_vy)
+    if orbit_mode or spin_mode:
+        position_priority = position_priority_needed(
+            error_x,
+            error_y,
+            angle_active and (not spin_mode),
+        )
+        cam_vx = calc_follow_forward(error_y, position_priority)
+        cam_vy = calc_follow_lateral(error_x, position_priority)
+        body_vx, body_vy = rotate_camera_velocity_to_body(cam_vx, cam_vy)
+    else:
+        cam_vx = (13 * error_x + 16 * error_y) / 29
+        cam_vy = (26 * error_y - 27 * error_x) / 53
+        position_priority = position_priority_needed(
+            cam_vy,
+            cam_vx,
+            angle_active,
+        )
+        body_vx = -calc_follow_forward(cam_vx, position_priority)
+        body_vy = calc_follow_lateral(cam_vy, position_priority)
+        if push_mode:
+            body_vx *= Follow_Push_Visual_Forward_Scale
+            body_vy *= Follow_Push_Visual_Lateral_Scale
+        else:
+            body_vx *= Follow_Normal_Visual_Forward_Scale
+            body_vy *= Follow_Normal_Visual_Lateral_Scale
     vx = body_vx
     vy = body_vy
     wz = vision_wz
@@ -810,6 +780,12 @@ def solve_follow_pose_twist(
                 Follow_Orbit_Wz_Feedforward_Limit,
             )
         elif push_mode:
+            if (
+                13 * error_x + 16 * error_y >= Follow_Ahead_Error_Y * 29
+                and ff_vx > 0.0
+            ):
+                ff_vx = 0.0
+                ff_vy = 0.0
             vx = add_feedforward_direct(
                 vx,
                 ff_vx,
@@ -852,15 +828,19 @@ def solve_follow_pose_twist(
         else:
             target_ff_vx = ff_vx + ff_wz * Follow_Target_Point_Wz_To_Vx
             target_ff_vy = ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
-            if error_y >= Follow_Ahead_Error_Y and target_ff_vx > 0.0:
+            if (
+                13 * error_x + 16 * error_y >= Follow_Ahead_Error_Y * 29
+                and target_ff_vx > 0.0
+            ):
                 target_ff_vx = 0.0
+                target_ff_vy = 0.0
             vx = add_feedforward_direct(
                 vx,
                 target_ff_vx,
                 Follow_Feedforward_Forward_Gain,
                 Follow_Feedforward_Forward_Limit,
             )
-            vy = add_feedforward_assist(
+            vy = add_feedforward_direct(
                 vy,
                 target_ff_vy,
                 Follow_Feedforward_Lateral_Gain,
@@ -1262,9 +1242,6 @@ def update_follow_targets(yaw_deg, gyro_z):
     if seen:
         target_lost_since_ms = 0
         use_motion_feedforward = fresh_motion
-        if push_mode_active and ff_vx > 0.0:
-            scale = push_ff_scale(cam_error_y, cam_error_x, now)
-            ff_vy *= scale
         orbit_close_guard_active = (
             orbit_mode_active
             and cam_error_y <= -Follow_Forward_Deadband

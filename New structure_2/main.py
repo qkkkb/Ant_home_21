@@ -113,7 +113,6 @@ Follow_Distance_Far_Boost_Error = 6
 Follow_Distance_Far_Boost_Gain = 0.70
 Follow_Distance_Close_Gain = 0.62
 Follow_Distance_Close_Limit = 22.0
-Follow_Ahead_Error_Y = 6
 Follow_Normal_StandOff_Error_Y = 4
 Follow_Orbit_Close_Back_Max_Vx = 28.0
 Follow_Orbit_Close_Back_Gain = 1.65
@@ -229,7 +228,6 @@ cam_parse_b2 = 0
 master_vx = 0.0
 master_vy = 0.0
 master_wz = 0.0
-master_yaw = 0.0
 master_flags = 0
 master_last_rx_ms = 0
 master_last_seq = 0
@@ -247,7 +245,6 @@ last_pwm_fl = 0
 last_pwm_fr = 0
 last_pwm_b = 0
 last_turn_rate_cmd = 0.0
-last_vz_cmd = 0.0
 last_follow_seen = False
 last_visual_vx = 0.0
 last_visual_vy = 0.0
@@ -743,6 +740,8 @@ def solve_follow_pose_twist(
         cam_vy = calc_follow_lateral(error_x, position_priority)
         body_vx, body_vy = rotate_camera_velocity_to_body(cam_vx, cam_vy)
     else:
+        if not push_mode:
+            error_y -= Follow_Normal_StandOff_Error_Y
         cam_vx = (13 * error_x + 16 * error_y) / 29
         cam_vy = (26 * error_y - 27 * error_x) / 53
         position_priority = position_priority_needed(
@@ -1079,7 +1078,7 @@ def poll_art_uart():
 
 
 def handle_coop_frame(msg_type, seq, payload, payload_len):
-    global master_vx, master_vy, master_wz, master_yaw
+    global master_vx, master_vy, master_wz
     global master_flags, master_last_rx_ms, master_last_seq
 
     if msg_type != MSG_MASTER_MOTION or payload_len < 9:
@@ -1087,7 +1086,6 @@ def handle_coop_frame(msg_type, seq, payload, payload_len):
     master_vx = decode_i16(payload, 0) / 10.0
     master_vy = decode_i16(payload, 2) / 10.0
     master_wz = decode_i16(payload, 4) / 10.0
-    master_yaw = decode_i16(payload, 6) / 10.0
     master_flags = payload[8]
     master_last_seq = seq
     master_last_rx_ms = utime.ticks_ms()
@@ -1121,9 +1119,9 @@ def debug_send(text):
         pass
 
 
-def update_follow_targets(yaw_deg, gyro_z):
+def update_follow_targets(gyro_z):
     global cam_target_vx, cam_target_vy, target_lost_since_ms
-    global last_turn_rate_cmd, last_vz_cmd
+    global last_turn_rate_cmd
     global last_follow_seen, last_visual_vx, last_visual_vy
     global last_ff_vx, last_ff_vy, last_ff_wz
     global last_cmd_vx, last_cmd_vy, last_cmd_wz
@@ -1193,12 +1191,15 @@ def update_follow_targets(yaw_deg, gyro_z):
             -Follow_Normal_Wz_Feedforward_Limit,
             Follow_Normal_Wz_Feedforward_Limit,
         )
-    push_translation_active = explicit_push and (not spin_mode_active)
-    push_mode_active = push_translation_active and (not orbit_mode_active)
-    push_settle_active = push_translation_active and orbit_mode_active
+    push_mode_active = (
+        explicit_push
+        and (not orbit_mode_active)
+        and (not spin_mode_active)
+    )
+    push_settle_active = explicit_push and orbit_mode_active
     if push_settle_active and fresh_motion:
         debug_event_mask |= 512
-    if push_translation_active:
+    if push_mode_active or push_settle_active:
         if not last_push_mode_active:
             push_enter_ms = now
         last_push_mode_active = True
@@ -1255,13 +1256,6 @@ def update_follow_targets(yaw_deg, gyro_z):
     orbit_close_guard_active = False
     orbit_close_vy_limit = Follow_Lateral_Limit
     prev_angle_priority_active = last_angle_priority_active
-    follow_error_y = cam_error_y
-    if (
-        (not orbit_mode_active)
-        and (not push_translation_active)
-        and (not spin_mode_active)
-    ):
-        follow_error_y -= Follow_Normal_StandOff_Error_Y
 
     if seen:
         target_lost_since_ms = 0
@@ -1284,14 +1278,14 @@ def update_follow_targets(yaw_deg, gyro_z):
             position_priority_active,
         ) = solve_follow_pose_twist(
             cam_error_x,
-            follow_error_y,
+            cam_error_y,
             cam_error_angle,
             ff_vx,
             ff_vy,
             follow_ff_wz,
             use_motion_feedforward,
             orbit_mode_active,
-            push_translation_active,
+            push_mode_active or push_settle_active,
             spin_mode_active,
         )
         if orbit_mode_active:
@@ -1540,7 +1534,6 @@ def update_follow_targets(yaw_deg, gyro_z):
         gyro_pid.output = vz_cmd
 
     last_turn_rate_cmd = turn_rate_cmd
-    last_vz_cmd = vz_cmd
     last_follow_seen = seen
     last_visual_vx = body_vx
     last_visual_vy = body_vy
@@ -1828,7 +1821,7 @@ def calc_speed_closed_loop():
         gyro_z = 0.0
         yaw_deg = 0.0
 
-    vz_cmd = update_follow_targets(yaw_deg, gyro_z)
+    vz_cmd = update_follow_targets(gyro_z)
     calc_wheel_spd(move_cmd, cam_target_vx, cam_target_vy, vz_cmd)
 
     e_fl = enc_fl.get()

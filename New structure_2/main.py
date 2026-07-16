@@ -77,8 +77,6 @@ FOLLOW_START_PWM_LOW_TARGET = 1.2
 FOLLOW_START_PWM_MID_TARGET = 2.8
 FOLLOW_STALL_BOOST_TARGET = 2.8
 FOLLOW_RUN_PWM_LIMIT = 40000
-FOLLOW_WHEEL_DELTA_FF = 4000
-FOLLOW_WHEEL_FF_TARGET_LIMIT = 10
 FOLLOW_STALL_BOOST_FRAMES = 3
 
 
@@ -1639,27 +1637,9 @@ def speed_ctrl_follow(pid, actual_speed, target_speed):
     if wheel_target_idle(target_speed):
         speed_reset(pid)
         return 0.0
-    last_target = pid.tar_spd_last
-    if last_target * target_speed < 0.0:
+    if pid.tar_spd_last * target_speed < 0.0:
         speed_reset(pid)
-        last_target = 0.0
-    ff_delta = clamp(
-        target_speed, -FOLLOW_WHEEL_FF_TARGET_LIMIT, FOLLOW_WHEEL_FF_TARGET_LIMIT
-    ) - clamp(
-        last_target, -FOLLOW_WHEEL_FF_TARGET_LIMIT, FOLLOW_WHEEL_FF_TARGET_LIMIT
-    )
-    output = speed_ctrl(pid, actual_speed, target_speed)
-    output += ff_delta * FOLLOW_WHEEL_DELTA_FF
-    if output > MOTOR_DUTY_MAX:
-        output = MOTOR_DUTY_MAX
-    elif output < -MOTOR_DUTY_MAX:
-        output = -MOTOR_DUTY_MAX
-    pid.output = output
-    if output > FOLLOW_RUN_PWM_LIMIT:
-        return FOLLOW_RUN_PWM_LIMIT
-    if output < -FOLLOW_RUN_PWM_LIMIT:
-        return -FOLLOW_RUN_PWM_LIMIT
-    return output
+    return speed_ctrl(pid, actual_speed, target_speed)
 
 
 def update_nav_led_display():

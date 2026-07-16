@@ -112,7 +112,7 @@ Follow_Distance_Far_Boost_Error = 6
 Follow_Distance_Far_Boost_Gain = 0.70
 Follow_Distance_Close_Gain = 0.62
 Follow_Distance_Close_Limit = 22.0
-Follow_Normal_StandOff_Error_Y = 6
+Follow_Normal_StandOff_Error_Y = 7
 Follow_Orbit_Close_Back_Max_Vx = 28.0
 Follow_Orbit_Close_Back_Gain = 1.65
 Follow_Orbit_Close_Full_Error = 8
@@ -424,9 +424,9 @@ def update_cam_target(err_x, err_y, err_angle=0):
             0,
             Follow_Push_Enter_Soft_Ms,
         )
-        err_x += 13 * elapsed // Follow_Push_Enter_Soft_Ms
-        err_y -= 3 * elapsed // Follow_Push_Enter_Soft_Ms
-        err_angle -= 8 * elapsed // Follow_Push_Enter_Soft_Ms
+        err_x += 12 * elapsed // Follow_Push_Enter_Soft_Ms
+        err_y -= 7 * elapsed // Follow_Push_Enter_Soft_Ms
+        err_angle -= 12 * elapsed // Follow_Push_Enter_Soft_Ms
     cam_error_x = int(err_x)
     cam_error_y = int(err_y)
     cam_error_angle = int(err_angle)

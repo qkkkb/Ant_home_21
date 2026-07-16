@@ -1724,9 +1724,11 @@ def calc_speed_closed_loop():
         last_hard_stop = True
         now_log = utime.ticks_ms()
         if debug_due(now_log):
+            log_id = now_log & 0x7FFF
             debug_send(
-                "S %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
+                "S %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
                 % (
+                    log_id,
                     0,
                     1 if cam_target_seen() else 0,
                     1 if master_motion_fresh() else 0,
@@ -1787,9 +1789,11 @@ def calc_speed_closed_loop():
 
     now_log = utime.ticks_ms()
     if debug_due(now_log):
+        log_id = now_log & 0x7FFF
         debug_send(
-            "S %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
+            "S %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
             % (
+                log_id,
                 1,
                 1 if last_follow_seen else 0,
                 1 if master_motion_fresh() else 0,
@@ -1806,11 +1810,18 @@ def calc_speed_closed_loop():
                 int(vz_cmd),
             )
         )
-        debug_send("E %d %d %d %d %d %d" % (e_fl, e_fr, e_b, int(t_fl), int(t_fr), int(t_b)))
-        debug_send("P %d %d %d %d %d %d" % (s_fl, s_fr, s_b, int(u_fl), int(u_fr), int(u_b)))
         debug_send(
-            "G %d %d %d %d %d %d %d"
+            "E %d %d %d %d %d %d %d"
+            % (log_id, e_fl, e_fr, e_b, int(t_fl), int(t_fr), int(t_b))
+        )
+        debug_send(
+            "P %d %d %d %d %d %d %d"
+            % (log_id, s_fl, s_fr, s_b, int(u_fl), int(u_fr), int(u_b))
+        )
+        debug_send(
+            "G %d %d %d %d %d %d %d %d %d"
             % (
+                log_id,
                 int(gyro_z),
                 int(yaw_deg),
                 int(last_visual_vx),
@@ -1818,6 +1829,7 @@ def calc_speed_closed_loop():
                 int(last_ff_vx),
                 int(last_ff_vy),
                 int(last_ff_wz),
+                int(last_turn_rate_cmd),
             )
         )
 

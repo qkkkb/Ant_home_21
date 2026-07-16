@@ -77,8 +77,6 @@ FOLLOW_START_PWM_LOW_TARGET = 1.2
 FOLLOW_START_PWM_MID_TARGET = 2.8
 FOLLOW_STALL_BOOST_TARGET = 2.8
 FOLLOW_RUN_PWM_LIMIT = 40000
-FOLLOW_WHEEL_PWM_FEEDFORWARD = 3800.0
-FOLLOW_WHEEL_SPEED_TARGET_LIMIT = 10.0
 FOLLOW_STALL_BOOST_FRAMES = 3
 
 
@@ -1637,19 +1635,7 @@ def speed_ctrl_follow(pid, actual_speed, target_speed):
     if wheel_target_idle(target_speed):
         speed_reset(pid)
         return 0.0
-    output = speed_ctrl(pid, actual_speed, target_speed)
-    feedforward = target_speed * FOLLOW_WHEEL_PWM_FEEDFORWARD
-    if feedforward > FOLLOW_RUN_PWM_LIMIT:
-        feedforward = FOLLOW_RUN_PWM_LIMIT
-    elif feedforward < -FOLLOW_RUN_PWM_LIMIT:
-        feedforward = -FOLLOW_RUN_PWM_LIMIT
-    if target_speed > 0.0 and actual_speed <= target_speed and output < feedforward:
-        output = feedforward
-        pid.output = output
-    elif target_speed < 0.0 and actual_speed >= target_speed and output > feedforward:
-        output = feedforward
-        pid.output = output
-    return output
+    return speed_ctrl(pid, actual_speed, target_speed)
 
 
 def update_nav_led_display():
@@ -1768,22 +1754,13 @@ def calc_speed_closed_loop():
 
     vz_cmd = update_follow_targets(yaw_deg, gyro_z)
     calc_wheel_spd(move_cmd, cam_target_vx, cam_target_vy, vz_cmd)
-    t_fl = move_cmd.speed_fl
-    t_fr = move_cmd.speed_fr
-    t_b = move_cmd.speed_b
-    u_fl = max_wheel_abs(t_fl, t_fr, t_b)
-    if u_fl > FOLLOW_WHEEL_SPEED_TARGET_LIMIT:
-        u_fl = FOLLOW_WHEEL_SPEED_TARGET_LIMIT / u_fl
-        t_fl *= u_fl
-        t_fr *= u_fl
-        t_b *= u_fl
-        move_cmd.speed_fl = t_fl
-        move_cmd.speed_fr = t_fr
-        move_cmd.speed_b = t_b
 
     e_fl = enc_fl.get()
     e_fr = enc_fr.get()
     e_b = enc_b.get()
+    t_fl = move_cmd.speed_fl
+    t_fr = move_cmd.speed_fr
+    t_b = move_cmd.speed_b
 
     if wheel_targets_zero(t_fl, t_fr, t_b):
         reset_speed_outputs()

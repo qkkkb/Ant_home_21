@@ -290,6 +290,15 @@ def ramp_value(target, last, step):
     return target
 
 
+def soft_deadband(value, deadband, full_error):
+    value_abs = abs(value)
+    if value_abs <= deadband:
+        return 0.0
+    if value_abs < full_error:
+        value_abs = (value_abs - deadband) * full_error / (full_error - deadband)
+    return value_abs if value > 0.0 else -value_abs
+
+
 def angle_pose_mode_needed(error_angle, orbit_mode=False, spin_mode=False):
     if orbit_mode or spin_mode:
         return True
@@ -440,12 +449,8 @@ def clear_cam_target_state():
     cam_parse_state = 0
 
 
-def cam_packet_fresh():
-    return utime.ticks_diff(utime.ticks_ms(), cam_last_rx_ms) <= Cam_Packet_Timeout_Ms
-
-
 def cam_target_seen():
-    return cam_has_target and cam_packet_fresh()
+    return cam_has_target and utime.ticks_diff(utime.ticks_ms(), cam_last_rx_ms) <= Cam_Packet_Timeout_Ms
 
 
 def master_motion_fresh():
@@ -453,18 +458,6 @@ def master_motion_fresh():
         USE_MASTER_MOTION_FEEDFORWARD
         and utime.ticks_diff(utime.ticks_ms(), master_last_rx_ms) <= Master_Motion_Timeout_Ms
     )
-
-
-def master_orbit_mode(fresh_motion):
-    return fresh_motion and ((master_flags & MASTER_MOTION_FLAG_ORBIT) != 0)
-
-
-def master_push_mode(fresh_motion):
-    return fresh_motion and ((master_flags & MASTER_MOTION_FLAG_PUSH) != 0)
-
-
-def master_spin_mode(fresh_motion):
-    return fresh_motion and ((master_flags & MASTER_MOTION_FLAG_SPIN) != 0)
 
 
 def update_spin_feedforward_latch(now, fresh_motion, explicit_spin, ff_wz, seen, error_angle):
@@ -598,7 +591,8 @@ def position_priority_needed(error_x, error_y, angle_active):
 
 def calc_follow_forward(error_y, position_priority=False):
     deadband = Follow_Orbit_Forward_Deadband if position_priority else Follow_Forward_Deadband
-    if -deadband <= error_y <= deadband:
+    error_y = soft_deadband(error_y, deadband, deadband * 2)
+    if error_y == 0.0:
         return 0.0
 
     if error_y > 0:
@@ -621,7 +615,8 @@ def calc_follow_forward(error_y, position_priority=False):
 
 def calc_follow_lateral(error_x, position_priority=False):
     deadband = Follow_Orbit_Lateral_Deadband if position_priority else Follow_Lateral_Deadband
-    if -deadband <= error_x <= deadband:
+    error_x = soft_deadband(error_x, deadband, deadband * 2)
+    if error_x == 0.0:
         return 0.0
     gain = Follow_Orbit_Lateral_Gain if position_priority else Follow_Lateral_Gain
     out = -error_x * gain * Follow_Lateral_Error_Sign
@@ -642,9 +637,12 @@ def calc_follow_lateral(error_x, position_priority=False):
 def calc_follow_angle(error_angle, orbit_mode=False, spin_mode=False):
     if orbit_mode or spin_mode:
         deadband = Follow_Pose_Angle_Deadband
+        full_error = Follow_Pose_Angle_Active_Error
     else:
         deadband = Follow_Normal_Pose_Angle_Deadband
-    if -deadband <= error_angle <= deadband:
+        full_error = Follow_Normal_Pose_Angle_Active_Error
+    error_angle = soft_deadband(error_angle, deadband, full_error)
+    if error_angle == 0.0:
         return 0.0
     if orbit_mode:
         out = clamp(
@@ -1098,9 +1096,9 @@ def update_follow_targets(gyro_z):
         ff_vx = 0.0
         ff_vy = 0.0
     ff_wz = master_wz if fresh_motion else 0.0
-    explicit_orbit = master_orbit_mode(fresh_motion)
-    explicit_push = master_push_mode(fresh_motion)
-    explicit_spin = master_spin_mode(fresh_motion)
+    explicit_orbit = fresh_motion and ((master_flags & MASTER_MOTION_FLAG_ORBIT) != 0)
+    explicit_push = fresh_motion and ((master_flags & MASTER_MOTION_FLAG_PUSH) != 0)
+    explicit_spin = fresh_motion and ((master_flags & MASTER_MOTION_FLAG_SPIN) != 0)
     spin_ff_wz = update_spin_feedforward_latch(
         now,
         fresh_motion,
@@ -1605,7 +1603,7 @@ def follow_start_pwm_for_target(target, stall_boost):
 def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
     min_pwm = follow_start_pwm_for_target(target, stall_boost)
     if min_pwm <= 0:
-        return 0
+        return smooth_value(cmd, last_pwm)
     if (
         (master_edge_until_ms or last_ff_wz >= Follow_Spin_Latch_Min_Wz or last_ff_wz <= -Follow_Spin_Latch_Min_Wz)
         and (target >= FOLLOW_REVERSE_BOOST_TARGET or target <= -FOLLOW_REVERSE_BOOST_TARGET)
@@ -1656,20 +1654,23 @@ def encoders_stalled(e_fl, e_fr, e_b):
     return e_fl == 0 and e_fr == 0 and e_b == 0
 
 
-def wheel_target_idle(target):
-    return -FOLLOW_START_PWM_LOW_TARGET < target < FOLLOW_START_PWM_LOW_TARGET
+def wheel_target_idle(pid, target):
+    limit = WHEEL_TARGET_IDLE_EPS if pid.tar_spd_last else FOLLOW_START_PWM_LOW_TARGET
+    return -limit < target < limit
 
 
 def speed_ctrl_follow(pid, actual_speed, target_speed, idle_event, reverse_event):
     global debug_event_mask
 
-    if wheel_target_idle(target_speed):
+    if wheel_target_idle(pid, target_speed):
         debug_event_mask |= idle_event
         speed_reset(pid)
         return 0.0
     if pid.tar_spd_last * target_speed < 0.0:
         debug_event_mask |= reverse_event
         speed_reset(pid)
+        if abs(target_speed) < FOLLOW_START_PWM_LOW_TARGET:
+            return 0.0
     return speed_ctrl(pid, actual_speed, target_speed)
 
 

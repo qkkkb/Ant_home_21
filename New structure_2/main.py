@@ -701,8 +701,6 @@ def solve_follow_pose_twist(
     push_mode=False,
     spin_mode=False,
 ):
-    global debug_event_mask
-
     vision_wz = calc_follow_angle(error_angle, orbit_mode, spin_mode)
     active_error = (
         Follow_Pose_Angle_Active_Error
@@ -815,21 +813,19 @@ def solve_follow_pose_twist(
             ff_scale = clamp((error_y + Follow_Close_Guard_Full_Error) / (Follow_Close_Guard_Full_Error - Follow_Close_Guard_Start_Error), 0.0, 1.0)
             target_ff_vx = ff_vx + ff_wz * Follow_Target_Point_Wz_To_Vx
             target_ff_vy = ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
-            if ff_scale < 1.0:
-                debug_event_mask |= 32768
-            target_ff_vx *= ff_scale
-            target_ff_vy *= ff_scale
             vx = add_feedforward_direct(
                 vx,
                 target_ff_vx,
                 Follow_Feedforward_Forward_Gain,
                 Follow_Feedforward_Forward_Limit,
+                ff_scale,
             )
             vy = add_feedforward_direct(
                 vy,
                 target_ff_vy,
                 Follow_Feedforward_Lateral_Gain,
                 Follow_Feedforward_Lateral_Limit,
+                ff_scale,
             )
             wz = add_feedforward_direct(
                 wz,

@@ -754,18 +754,17 @@ def solve_follow_pose_twist(
                 Follow_Spin_Wz_Feedforward_Limit,
             )
         else:
-            ff_scale = clamp(
-                (error_y + Follow_Close_Guard_Full_Error)
-                / Follow_Close_Guard_Full_Error,
-                0.0,
-                1.0,
-            )
-            target_ff_vx = (
-                ff_vx + ff_wz * Follow_Target_Point_Wz_To_Vx
-            ) * ff_scale
-            target_ff_vy = (
-                ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
-            ) * ff_scale
+            target_ff_vx = ff_vx + ff_wz * Follow_Target_Point_Wz_To_Vx
+            target_ff_vy = ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
+            if body_vx * target_ff_vx + body_vy * target_ff_vy < -0.001:
+                ff_scale = clamp(
+                    (error_y + Follow_Close_Guard_Full_Error)
+                    / Follow_Close_Guard_Full_Error,
+                    0.0,
+                    1.0,
+                )
+                target_ff_vx *= ff_scale
+                target_ff_vy *= ff_scale
             vx = add_feedforward_direct(
                 vx,
                 target_ff_vx,

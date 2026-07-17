@@ -262,6 +262,7 @@ last_push_mode_active = False
 push_enter_ms = 0
 last_follow_mode_key = -1
 master_edge_until_ms = 0
+master_zero_since_ms = 0
 last_hard_stop = False
 last_stall_count = 0
 last_stall_boost = False
@@ -421,7 +422,7 @@ def clear_cam_target_state():
     global spin_latched_wz, spin_latch_until_ms
     global last_push_mode_active, push_enter_ms
     global last_follow_mode_key
-    global master_edge_until_ms
+    global master_edge_until_ms, master_zero_since_ms
 
     cam_error_x = 0
     cam_error_y = 0
@@ -440,6 +441,7 @@ def clear_cam_target_state():
     push_enter_ms = 0
     last_follow_mode_key = -1
     master_edge_until_ms = 0
+    master_zero_since_ms = 0
     cam_has_target = False
     cam_valid_target_since_ms = 0
     target_lost_since_ms = 0
@@ -1080,7 +1082,7 @@ def update_follow_targets(gyro_z):
     global last_angle_priority_active
     global last_push_mode_active, push_enter_ms
     global last_follow_mode_key
-    global master_edge_until_ms
+    global master_edge_until_ms, master_zero_since_ms
     global debug_event_mask
 
     now = utime.ticks_ms()
@@ -1095,6 +1097,21 @@ def update_follow_targets(gyro_z):
         ff_vx = 0.0
         ff_vy = 0.0
     ff_wz = master_wz if fresh_motion else 0.0
+    if (
+        fresh_motion
+        and master_flags == 5
+        and last_follow_mode_key == 0
+        and ff_vx == 0.0
+        and ff_vy == 0.0
+        and (last_ff_vx != 0.0 or last_ff_vy != 0.0)
+    ):
+        if master_zero_since_ms == 0:
+            master_zero_since_ms = now
+        if utime.ticks_diff(now, master_zero_since_ms) <= Follow_Master_Edge_Hold_Ms:
+            ff_vx = last_ff_vx
+            ff_vy = last_ff_vy
+    else:
+        master_zero_since_ms = 0
     explicit_orbit = fresh_motion and ((master_flags & MASTER_MOTION_FLAG_ORBIT) != 0)
     explicit_push = fresh_motion and ((master_flags & MASTER_MOTION_FLAG_PUSH) != 0)
     explicit_spin = fresh_motion and ((master_flags & MASTER_MOTION_FLAG_SPIN) != 0)
@@ -1530,7 +1547,7 @@ def reset_speed_outputs():
     global spin_latched_wz, spin_latch_until_ms
     global last_push_mode_active, push_enter_ms
     global last_follow_mode_key
-    global master_edge_until_ms
+    global master_edge_until_ms, master_zero_since_ms
 
     speed_reset(pid_fl)
     speed_reset(pid_fr)
@@ -1554,6 +1571,7 @@ def reset_speed_outputs():
     push_enter_ms = 0
     last_follow_mode_key = -1
     master_edge_until_ms = 0
+    master_zero_since_ms = 0
 
 
 def clamp_duty(value):

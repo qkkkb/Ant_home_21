@@ -124,9 +124,10 @@ Follow_Push_Feedforward_Forward_Limit = 18.0
 Follow_Push_Feedforward_Lateral_Limit = 16.0
 Follow_Push_Enter_Soft_Ms = 220
 Follow_Normal_Visual_Forward_Scale = 0.75
-Follow_Normal_Visual_Lateral_Scale = 1.25
+Follow_Normal_Visual_Lateral_Scale = 1.15
 Follow_Close_Guard_Start_Error = 0.0
 Follow_Close_Guard_Full_Error = 8.0
+Follow_Push_Close_Feedforward_Min_Scale = 0.30
 Follow_Normal_Hold_Feedforward_Gain = 1.00
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Normal_Wz_Feedforward_Gain = 1.00
@@ -152,7 +153,7 @@ Follow_Orbit_Pose_Angle_Gain = -1.35
 Follow_Orbit_Pose_Angle_Limit = 74.0
 Follow_Orbit_Pose_Angle_Min_Error = 14
 Follow_Orbit_Pose_Angle_Min_Turn = 30.0
-Follow_Normal_Pose_Angle_Deadband = 6
+Follow_Normal_Pose_Angle_Deadband = 8
 Follow_Normal_Pose_Angle_Active_Error = 18
 Follow_Spin_Target_Point_Wz_To_Vx = 0.00
 Follow_Spin_Target_Point_Wz_To_Vy = 0.00
@@ -1272,6 +1273,9 @@ def update_follow_targets(gyro_z):
             0.0,
             1.0,
         )
+        ff_scale = Follow_Push_Close_Feedforward_Min_Scale + (
+            1.0 - Follow_Push_Close_Feedforward_Min_Scale
+        ) * ff_scale
         vx = add_feedforward_direct(
             vx,
             ff_vx,
@@ -1451,7 +1455,7 @@ def update_follow_targets(gyro_z):
         cam_target_vx,
         cam_target_vy,
         vz_cmd,
-        priority_turn_mode or normal_brake_active,
+        (priority_turn_mode and (not push_follow_active)) or normal_brake_active,
         (priority_turn_mode or normal_brake_active)
         and (not orbit_mode_active)
         and (not spin_mode_active)

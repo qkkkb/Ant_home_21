@@ -123,6 +123,7 @@ Follow_Push_Enter_Soft_Ms = 220
 Follow_Normal_Visual_Forward_Scale = 0.90
 Follow_Normal_Visual_Lateral_Scale = 1.30
 Follow_Close_Guard_Full_Error = 8.0
+Follow_Close_Feedforward_Min_Scale = 0.25
 Follow_Push_Close_Feedforward_Min_Scale = 0.30
 Follow_Normal_Hold_Feedforward_Gain = 1.00
 Follow_Hold_Feedforward_Gain = 1.70
@@ -142,7 +143,6 @@ Follow_Orbit_Feedforward_Close_Error = 6
 Follow_Orbit_Feedforward_Full_Error = 22
 Follow_Orbit_Feedforward_Close_Scale = 0.78
 Follow_Orbit_Close_Feedforward_Full_Error = 6
-Follow_Orbit_Close_Feedforward_Min_Scale = 0.25
 Follow_Pose_Angle_Gain = -0.68
 Follow_Pose_Angle_Limit = 40.0
 Follow_Orbit_Pose_Angle_Gain = -1.35
@@ -346,9 +346,9 @@ def orbit_feedforward_position_scale(error_x, error_y):
     if depth <= 0.0:
         return scale
     if depth >= Follow_Orbit_Close_Feedforward_Full_Error:
-        return Follow_Orbit_Close_Feedforward_Min_Scale
+        return Follow_Close_Feedforward_Min_Scale
     close_scale = 1.0 - (
-        (1.0 - Follow_Orbit_Close_Feedforward_Min_Scale)
+        (1.0 - Follow_Close_Feedforward_Min_Scale)
         * depth
         / Follow_Orbit_Close_Feedforward_Full_Error
     )
@@ -772,6 +772,9 @@ def solve_follow_pose_twist(
                 0.0,
                 1.0,
             )
+            ff_scale = Follow_Close_Feedforward_Min_Scale + (
+                1.0 - Follow_Close_Feedforward_Min_Scale
+            ) * ff_scale
             vx = add_feedforward_direct(
                 vx,
                 target_ff_vx,

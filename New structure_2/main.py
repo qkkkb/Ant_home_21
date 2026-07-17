@@ -664,7 +664,8 @@ def add_feedforward_direct(base, feedforward, gain, limit, conflict_scale=1.0):
     assist = clamp(feedforward * gain, -limit, limit)
     if base * assist < -0.001 and conflict_scale < 1.0:
         debug_event_mask |= 32768
-        assist = clamp(assist, -abs(base), abs(base)) if master_edge_until_ms else assist * conflict_scale
+        if not master_edge_until_ms or conflict_scale <= 0.0:
+            assist *= conflict_scale
     return base + assist
 
 
@@ -709,7 +710,7 @@ def solve_follow_pose_twist(
             Follow_Normal_Position_Priority_Error,
             Follow_Normal_Position_Priority_Error,
         )
-        body_vx = calc_follow_forward(-cam_vx, position_priority)
+        body_vx = -calc_follow_forward(cam_vx, position_priority)
         body_vy = calc_follow_lateral(cam_vy, position_priority)
         body_vx *= Follow_Normal_Visual_Forward_Scale
         body_vy *= Follow_Normal_Visual_Lateral_Scale

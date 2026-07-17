@@ -5,7 +5,7 @@ from smartcar import ticker, encoder
 from seekfree import WIRELESS_UART
 from lsm6dsv16x_gyro_runtime import LSM6DSV16XYawRuntime
 from models import AnglePID, MoveBase, SpeedPID
-from move_base import calc_wheel_spd
+from move_base import calc_wheel_spd, calc_wheel_spd_2dof
 import pid as _pid_mod
 import config as cfg
 from hardware import Motor
@@ -174,6 +174,7 @@ Follow_Spin_XY_Min_Scale = 0.94
 Follow_Orbit_XY_Max_Scale = 0.50
 Follow_Spin_XY_Max_Scale = 1.00
 Follow_Pose_Wheel_Target_Limit = 20.0
+Follow_Master_Wheel_Target_Limit = 24.0
 Follow_Command_Ramp_Vx = 2.0
 Follow_Command_Ramp_Vy = 3.0
 Follow_Orbit_Command_Ramp_Vx = 20.0
@@ -1546,6 +1547,55 @@ def reset_speed_outputs():
     master_edge_until_ms = 0
 
 
+def calc_follow_wheel_targets(move, vz_cmd):
+    global cam_target_vx, cam_target_vy
+
+    if (
+        last_follow_mode_key != 0
+        or (not last_follow_seen)
+        or (not master_motion_fresh())
+    ):
+        calc_wheel_spd(move, cam_target_vx, cam_target_vy, vz_cmd)
+        return vz_cmd
+    if (
+        -0.001 < last_ff_vx < 0.001
+        and -0.001 < last_ff_vy < 0.001
+        and -0.001 < last_ff_wz < 0.001
+    ):
+        calc_wheel_spd(move, cam_target_vx, cam_target_vy, vz_cmd)
+        return vz_cmd
+    xy_scale = angle_xy_lock_scale(cam_error_angle) if angle_pose_mode_needed(cam_error_angle) else 1.0
+    ff_scale = clamp(
+        (cam_error_y + Follow_Close_Guard_Full_Error)
+        / (Follow_Close_Guard_Full_Error - Follow_Close_Guard_Start_Error),
+        0.0,
+        1.0,
+    )
+    vz_cmd = calc_wheel_spd_2dof(
+        move,
+        last_ff_vx,
+        last_ff_vy,
+        last_ff_wz,
+        last_visual_vx,
+        last_visual_vy,
+        vz_cmd,
+        Follow_Target_Point_Wz_To_Vx,
+        Follow_Target_Point_Wz_To_Vy,
+        Follow_Feedforward_Forward_Gain,
+        Follow_Feedforward_Lateral_Gain,
+        Follow_Feedforward_Forward_Limit,
+        Follow_Feedforward_Lateral_Limit,
+        xy_scale,
+        ff_scale,
+        Follow_Master_Wheel_Target_Limit,
+        Follow_Pose_Wheel_Target_Limit,
+        ff_scale < 0.999,
+    )
+    cam_target_vx = (move.speed_fl - move.speed_fr) / 1.73205
+    cam_target_vy = (move.speed_fl + move.speed_fr - 2.0 * move.speed_b) / 3.0
+    return vz_cmd
+
+
 def clamp_duty(value):
     value = int(value)
     if value > MOTOR_DUTY_MAX:
@@ -1601,11 +1651,20 @@ def follow_start_pwm_for_target(target, stall_boost):
 
 
 def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
+    fast_reverse = (
+        master_edge_until_ms
+        or last_ff_wz >= Follow_Spin_Latch_Min_Wz
+        or last_ff_wz <= -Follow_Spin_Latch_Min_Wz
+    )
+    if last_follow_mode_key == 0 and (not fast_reverse) and last_pwm * target < 0.0:
+        if -MOTOR_DUTY_MIN <= last_pwm <= MOTOR_DUTY_MIN:
+            return 0
+        return smooth_value(0, last_pwm)
     min_pwm = follow_start_pwm_for_target(target, stall_boost)
     if min_pwm <= 0:
         return smooth_value(cmd, last_pwm)
     if (
-        (master_edge_until_ms or last_ff_wz >= Follow_Spin_Latch_Min_Wz or last_ff_wz <= -Follow_Spin_Latch_Min_Wz)
+        fast_reverse
         and (target >= FOLLOW_REVERSE_BOOST_TARGET or target <= -FOLLOW_REVERSE_BOOST_TARGET)
     ):
         if last_pwm * target < 0.0:
@@ -1659,11 +1718,23 @@ def wheel_target_idle(pid, target):
     return -limit < target < limit
 
 
-def speed_ctrl_follow(pid, actual_speed, target_speed, idle_event, reverse_event):
+def speed_ctrl_follow(pid, actual_speed, target_speed, idle_event, reverse_event, last_pwm):
     global debug_event_mask
 
     if wheel_target_idle(pid, target_speed):
         debug_event_mask |= idle_event
+        speed_reset(pid)
+        return 0.0
+    if (
+        last_pwm * target_speed < 0.0
+        and last_follow_mode_key == 0
+        and not (
+            master_edge_until_ms
+            or last_ff_wz >= Follow_Spin_Latch_Min_Wz
+            or last_ff_wz <= -Follow_Spin_Latch_Min_Wz
+        )
+    ):
+        debug_event_mask |= reverse_event
         speed_reset(pid)
         return 0.0
     if pid.tar_spd_last * target_speed < 0.0:
@@ -1794,7 +1865,7 @@ def calc_speed_closed_loop():
         yaw_deg = 0.0
 
     vz_cmd = update_follow_targets(gyro_z)
-    calc_wheel_spd(move_cmd, cam_target_vx, cam_target_vy, vz_cmd)
+    vz_cmd = calc_follow_wheel_targets(move_cmd, vz_cmd)
 
     e_fl = enc_fl.get()
     e_fr = enc_fr.get()
@@ -1818,9 +1889,9 @@ def calc_speed_closed_loop():
             last_stall_count = 0
         last_stall_boost = last_stall_count >= FOLLOW_STALL_BOOST_FRAMES
 
-        u_fl = speed_ctrl_follow(pid_fl, e_fl, t_fl, 1, 8)
-        u_fr = speed_ctrl_follow(pid_fr, e_fr, t_fr, 2, 16)
-        u_b = speed_ctrl_follow(pid_b, e_b, t_b, 4, 32)
+        u_fl = speed_ctrl_follow(pid_fl, e_fl, t_fl, 1, 8, last_pwm_fl)
+        u_fr = speed_ctrl_follow(pid_fr, e_fr, t_fr, 2, 16, last_pwm_fr)
+        u_b = speed_ctrl_follow(pid_b, e_b, t_b, 4, 32, last_pwm_b)
 
         s_fl, s_fr, s_b = set_three_pwm_follow(
             u_fl, u_fr, u_b, t_fl, t_fr, t_b, last_stall_boost

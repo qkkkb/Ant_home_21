@@ -1366,10 +1366,15 @@ def update_follow_targets(gyro_z):
         and (not spin_mode_active)
         and (turn_rate_cmd >= 0.001 or turn_rate_cmd <= -0.001)
         and (
-            gyro_z >= Follow_Orbit_Brake_Gyro_Threshold
-            or gyro_z <= -Follow_Orbit_Brake_Gyro_Threshold
+            turn_rate_cmd * gyro_z < 0.0
+            or (
+                (
+                    gyro_z >= Follow_Orbit_Brake_Gyro_Threshold
+                    or gyro_z <= -Follow_Orbit_Brake_Gyro_Threshold
+                )
+                and abs(gyro_z) > abs(turn_rate_cmd) * GYRO_PRIORITY_OVERSPEED_RATIO
+            )
         )
-        and abs(gyro_z) > abs(turn_rate_cmd) * GYRO_PRIORITY_OVERSPEED_RATIO
     )
     if -0.001 < turn_rate_cmd < 0.001:
         turn_rate_cmd = 0.0

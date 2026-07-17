@@ -1479,7 +1479,7 @@ def update_follow_targets(gyro_z):
             debug_event_mask |= 16384
     if normal_brake_active and (not priority_turn_mode):
         normal_brake_reserve = Follow_Normal_Brake_Wheel_Reserve
-        if master_flags and (
+        if master_flags and abs(gyro_z) >= 40.0 and (
             abs(gyro_z) > abs(turn_rate_cmd) * GYRO_PRIORITY_OVERSPEED_RATIO
         ):
             normal_brake_reserve *= 2.0

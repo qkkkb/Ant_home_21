@@ -1366,7 +1366,7 @@ def update_follow_targets(gyro_z):
         and (not spin_mode_active)
         and (turn_rate_cmd >= 0.001 or turn_rate_cmd <= -0.001)
         and (
-            turn_rate_cmd * gyro_z < 0.0
+            (master_flags and turn_rate_cmd * gyro_z < 0.0)
             or (
                 (
                     gyro_z >= Follow_Orbit_Brake_Gyro_Threshold
@@ -1479,7 +1479,9 @@ def update_follow_targets(gyro_z):
             debug_event_mask |= 16384
     if normal_brake_active and (not priority_turn_mode):
         normal_brake_reserve = Follow_Normal_Brake_Wheel_Reserve
-        if abs(gyro_z) > abs(turn_rate_cmd) * GYRO_PRIORITY_OVERSPEED_RATIO:
+        if master_flags and (
+            abs(gyro_z) > abs(turn_rate_cmd) * GYRO_PRIORITY_OVERSPEED_RATIO
+        ):
             normal_brake_reserve *= 2.0
         if vz_cmd > normal_brake_reserve:
             debug_event_mask |= 8192

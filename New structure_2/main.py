@@ -105,6 +105,7 @@ Follow_Orbit_Forward_Deadband = 2
 Follow_Orbit_Lateral_Deadband = 2
 Follow_Orbit_Position_X_Error = 4
 Follow_Orbit_Position_Y_Error = 4
+Follow_Normal_Position_Priority_Error = 18
 Follow_Distance_Far_Boost_Error = 6
 Follow_Distance_Far_Boost_Gain = 0.70
 Follow_Distance_Close_Gain = 0.62
@@ -566,13 +567,19 @@ def follow_limit(base_limit, master_value):
     return limit
 
 
-def position_priority_needed(error_x, error_y, angle_active):
+def position_priority_needed(
+    error_x,
+    error_y,
+    angle_active,
+    x_limit=Follow_Orbit_Position_X_Error,
+    y_limit=Follow_Orbit_Position_Y_Error,
+):
     return (
         angle_active
-        or error_x >= Follow_Orbit_Position_X_Error
-        or error_x <= -Follow_Orbit_Position_X_Error
-        or error_y >= Follow_Orbit_Position_Y_Error
-        or error_y <= -Follow_Orbit_Position_Y_Error
+        or error_x >= x_limit
+        or error_x <= -x_limit
+        or error_y >= y_limit
+        or error_y <= -y_limit
     )
 
 
@@ -699,6 +706,8 @@ def solve_follow_pose_twist(
             cam_vy,
             cam_vx,
             angle_active,
+            Follow_Normal_Position_Priority_Error,
+            Follow_Normal_Position_Priority_Error,
         )
         body_vx = -calc_follow_forward(cam_vx, position_priority)
         body_vy = calc_follow_lateral(cam_vy, position_priority)

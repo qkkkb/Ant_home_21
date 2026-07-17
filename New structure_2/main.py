@@ -1169,10 +1169,7 @@ def update_follow_targets(gyro_z):
         mode_key = 0
     if last_follow_mode_key != mode_key:
         debug_event_mask |= 64
-        if (
-            last_follow_mode_key < 0
-            or (last_follow_mode_key != 3 and mode_key != 3)
-        ):
+        if last_follow_mode_key < 0:
             speed_reset(pid_fl)
             speed_reset(pid_fr)
             speed_reset(pid_b)
@@ -1302,6 +1299,11 @@ def update_follow_targets(gyro_z):
             0.0,
             1.0,
         )
+        if ff_scale < 1.0:
+            if vx * ff_vx > 0.001:
+                vx *= ff_scale
+            if vy * ff_vy > 0.001:
+                vy *= ff_scale
         ff_scale = Follow_Push_Close_Feedforward_Min_Scale + (
             1.0 - Follow_Push_Close_Feedforward_Min_Scale
         ) * ff_scale

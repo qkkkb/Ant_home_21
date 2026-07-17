@@ -24,7 +24,7 @@ class SpeedPID:
         self.kd = 30.0
         self.gama = 0.25
         self.kp = 3000.0
-        self.ki = 6.0
+        self.ki = 8.0
 
     def init_c(self):
         self.temp = 1.0 / (self.gama * self.kd + self.kp)

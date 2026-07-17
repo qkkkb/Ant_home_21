@@ -1601,13 +1601,18 @@ def follow_start_pwm_for_target(target, stall_boost):
 
 
 def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
-    if (not master_edge_until_ms) and last_pwm * target < 0.0:
+    fast_reverse = (
+        master_edge_until_ms
+        or last_ff_wz >= Follow_Spin_Latch_Min_Wz
+        or last_ff_wz <= -Follow_Spin_Latch_Min_Wz
+    )
+    if (not fast_reverse) and last_pwm * target < 0.0:
         return smooth_value(0, last_pwm)
     min_pwm = follow_start_pwm_for_target(target, stall_boost)
     if min_pwm <= 0:
         return smooth_value(cmd, last_pwm)
     if (
-        master_edge_until_ms
+        fast_reverse
         and (target >= FOLLOW_REVERSE_BOOST_TARGET or target <= -FOLLOW_REVERSE_BOOST_TARGET)
     ):
         if last_pwm * target < 0.0:

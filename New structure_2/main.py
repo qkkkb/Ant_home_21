@@ -1695,11 +1695,12 @@ def speed_ctrl_follow(pid, actual_speed, target_speed, idle_event, reverse_event
         debug_event_mask |= reverse_event
         speed_reset(pid)
         return 0.0
-    output = clamp(
-        speed_ctrl(pid, actual_speed, target_speed),
-        -follow_output_limit,
-        follow_output_limit,
-    )
+    output = speed_ctrl(pid, actual_speed, target_speed)
+    if output * target_speed < 0.0 and pid.err * target_speed >= 0.0:
+        debug_event_mask |= reverse_event
+        speed_reset(pid)
+        output = speed_ctrl(pid, actual_speed, target_speed)
+    output = clamp(output, -follow_output_limit, follow_output_limit)
     pid.output = output
     return output
 

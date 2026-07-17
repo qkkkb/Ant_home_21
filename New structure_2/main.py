@@ -119,7 +119,6 @@ Follow_Push_Feedforward_Forward_Gain = 1.08
 Follow_Push_Feedforward_Lateral_Gain = 1.08
 Follow_Push_Feedforward_Forward_Limit = 18.0
 Follow_Push_Feedforward_Lateral_Limit = 16.0
-Follow_Push_Enter_Soft_Ms = 220
 Follow_Normal_Visual_Forward_Scale = 0.90
 Follow_Normal_Visual_Lateral_Scale = 1.30
 Follow_Close_Guard_Full_Error = 8.0
@@ -249,8 +248,6 @@ orbit_follow_exit_since_ms = 0
 filtered_ff_wz = 0.0
 spin_latched_wz = 0.0
 spin_latch_until_ms = 0
-last_push_mode_active = False
-push_enter_ms = 0
 last_follow_mode_key = -1
 master_edge_until_ms = 0
 master_zero_since_ms = 0
@@ -388,15 +385,6 @@ def gyro_limit_for_turn(turn_rate_cmd, priority=False, spin_priority=False):
 def update_cam_target(err_x, err_y, err_angle=0):
     global cam_error_x, cam_error_y, cam_error_angle, cam_last_rx_ms
 
-    if last_push_mode_active:
-        elapsed = clamp(
-            utime.ticks_diff(utime.ticks_ms(), push_enter_ms),
-            0,
-            Follow_Push_Enter_Soft_Ms,
-        )
-        err_x += 12 * elapsed // Follow_Push_Enter_Soft_Ms
-        err_y -= 7 * elapsed // Follow_Push_Enter_Soft_Ms
-        err_angle -= 12 * elapsed // Follow_Push_Enter_Soft_Ms
     cam_error_x = int(err_x)
     cam_error_y = int(err_y)
     cam_error_angle = int(err_angle)
@@ -411,7 +399,6 @@ def clear_cam_target_state():
     global last_angle_priority_active
     global orbit_follow_active, orbit_follow_exit_since_ms, filtered_ff_wz
     global spin_latched_wz, spin_latch_until_ms
-    global last_push_mode_active, push_enter_ms
     global last_follow_mode_key
     global master_edge_until_ms, master_zero_since_ms
 
@@ -428,8 +415,6 @@ def clear_cam_target_state():
     filtered_ff_wz = 0.0
     spin_latched_wz = 0.0
     spin_latch_until_ms = 0
-    last_push_mode_active = False
-    push_enter_ms = 0
     last_follow_mode_key = -1
     master_edge_until_ms = 0
     master_zero_since_ms = 0
@@ -939,11 +924,7 @@ def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z, spin_priority=False):
     limit = gyro_limit_for_turn(turn_rate_cmd, True, spin_priority)
     turn_abs = abs(turn_rate_cmd)
     gyro_abs = abs(gyro_z)
-    overspeed_ratio = (
-        GYRO_SPIN_PRIORITY_OVERSPEED_RATIO
-        if spin_priority
-        else GYRO_PRIORITY_OVERSPEED_RATIO
-    )
+    overspeed_ratio = GYRO_SPIN_PRIORITY_OVERSPEED_RATIO if spin_priority else 1.0
     same_dir = (
         (turn_rate_cmd > 0.0 and gyro_z > 0.0)
         or (turn_rate_cmd < 0.0 and gyro_z < 0.0)
@@ -1068,7 +1049,6 @@ def update_follow_targets(gyro_z):
     global last_pwm_fl, last_pwm_fr, last_pwm_b
     global last_stall_count, last_stall_boost
     global last_angle_priority_active
-    global last_push_mode_active, push_enter_ms
     global last_follow_mode_key
     global master_edge_until_ms, master_zero_since_ms
     global debug_event_mask
@@ -1154,13 +1134,6 @@ def update_follow_targets(gyro_z):
     push_follow_active = explicit_push and orbit_mode_active
     if push_follow_active and fresh_motion:
         debug_event_mask |= 512
-    if explicit_push and (not spin_mode_active):
-        if not last_push_mode_active:
-            push_enter_ms = now
-        last_push_mode_active = True
-    else:
-        last_push_mode_active = False
-        push_enter_ms = 0
     if spin_mode_active:
         mode_key = 3
     elif orbit_mode_active:
@@ -1539,7 +1512,6 @@ def reset_speed_outputs():
     global last_angle_priority_active
     global orbit_follow_active, orbit_follow_exit_since_ms, filtered_ff_wz
     global spin_latched_wz, spin_latch_until_ms
-    global last_push_mode_active, push_enter_ms
     global last_follow_mode_key
     global master_edge_until_ms, master_zero_since_ms
 
@@ -1561,8 +1533,6 @@ def reset_speed_outputs():
     filtered_ff_wz = 0.0
     spin_latched_wz = 0.0
     spin_latch_until_ms = 0
-    last_push_mode_active = False
-    push_enter_ms = 0
     last_follow_mode_key = -1
     master_edge_until_ms = 0
     master_zero_since_ms = 0

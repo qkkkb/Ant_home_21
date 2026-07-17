@@ -1626,17 +1626,14 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
     min_pwm = follow_start_pwm_for_target(target, stall_boost)
     if min_pwm <= 0:
         return 0
-    if target >= FOLLOW_REVERSE_BOOST_TARGET or target <= -FOLLOW_REVERSE_BOOST_TARGET:
+    if (
+        (master_edge_until_ms or last_ff_wz >= Follow_Spin_Latch_Min_Wz or last_ff_wz <= -Follow_Spin_Latch_Min_Wz)
+        and (target >= FOLLOW_REVERSE_BOOST_TARGET or target <= -FOLLOW_REVERSE_BOOST_TARGET)
+    ):
         if last_pwm * target < 0.0:
             return FOLLOW_STALL_BOOST_PWM if target > 0.0 else -FOLLOW_STALL_BOOST_PWM
         if last_pwm == 0 and (target - speed_err) * target < 0.0:
             return FOLLOW_STALL_BOOST_PWM if target > 0.0 else -FOLLOW_STALL_BOOST_PWM
-        if (
-            last_pwm * cmd < 0.0
-            and cmd * speed_err > 0.0
-            and (cmd >= FOLLOW_START_PWM or cmd <= -FOLLOW_START_PWM)
-        ):
-            return FOLLOW_STALL_BOOST_PWM if cmd > 0.0 else -FOLLOW_STALL_BOOST_PWM
     return smooth_value(apply_start_pwm(cmd, min_pwm), last_pwm)
 
 

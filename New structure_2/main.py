@@ -14,7 +14,6 @@ from coop_protocol import (
     MASTER_MOTION_FLAG_ORBIT,
     MASTER_MOTION_FLAG_PUSH,
     MASTER_MOTION_FLAG_SPIN,
-    MASTER_MOTION_FLAG_TARGET,
     MSG_MASTER_MOTION,
     decode_i16,
 )
@@ -1113,29 +1112,14 @@ def update_follow_targets(gyro_z):
     explicit_push = master_push_mode(fresh_motion)
     explicit_spin = master_spin_mode(fresh_motion)
     if (
-        fresh_motion
-        and last_follow_mode_key == 0
-        and (master_flags & MASTER_MOTION_FLAG_TARGET) == 0
-        and (not explicit_orbit)
-        and (not explicit_push)
-        and (not explicit_spin)
-        and -FOLLOW_START_PWM_LOW_TARGET < ff_vx < FOLLOW_START_PWM_LOW_TARGET
-        and -FOLLOW_START_PWM_LOW_TARGET < ff_vy < FOLLOW_START_PWM_LOW_TARGET
-        and seen
-        and (
-            cam_error_y - Follow_Normal_StandOff_Error_Y
-            > Follow_Close_Guard_Start_Error
-        )
-        and -Follow_Normal_Pose_Angle_Active_Error < cam_error_angle
-        and cam_error_angle < Follow_Normal_Pose_Angle_Active_Error
+        fresh_motion and seen and last_follow_mode_key == 0
+        and master_flags == 0x05
+        and ff_vx == 0.0 and ff_vy == 0.0
+        and cam_error_y > Follow_Normal_StandOff_Error_Y
+        and not last_angle_priority_active
     ):
-        # Preserve translation continuity while the master pauses for classification.
-        ff_vx = last_ff_vx * 24.0 / 25.0
-        ff_vy = last_ff_vy * 24.0 / 25.0
-        if -FOLLOW_START_PWM_LOW_TARGET < ff_vx < FOLLOW_START_PWM_LOW_TARGET:
-            ff_vx = 0.0
-        if -FOLLOW_START_PWM_LOW_TARGET < ff_vy < FOLLOW_START_PWM_LOW_TARGET:
-            ff_vy = 0.0
+        ff_vx = last_ff_vx * 0.96
+        ff_vy = last_ff_vy * 0.96
     spin_ff_wz = update_spin_feedforward_latch(
         now,
         fresh_motion,

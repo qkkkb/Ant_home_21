@@ -709,7 +709,7 @@ def solve_follow_pose_twist(
             Follow_Normal_Position_Priority_Error,
             Follow_Normal_Position_Priority_Error,
         )
-        body_vx = -calc_follow_forward(cam_vx, position_priority)
+        body_vx = calc_follow_forward(-cam_vx, position_priority)
         body_vy = calc_follow_lateral(cam_vy, position_priority)
         body_vx *= Follow_Normal_Visual_Forward_Scale
         body_vy *= Follow_Normal_Visual_Lateral_Scale

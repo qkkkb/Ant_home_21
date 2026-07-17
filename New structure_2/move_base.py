@@ -8,77 +8,34 @@ def calc_wheel_spd(move, vx, vy, vz):
     move.speed_b = -vy + vz
 
 
-def _compose_wheel(feedforward, correction, ff_limit, target_limit, allow_reverse):
-    if feedforward > ff_limit:
-        feedforward = ff_limit
-    elif feedforward < -ff_limit:
-        feedforward = -ff_limit
+def compose_wheel(feedforward, correction, allow_reverse):
+    if feedforward > 24.0:
+        feedforward = 24.0
+    elif feedforward < -24.0:
+        feedforward = -24.0
     target = feedforward + correction
     if (not allow_reverse) and feedforward * target < 0.0:
         return 0.0
-    feedforward = abs(feedforward)
-    if feedforward > target_limit:
-        target_limit = feedforward
-    if target > target_limit:
-        return target_limit
-    if target < -target_limit:
-        return -target_limit
+    limit = abs(feedforward)
+    if limit < 20.0:
+        limit = 20.0
+    if target > limit:
+        return limit
+    if target < -limit:
+        return -limit
     return target
 
 
-def calc_wheel_spd_2dof(
-    move,
-    ff_vx,
-    ff_vy,
-    ff_wz,
-    corr_vx,
-    corr_vy,
-    corr_vz,
-    wz_to_vx,
-    wz_to_vy,
-    forward_gain,
-    lateral_gain,
-    forward_limit,
-    lateral_limit,
-    xy_scale,
-    ff_scale,
-    ff_limit,
-    target_limit,
-    allow_reverse,
+def calc_follow_wheel_spd(
+    move, corr_vx, corr_vy, corr_vz, ff_vx, ff_vy, ff_scale, xy_scale
 ):
-    ff_vx = (ff_vx + ff_wz * wz_to_vx) * forward_gain
-    ff_vy = (ff_vy + ff_wz * wz_to_vy) * lateral_gain
-    if ff_vx > forward_limit:
-        ff_vx = forward_limit
-    elif ff_vx < -forward_limit:
-        ff_vx = -forward_limit
-    if ff_vy > lateral_limit:
-        ff_vy = lateral_limit
-    elif ff_vy < -lateral_limit:
-        ff_vy = -lateral_limit
-    ff_vx *= xy_scale * ff_scale
-    ff_vy *= xy_scale * ff_scale
-    ff_vx = BODY_X_SIGN * ff_vx
-    corr_vx = BODY_X_SIGN * corr_vx
-    move.speed_fr = _compose_wheel(
-        ff_vx * 0.866025 + ff_vy * 0.5,
-        corr_vx * 0.866025 + corr_vy * 0.5 + corr_vz,
-        ff_limit,
-        target_limit,
-        allow_reverse,
-    )
-    move.speed_fl = _compose_wheel(
-        -ff_vx * 0.866025 + ff_vy * 0.5,
-        -corr_vx * 0.866025 + corr_vy * 0.5 + corr_vz,
-        ff_limit,
-        target_limit,
-        allow_reverse,
-    )
-    move.speed_b = _compose_wheel(
-        -ff_vy,
-        -corr_vy + corr_vz,
-        ff_limit,
-        target_limit,
-        allow_reverse,
-    )
+    calc_wheel_spd(move, ff_vx * ff_scale * xy_scale, ff_vy * ff_scale * xy_scale, 0.0)
+    ff_fl = move.speed_fl
+    ff_fr = move.speed_fr
+    ff_b = move.speed_b
+    calc_wheel_spd(move, corr_vx, corr_vy, corr_vz)
+    allow_reverse = ff_scale < 0.999
+    move.speed_fl = compose_wheel(ff_fl, move.speed_fl, allow_reverse)
+    move.speed_fr = compose_wheel(ff_fr, move.speed_fr, allow_reverse)
+    move.speed_b = compose_wheel(ff_b, move.speed_b, allow_reverse)
     return (move.speed_fl + move.speed_fr + move.speed_b) / 3.0

@@ -187,8 +187,6 @@ Follow_Normal_Target_Lost_Hold_Ms = 500
 Follow_Target_Lost_Hold_Ms = 250
 Follow_Orbit_Mode_FfWz_On = 18.0
 Follow_Orbit_Mode_FfWz_Off = 7.0
-Follow_Orbit_Mode_Angle_Off = 4
-Follow_Orbit_Mode_Gyro_Off = 6.0
 Follow_Orbit_Mode_Exit_Ms = 120
 Follow_Orbit_Mode_FfWz_Filter = 0.22
 Follow_Normal_Wz_Feedforward_Limit = 15.0
@@ -548,10 +546,11 @@ def update_orbit_follow_mode(
                 (not fresh_motion)
                 or (-Follow_Orbit_Mode_FfWz_Off <= ff_wz <= Follow_Orbit_Mode_FfWz_Off)
             )
-            and (-Follow_Orbit_Mode_Angle_Off <= error_angle <= Follow_Orbit_Mode_Angle_Off)
-            and (-Follow_Orbit_Mode_Gyro_Off <= gyro_z <= Follow_Orbit_Mode_Gyro_Off)
-            and (-Follow_Orbit_Position_X_Error <= cam_error_x <= Follow_Orbit_Position_X_Error)
-            and (-Follow_Orbit_Position_Y_Error <= cam_error_y <= Follow_Orbit_Position_Y_Error)
+            and (
+                -Follow_Normal_Pose_Angle_Deadband
+                <= error_angle
+                <= Follow_Normal_Pose_Angle_Deadband
+            )
         )
     )
     if stable:
@@ -1365,6 +1364,7 @@ def update_follow_targets(gyro_z):
     normal_brake_active = (
         (not orbit_mode_active)
         and (not spin_mode_active)
+        and (turn_rate_cmd >= 0.001 or turn_rate_cmd <= -0.001)
         and (
             gyro_z >= Follow_Orbit_Brake_Gyro_Threshold
             or gyro_z <= -Follow_Orbit_Brake_Gyro_Threshold

@@ -1478,12 +1478,15 @@ def update_follow_targets(gyro_z):
         ):
             debug_event_mask |= 16384
     if normal_brake_active and (not priority_turn_mode):
-        if vz_cmd > Follow_Normal_Brake_Wheel_Reserve:
+        normal_brake_reserve = Follow_Normal_Brake_Wheel_Reserve
+        if abs(gyro_z) > abs(turn_rate_cmd) * GYRO_PRIORITY_OVERSPEED_RATIO:
+            normal_brake_reserve *= 2.0
+        if vz_cmd > normal_brake_reserve:
             debug_event_mask |= 8192
-            vz_cmd = Follow_Normal_Brake_Wheel_Reserve
-        elif vz_cmd < -Follow_Normal_Brake_Wheel_Reserve:
+            vz_cmd = normal_brake_reserve
+        elif vz_cmd < -normal_brake_reserve:
             debug_event_mask |= 8192
-            vz_cmd = -Follow_Normal_Brake_Wheel_Reserve
+            vz_cmd = -normal_brake_reserve
     cam_target_vx, cam_target_vy, vz_cmd = limit_pose_twist_for_wheels(
         cam_target_vx,
         cam_target_vy,

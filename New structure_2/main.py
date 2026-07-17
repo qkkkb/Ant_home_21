@@ -68,6 +68,7 @@ WHEEL_TARGET_STOP_EPS = 0.05
 WHEEL_TARGET_IDLE_EPS = 0.35
 FOLLOW_START_PWM = 6200
 FOLLOW_START_PWM_MID = 3600
+FOLLOW_STATIC_LOCK_PWM_LIMIT = 14000
 FOLLOW_STALL_BOOST_PWM = 8800
 FOLLOW_START_PWM_LOW_TARGET = 1.2
 FOLLOW_START_PWM_MID_TARGET = 2.8
@@ -254,6 +255,7 @@ master_zero_since_ms = 0
 last_hard_stop = False
 last_stall_count = 0
 last_stall_boost = False
+follow_output_limit = FOLLOW_RUN_PWM_LIMIT
 # Bits 0-2: low target reset; 3-5: reverse reset; 6: mode reset;
 # 7: explicit camera loss; 8: camera timeout edge; 9: push-settle orbit FF gate;
 # 10-12: final PWM saturation; 13: pose limiter; 14: gyro limit.
@@ -649,7 +651,11 @@ def add_feedforward_direct(base, feedforward, gain, limit, conflict_scale=1.0):
     assist = clamp(feedforward * gain, -limit, limit)
     if base * assist < -0.001 and conflict_scale < 1.0:
         debug_event_mask |= 32768
-        if not master_edge_until_ms or conflict_scale <= 0.0:
+        if (
+            not master_edge_until_ms
+            or last_follow_mode_key != 0
+            or conflict_scale <= 0.0
+        ):
             assist *= conflict_scale
     return base + assist
 
@@ -924,7 +930,12 @@ def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z, spin_priority=False):
     limit = gyro_limit_for_turn(turn_rate_cmd, True, spin_priority)
     turn_abs = abs(turn_rate_cmd)
     gyro_abs = abs(gyro_z)
-    overspeed_ratio = GYRO_SPIN_PRIORITY_OVERSPEED_RATIO if spin_priority else 1.0
+    if spin_priority:
+        overspeed_ratio = GYRO_SPIN_PRIORITY_OVERSPEED_RATIO
+    elif last_follow_mode_key == 1:
+        overspeed_ratio = 1.0
+    else:
+        overspeed_ratio = GYRO_PRIORITY_OVERSPEED_RATIO
     same_dir = (
         (turn_rate_cmd > 0.0 and gyro_z > 0.0)
         or (turn_rate_cmd < 0.0 and gyro_z < 0.0)
@@ -1048,6 +1059,7 @@ def update_follow_targets(gyro_z):
     global last_ap_vz_cmd
     global last_pwm_fl, last_pwm_fr, last_pwm_b
     global last_stall_count, last_stall_boost
+    global follow_output_limit
     global last_angle_priority_active
     global last_follow_mode_key
     global master_edge_until_ms, master_zero_since_ms
@@ -1140,6 +1152,14 @@ def update_follow_targets(gyro_z):
         mode_key = 1
     else:
         mode_key = 0
+    follow_output_limit = FOLLOW_RUN_PWM_LIMIT
+    if (
+        mode_key == 0
+        and -0.001 < ff_vx < 0.001
+        and -0.001 < ff_vy < 0.001
+        and -0.001 < follow_ff_wz < 0.001
+    ):
+        follow_output_limit = FOLLOW_STATIC_LOCK_PWM_LIMIT
     if last_follow_mode_key != mode_key:
         debug_event_mask |= 64
         if last_follow_mode_key < 0:
@@ -1162,7 +1182,7 @@ def update_follow_targets(gyro_z):
                 gyro_pid.err_last = 0.0
         last_follow_mode_key = mode_key
     if (
-        mode_key != 0
+        (mode_key != 0 and (not push_follow_active))
         or (not seen)
         or (not fresh_motion)
     ):
@@ -1620,6 +1640,9 @@ def set_three_pwm_follow(u_fl, u_fr, u_b, t_fl, t_fr, t_b, stall_boost):
     s_fl = follow_channel_pwm(u_fl, t_fl, pid_fl.err, stall_boost, last_pwm_fl)
     s_fr = follow_channel_pwm(u_fr, t_fr, pid_fr.err, stall_boost, last_pwm_fr)
     s_b = follow_channel_pwm(u_b, t_b, pid_b.err, stall_boost, last_pwm_b)
+    s_fl = clamp(s_fl, -follow_output_limit, follow_output_limit)
+    s_fr = clamp(s_fr, -follow_output_limit, follow_output_limit)
+    s_b = clamp(s_b, -follow_output_limit, follow_output_limit)
     apply_motor_duty(s_fl, motor_fl)
     apply_motor_duty(s_fr, motor_fr)
     apply_motor_duty(s_b, motor_b)
@@ -1669,7 +1692,13 @@ def speed_ctrl_follow(pid, actual_speed, target_speed, idle_event, reverse_event
         debug_event_mask |= reverse_event
         speed_reset(pid)
         return 0.0
-    return speed_ctrl(pid, actual_speed, target_speed)
+    output = clamp(
+        speed_ctrl(pid, actual_speed, target_speed),
+        -follow_output_limit,
+        follow_output_limit,
+    )
+    pid.output = output
+    return output
 
 
 def update_nav_led_display():

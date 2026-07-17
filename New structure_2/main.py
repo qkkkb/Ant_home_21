@@ -155,8 +155,8 @@ Follow_Orbit_Pose_Angle_Min_Error = 14
 Follow_Orbit_Pose_Angle_Min_Turn = 30.0
 Follow_Normal_Pose_Angle_Deadband = 8
 Follow_Normal_Pose_Angle_Active_Error = 18
-Follow_Spin_Target_Point_Wz_To_Vx = 0.00
-Follow_Spin_Target_Point_Wz_To_Vy = 0.00
+Follow_Spin_Target_Point_Wz_To_Vx = 0.08
+Follow_Spin_Target_Point_Wz_To_Vy = -0.08
 Follow_Spin_Feedforward_Forward_Gain = 0.95
 Follow_Spin_Feedforward_Lateral_Gain = 1.05
 Follow_Spin_Feedforward_Forward_Limit = 12.0
@@ -482,12 +482,19 @@ def update_spin_feedforward_latch(now, fresh_motion, explicit_spin, ff_wz, seen,
         spin_latch_until_ms = utime.ticks_add(now, Follow_Spin_Command_Hold_Ms)
         return ff_wz
 
-    if spin_latched_wz != 0.0 and utime.ticks_diff(spin_latch_until_ms, now) > 0:
-        if (not seen) or (
-            error_angle >= Follow_Spin_Latch_Release_Angle
-            or error_angle <= -Follow_Spin_Latch_Release_Angle
+    if spin_latched_wz != 0.0:
+        if seen and (
+            -Follow_Spin_Latch_Release_Angle
+            <= error_angle
+            <= Follow_Spin_Latch_Release_Angle
         ):
+            spin_latched_wz = 0.0
+            spin_latch_until_ms = 0
+        elif utime.ticks_diff(spin_latch_until_ms, now) > 0:
             return spin_latched_wz
+        else:
+            spin_latched_wz = 0.0
+            spin_latch_until_ms = 0
 
     if not explicit_spin:
         spin_latched_wz = 0.0
@@ -758,13 +765,13 @@ def solve_follow_pose_twist(
         elif spin_mode:
             target_ff_vx = ff_vx + ff_wz * Follow_Spin_Target_Point_Wz_To_Vx
             target_ff_vy = ff_vy + ff_wz * Follow_Spin_Target_Point_Wz_To_Vy
-            vx = add_feedforward_direct(
+            vx = add_feedforward_assist(
                 vx,
                 target_ff_vx,
                 Follow_Spin_Feedforward_Forward_Gain,
                 Follow_Spin_Feedforward_Forward_Limit,
             )
-            vy = add_feedforward_direct(
+            vy = add_feedforward_assist(
                 vy,
                 target_ff_vy,
                 Follow_Spin_Feedforward_Lateral_Gain,
@@ -1106,12 +1113,18 @@ def update_follow_targets(gyro_z):
         cam_error_angle,
     )
     spin_mode_active = (
-        explicit_spin
-        or (
-            fresh_motion
-            and (not explicit_orbit)
-            and (not explicit_push)
-            and (
+        fresh_motion
+        and (not explicit_orbit)
+        and (not explicit_push)
+        and (
+            (
+                explicit_spin
+                and (
+                    spin_ff_wz >= Follow_Spin_Latch_Min_Wz
+                    or spin_ff_wz <= -Follow_Spin_Latch_Min_Wz
+                )
+            )
+            or (
                 spin_ff_wz >= Follow_Spin_Mode_FfWz_On
                 or spin_ff_wz <= -Follow_Spin_Mode_FfWz_On
             )
@@ -1157,23 +1170,27 @@ def update_follow_targets(gyro_z):
         mode_key = 0
     if last_follow_mode_key != mode_key:
         debug_event_mask |= 64
-        speed_reset(pid_fl)
-        speed_reset(pid_fr)
-        speed_reset(pid_b)
-        last_pwm_fl = 0
-        last_pwm_fr = 0
-        last_pwm_b = 0
-        last_stall_count = 0
-        last_stall_boost = False
-        last_cmd_vx = 0.0
-        last_cmd_vy = 0.0
-        last_cmd_wz = 0.0
-        last_ap_vz_cmd = 0.0
-        last_angle_priority_active = False
-        if ENABLE_GYRO_LOOP and gyro_pid is not None:
-            gyro_pid.output = 0.0
-            gyro_pid.err = 0.0
-            gyro_pid.err_last = 0.0
+        if (
+            last_follow_mode_key < 0
+            or (last_follow_mode_key != 3 and mode_key != 3)
+        ):
+            speed_reset(pid_fl)
+            speed_reset(pid_fr)
+            speed_reset(pid_b)
+            last_pwm_fl = 0
+            last_pwm_fr = 0
+            last_pwm_b = 0
+            last_stall_count = 0
+            last_stall_boost = False
+            last_cmd_vx = 0.0
+            last_cmd_vy = 0.0
+            last_cmd_wz = 0.0
+            last_ap_vz_cmd = 0.0
+            last_angle_priority_active = False
+            if ENABLE_GYRO_LOOP and gyro_pid is not None:
+                gyro_pid.output = 0.0
+                gyro_pid.err = 0.0
+                gyro_pid.err_last = 0.0
         last_follow_mode_key = mode_key
     if (
         spin_mode_active

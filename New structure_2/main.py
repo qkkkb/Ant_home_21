@@ -1618,13 +1618,19 @@ def follow_start_pwm_for_target(target, stall_boost):
     return FOLLOW_START_PWM
 
 
-def follow_channel_pwm(cmd, target, stall_boost, last_pwm):
+def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
     min_pwm = follow_start_pwm_for_target(target, stall_boost)
     if min_pwm <= 0:
         return 0
     if last_pwm * target < 0.0:
         return FOLLOW_STALL_BOOST_PWM if target > 0.0 else -FOLLOW_STALL_BOOST_PWM
-    if last_pwm * cmd < 0.0 and (cmd >= FOLLOW_START_PWM or cmd <= -FOLLOW_START_PWM):
+    if last_pwm == 0 and (target - speed_err) * target < 0.0:
+        return FOLLOW_STALL_BOOST_PWM if target > 0.0 else -FOLLOW_STALL_BOOST_PWM
+    if (
+        last_pwm * cmd < 0.0
+        and cmd * speed_err > 0.0
+        and (cmd >= FOLLOW_START_PWM or cmd <= -FOLLOW_START_PWM)
+    ):
         return FOLLOW_STALL_BOOST_PWM if cmd > 0.0 else -FOLLOW_STALL_BOOST_PWM
     return smooth_value(apply_start_pwm(cmd, min_pwm), last_pwm)
 
@@ -1632,9 +1638,9 @@ def follow_channel_pwm(cmd, target, stall_boost, last_pwm):
 def set_three_pwm_follow(u_fl, u_fr, u_b, t_fl, t_fr, t_b, stall_boost):
     global last_pwm_fl, last_pwm_fr, last_pwm_b
 
-    s_fl = follow_channel_pwm(u_fl, t_fl, stall_boost, last_pwm_fl)
-    s_fr = follow_channel_pwm(u_fr, t_fr, stall_boost, last_pwm_fr)
-    s_b = follow_channel_pwm(u_b, t_b, stall_boost, last_pwm_b)
+    s_fl = follow_channel_pwm(u_fl, t_fl, pid_fl.err, stall_boost, last_pwm_fl)
+    s_fr = follow_channel_pwm(u_fr, t_fr, pid_fr.err, stall_boost, last_pwm_fr)
+    s_b = follow_channel_pwm(u_b, t_b, pid_b.err, stall_boost, last_pwm_b)
     apply_motor_duty(s_fl, motor_fl)
     apply_motor_duty(s_fr, motor_fr)
     apply_motor_duty(s_b, motor_b)

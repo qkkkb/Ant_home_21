@@ -200,6 +200,8 @@ Follow_Orbit_Brake_Gyro_Threshold = 4.0
 Follow_Orbit_Brake_Output_Limit = 8.0
 Follow_Normal_Brake_Wheel_Reserve = 2.0
 Master_Motion_Timeout_Ms = 250
+Follow_Master_Edge_Delta = 4.0
+Follow_Master_Edge_Hold_Ms = 120
 Follow_Master_Extra_Vx = 0.0
 Follow_Master_Extra_Vy = 0.0
 Camera_Right_Yaw_Cos = 0.5
@@ -261,6 +263,7 @@ spin_latch_until_ms = 0
 last_push_mode_active = False
 push_enter_ms = 0
 last_follow_mode_key = -1
+master_edge_until_ms = 0
 last_hard_stop = False
 last_stall_count = 0
 last_stall_boost = False
@@ -417,6 +420,7 @@ def clear_cam_target_state():
     global spin_latched_wz, spin_latch_until_ms
     global last_push_mode_active, push_enter_ms
     global last_follow_mode_key
+    global master_edge_until_ms
 
     cam_error_x = 0
     cam_error_y = 0
@@ -434,6 +438,7 @@ def clear_cam_target_state():
     last_push_mode_active = False
     push_enter_ms = 0
     last_follow_mode_key = -1
+    master_edge_until_ms = 0
     cam_has_target = False
     cam_valid_target_since_ms = 0
     target_lost_since_ms = 0
@@ -1086,6 +1091,7 @@ def update_follow_targets(gyro_z):
     global last_angle_priority_active
     global last_push_mode_active, push_enter_ms
     global last_follow_mode_key
+    global master_edge_until_ms
     global debug_event_mask
 
     now = utime.ticks_ms()
@@ -1196,6 +1202,23 @@ def update_follow_targets(gyro_z):
                 gyro_pid.err_last = 0.0
         last_follow_mode_key = mode_key
     if (
+        mode_key != 0
+        or (not seen)
+        or (not fresh_motion)
+        or (
+            cam_error_y - Follow_Normal_StandOff_Error_Y
+            <= Follow_Close_Guard_Start_Error
+        )
+    ):
+        master_edge_until_ms = 0
+    elif (
+        abs(ff_vx - last_ff_vx) >= Follow_Master_Edge_Delta
+        or abs(ff_vy - last_ff_vy) >= Follow_Master_Edge_Delta
+    ):
+        master_edge_until_ms = utime.ticks_add(now, Follow_Master_Edge_Hold_Ms)
+    elif master_edge_until_ms and utime.ticks_diff(master_edge_until_ms, now) <= 0:
+        master_edge_until_ms = 0
+    if (
         spin_mode_active
         and (follow_ff_wz >= 0.001 or follow_ff_wz <= -0.001)
         and last_cmd_wz * follow_ff_wz < 0.0
@@ -1206,6 +1229,8 @@ def update_follow_targets(gyro_z):
         orbit_mode_active,
         spin_mode_active,
     ) if seen else (orbit_mode_active or spin_mode_active)
+    if master_edge_until_ms and angle_pose_mode_active:
+        master_edge_until_ms = 0
     body_vx = 0.0
     body_vy = 0.0
     turn_rate_cmd = 0.0
@@ -1236,6 +1261,10 @@ def update_follow_targets(gyro_z):
             orbit_mode_active,
             spin_mode_active,
         )
+        if master_edge_until_ms and (
+            body_vx * ff_vx < -0.001 or body_vy * ff_vy < -0.001
+        ):
+            master_edge_until_ms = 0
         if orbit_mode_active:
             position_priority_active = True
         if angle_pose_mode_active:
@@ -1318,7 +1347,10 @@ def update_follow_targets(gyro_z):
         vy_limit = follow_limit(vy_limit, ff_vy, Follow_Master_Extra_Vy)
     vx = clamp(vx, -vx_limit, vx_limit)
     vy = clamp(vy, -vy_limit, vy_limit)
-    if position_priority_active:
+    if master_edge_until_ms:
+        vx_ramp = Follow_Orbit_Command_Ramp_Vx
+        vy_ramp = Follow_Orbit_Command_Ramp_Vy
+    elif position_priority_active:
         vx_ramp = Follow_Orbit_Command_Ramp_Vx
         vy_ramp = Follow_Orbit_Command_Ramp_Vy
     else:
@@ -1475,8 +1507,9 @@ def update_follow_targets(gyro_z):
         cam_target_vx,
         cam_target_vy,
         vz_cmd,
-        (priority_turn_mode and (not push_follow_active)) or normal_brake_active,
-        (priority_turn_mode or normal_brake_active)
+        (priority_turn_mode and (not push_follow_active))
+        or (normal_brake_active and (not master_edge_until_ms)),
+        (priority_turn_mode or (normal_brake_active and (not master_edge_until_ms)))
         and (not orbit_mode_active)
         and (not spin_mode_active)
         and (vz_cmd >= 0.001 or vz_cmd <= -0.001),
@@ -1511,6 +1544,7 @@ def reset_speed_outputs():
     global spin_latched_wz, spin_latch_until_ms
     global last_push_mode_active, push_enter_ms
     global last_follow_mode_key
+    global master_edge_until_ms
 
     speed_reset(pid_fl)
     speed_reset(pid_fr)
@@ -1533,6 +1567,7 @@ def reset_speed_outputs():
     last_push_mode_active = False
     push_enter_ms = 0
     last_follow_mode_key = -1
+    master_edge_until_ms = 0
 
 
 def clamp_duty(value):

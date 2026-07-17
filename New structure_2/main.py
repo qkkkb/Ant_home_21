@@ -290,12 +290,6 @@ def ramp_value(target, last, step):
     return target
 
 
-def angle_abs_value(error_angle):
-    if error_angle < 0:
-        return -error_angle
-    return error_angle
-
-
 def angle_pose_mode_needed(error_angle, orbit_mode=False, spin_mode=False):
     if orbit_mode or spin_mode:
         return True
@@ -311,7 +305,7 @@ def angle_pose_mode_needed(error_angle, orbit_mode=False, spin_mode=False):
 
 
 def angle_xy_lock_scale(error_angle, orbit_mode=False, spin_mode=False):
-    angle_abs = angle_abs_value(error_angle)
+    angle_abs = abs(error_angle)
     if angle_abs <= Follow_Angle_XY_Mode_On_Error:
         scale = 1.0
     elif angle_abs >= Follow_Angle_XY_Mode_Full_Error:
@@ -459,10 +453,6 @@ def master_motion_fresh():
         USE_MASTER_MOTION_FEEDFORWARD
         and utime.ticks_diff(utime.ticks_ms(), master_last_rx_ms) <= Master_Motion_Timeout_Ms
     )
-
-
-def master_motion_rx_fresh():
-    return utime.ticks_diff(utime.ticks_ms(), master_last_rx_ms) <= Master_Motion_Timeout_Ms
 
 
 def master_orbit_mode(fresh_motion):
@@ -1704,7 +1694,7 @@ def speed_ctrl_follow(pid, actual_speed, target_speed, idle_event, reverse_event
 
 def update_nav_led_display():
     straight_value = 1 if cam_target_seen() else 0
-    translate_value = 1 if master_motion_rx_fresh() else 0
+    translate_value = 1 if utime.ticks_diff(utime.ticks_ms(), master_last_rx_ms) <= Master_Motion_Timeout_Ms else 0
     rotate_value = 1 if car_started else 0
     now = utime.ticks_ms()
     rx_active = coop_rx_led_until_ms and utime.ticks_diff(coop_rx_led_until_ms, now) > 0

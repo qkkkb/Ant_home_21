@@ -683,7 +683,7 @@ def add_feedforward_direct(base, feedforward, gain, limit, conflict_scale=1.0):
     assist = clamp(feedforward * gain, -limit, limit)
     if base * assist < -0.001 and conflict_scale < 1.0:
         debug_event_mask |= 32768
-        assist *= conflict_scale
+        assist = clamp(assist, -abs(base), abs(base)) if master_edge_until_ms else assist * conflict_scale
     return base + assist
 
 
@@ -1101,15 +1101,6 @@ def update_follow_targets(gyro_z):
     explicit_orbit = master_orbit_mode(fresh_motion)
     explicit_push = master_push_mode(fresh_motion)
     explicit_spin = master_spin_mode(fresh_motion)
-    if (
-        fresh_motion and seen and last_follow_mode_key == 0
-        and master_flags == 0x05
-        and ff_vx == 0.0 and ff_vy == 0.0
-        and cam_error_y > Follow_Normal_StandOff_Error_Y
-        and not last_angle_priority_active
-    ):
-        ff_vx = last_ff_vx * 0.96
-        ff_vy = last_ff_vy * 0.96
     spin_ff_wz = update_spin_feedforward_latch(
         now,
         fresh_motion,
@@ -1202,10 +1193,6 @@ def update_follow_targets(gyro_z):
         mode_key != 0
         or (not seen)
         or (not fresh_motion)
-        or (
-            cam_error_y - Follow_Normal_StandOff_Error_Y
-            <= Follow_Close_Guard_Start_Error
-        )
     ):
         master_edge_until_ms = 0
     elif (
@@ -1226,8 +1213,6 @@ def update_follow_targets(gyro_z):
         orbit_mode_active,
         spin_mode_active,
     ) if seen else (orbit_mode_active or spin_mode_active)
-    if master_edge_until_ms and angle_pose_mode_active:
-        master_edge_until_ms = 0
     body_vx = 0.0
     body_vy = 0.0
     turn_rate_cmd = 0.0
@@ -1258,10 +1243,6 @@ def update_follow_targets(gyro_z):
             orbit_mode_active,
             spin_mode_active,
         )
-        if master_edge_until_ms and (
-            body_vx * ff_vx < -0.001 or body_vy * ff_vy < -0.001
-        ):
-            master_edge_until_ms = 0
         if orbit_mode_active:
             position_priority_active = True
         if angle_pose_mode_active:

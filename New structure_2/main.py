@@ -1351,11 +1351,20 @@ def update_follow_targets(gyro_z):
     normal_brake_active = (
         (not orbit_mode_active)
         and (not spin_mode_active)
-        and (turn_rate_cmd >= 0.001 or turn_rate_cmd <= -0.001)
         and abs(gyro_z) >= 40.0
         and (
-            (master_flags and turn_rate_cmd * gyro_z < 0.0)
-            or abs(gyro_z) > abs(turn_rate_cmd) * GYRO_PRIORITY_OVERSPEED_RATIO
+            (
+                fresh_motion
+                and master_flags
+                and -0.001 < turn_rate_cmd < 0.001
+            )
+            or (
+                (turn_rate_cmd >= 0.001 or turn_rate_cmd <= -0.001)
+                and (
+                    (master_flags and turn_rate_cmd * gyro_z < 0.0)
+                    or abs(gyro_z) > abs(turn_rate_cmd) * GYRO_PRIORITY_OVERSPEED_RATIO
+                )
+            )
         )
     )
     if -0.001 < turn_rate_cmd < 0.001:

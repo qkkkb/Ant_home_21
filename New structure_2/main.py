@@ -1631,7 +1631,10 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
             return FOLLOW_STALL_BOOST_PWM if target > 0.0 else -FOLLOW_STALL_BOOST_PWM
         if last_pwm == 0 and (target - speed_err) * target < 0.0:
             return FOLLOW_STALL_BOOST_PWM if target > 0.0 else -FOLLOW_STALL_BOOST_PWM
-    return smooth_value(apply_start_pwm(cmd, min_pwm), last_pwm)
+    cmd = apply_start_pwm(cmd, min_pwm)
+    if master_edge_until_ms and last_follow_mode_key == 0:
+        return smooth_value(cmd, smooth_value(cmd, last_pwm))
+    return smooth_value(cmd, last_pwm)
 
 
 def set_three_pwm_follow(u_fl, u_fr, u_b, t_fl, t_fr, t_b, stall_boost):

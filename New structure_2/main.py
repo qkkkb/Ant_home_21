@@ -562,8 +562,6 @@ def update_orbit_follow_mode(
             )
             and (-Follow_Orbit_Mode_Angle_Off <= error_angle <= Follow_Orbit_Mode_Angle_Off)
             and (-Follow_Orbit_Mode_Gyro_Off <= gyro_z <= Follow_Orbit_Mode_Gyro_Off)
-            and (-Follow_Orbit_Position_X_Error <= cam_error_x <= Follow_Orbit_Position_X_Error)
-            and (-Follow_Orbit_Position_Y_Error <= cam_error_y <= Follow_Orbit_Position_Y_Error)
         )
     )
     if stable:
@@ -1173,7 +1171,11 @@ def update_follow_targets(gyro_z):
         debug_event_mask |= 64
         if (
             last_follow_mode_key < 0
-            or (last_follow_mode_key != 3 and mode_key != 3)
+            or (
+                last_follow_mode_key != 3
+                and mode_key != 3
+                and not (last_follow_mode_key == 1 and mode_key == 0)
+            )
         ):
             speed_reset(pid_fl)
             speed_reset(pid_fr)
@@ -1587,15 +1589,31 @@ def follow_start_pwm_for_target(target, stall_boost):
     return FOLLOW_START_PWM
 
 
-def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
+def master_reverse_active(target, ff_wheel):
+    return (
+        last_ff_wz >= Follow_Spin_Latch_Min_Wz
+        or last_ff_wz <= -Follow_Spin_Latch_Min_Wz
+        or (
+            (ff_wheel >= FOLLOW_REVERSE_BOOST_TARGET or ff_wheel <= -FOLLOW_REVERSE_BOOST_TARGET)
+            and ff_wheel * target > 0.0
+        )
+    )
+
+
+def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm, fast_reverse):
     min_pwm = follow_start_pwm_for_target(target, stall_boost)
     if min_pwm <= 0:
         return 0
-    if target >= FOLLOW_REVERSE_BOOST_TARGET or target <= -FOLLOW_REVERSE_BOOST_TARGET:
-        if last_pwm * target < 0.0:
+    target_large = target >= FOLLOW_REVERSE_BOOST_TARGET or target <= -FOLLOW_REVERSE_BOOST_TARGET
+    if last_pwm * target < 0.0:
+        if fast_reverse and target_large:
             return FOLLOW_STALL_BOOST_PWM if target > 0.0 else -FOLLOW_STALL_BOOST_PWM
-        if last_pwm == 0 and (target - speed_err) * target < 0.0:
+        return 0
+    if last_pwm == 0 and (target - speed_err) * target < 0.0:
+        if fast_reverse and target_large:
             return FOLLOW_STALL_BOOST_PWM if target > 0.0 else -FOLLOW_STALL_BOOST_PWM
+        return 0
+    if fast_reverse and target_large:
         if (
             last_pwm * cmd < 0.0
             and cmd * speed_err > 0.0
@@ -1608,9 +1626,33 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
 def set_three_pwm_follow(u_fl, u_fr, u_b, t_fl, t_fr, t_b, stall_boost):
     global last_pwm_fl, last_pwm_fr, last_pwm_b
 
-    s_fl = follow_channel_pwm(u_fl, t_fl, pid_fl.err, stall_boost, last_pwm_fl)
-    s_fr = follow_channel_pwm(u_fr, t_fr, pid_fr.err, stall_boost, last_pwm_fr)
-    s_b = follow_channel_pwm(u_b, t_b, pid_b.err, stall_boost, last_pwm_b)
+    ff_wheel = last_ff_vx * 0.866025 + last_ff_vy * 0.5
+    s_fl = follow_channel_pwm(
+        u_fl,
+        t_fl,
+        pid_fl.err,
+        stall_boost,
+        last_pwm_fl,
+        master_reverse_active(t_fl, ff_wheel),
+    )
+    ff_wheel = -last_ff_vx * 0.866025 + last_ff_vy * 0.5
+    s_fr = follow_channel_pwm(
+        u_fr,
+        t_fr,
+        pid_fr.err,
+        stall_boost,
+        last_pwm_fr,
+        master_reverse_active(t_fr, ff_wheel),
+    )
+    ff_wheel = -last_ff_vy
+    s_b = follow_channel_pwm(
+        u_b,
+        t_b,
+        pid_b.err,
+        stall_boost,
+        last_pwm_b,
+        master_reverse_active(t_b, ff_wheel),
+    )
     apply_motor_duty(s_fl, motor_fl)
     apply_motor_duty(s_fr, motor_fr)
     apply_motor_duty(s_b, motor_b)

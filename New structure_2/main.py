@@ -755,30 +755,28 @@ def solve_follow_pose_twist(
             )
         else:
             ff_scale = clamp(
-                (
-                    error_y
-                    - Follow_Normal_StandOff_Error_Y
-                    + Follow_Close_Guard_Full_Error
-                )
+                (error_y + Follow_Close_Guard_Full_Error)
                 / Follow_Close_Guard_Full_Error,
                 0.0,
                 1.0,
             )
-            target_ff_vx = ff_vx + ff_wz * Follow_Target_Point_Wz_To_Vx
-            target_ff_vy = ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
+            target_ff_vx = (
+                ff_vx + ff_wz * Follow_Target_Point_Wz_To_Vx
+            ) * ff_scale
+            target_ff_vy = (
+                ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
+            ) * ff_scale
             vx = add_feedforward_direct(
                 vx,
                 target_ff_vx,
                 Follow_Feedforward_Forward_Gain,
                 Follow_Feedforward_Forward_Limit,
-                ff_scale,
             )
             vy = add_feedforward_direct(
                 vy,
                 target_ff_vy,
                 Follow_Feedforward_Lateral_Gain,
                 Follow_Feedforward_Lateral_Limit,
-                ff_scale,
             )
             wz = add_feedforward_direct(
                 wz,

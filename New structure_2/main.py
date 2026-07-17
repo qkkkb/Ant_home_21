@@ -1623,7 +1623,7 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
         or last_ff_wz <= -Follow_Spin_Latch_Min_Wz
     )
     if (not fast_reverse) and last_pwm * target < 0.0:
-        return smooth_value(0, last_pwm)
+        return 0
     min_pwm = follow_start_pwm_for_target(target, stall_boost)
     if min_pwm <= 0:
         return smooth_value(cmd, last_pwm)

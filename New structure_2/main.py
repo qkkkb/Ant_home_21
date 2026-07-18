@@ -109,7 +109,7 @@ Follow_Orbit_Position_Y_Error = 4
 Follow_Normal_Position_Priority_Error = 18
 Follow_Distance_Far_Boost_Error = 6
 Follow_Distance_Far_Boost_Gain = 0.70
-Follow_Distance_Close_Gain = 0.62
+Follow_Distance_Close_Gain = 0.70
 Follow_Distance_Close_Limit = 22.0
 Follow_Normal_StandOff_Error_Y = 7
 Follow_Feedforward_Forward_Gain = 1.00
@@ -1180,11 +1180,11 @@ def update_follow_targets(gyro_z):
                 gyro_pid.output = 0.0
                 gyro_pid.err = 0.0
                 gyro_pid.err_last = 0.0
-        last_follow_mode_key = mode_key
     if (
         (mode_key != 0 and (not push_follow_active))
         or (not seen)
         or (not fresh_motion)
+        or (last_follow_mode_key > 0 and mode_key == 0)
     ):
         master_edge_until_ms = 0
     elif (
@@ -1194,6 +1194,7 @@ def update_follow_targets(gyro_z):
         master_edge_until_ms = utime.ticks_add(now, Follow_Master_Edge_Hold_Ms)
     elif master_edge_until_ms and utime.ticks_diff(master_edge_until_ms, now) <= 0:
         master_edge_until_ms = 0
+    last_follow_mode_key = mode_key
     if (
         spin_mode_active
         and (follow_ff_wz >= 0.001 or follow_ff_wz <= -0.001)

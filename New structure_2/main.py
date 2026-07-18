@@ -1499,7 +1499,18 @@ def update_follow_targets(gyro_z):
         vz_cmd,
         (priority_turn_mode and (not push_follow_active))
         or (normal_brake_active and (not master_edge_until_ms)),
-        (priority_turn_mode or (normal_brake_active and (not master_edge_until_ms)))
+        (
+            priority_turn_mode
+            or (normal_brake_active and (not master_edge_until_ms))
+            or (
+                mode_key == 0
+                and fresh_motion
+                and (
+                    master_vy >= Follow_Master_Edge_Delta
+                    or master_vy <= -Follow_Master_Edge_Delta
+                )
+            )
+        )
         and (not orbit_mode_active)
         and (not spin_mode_active)
         and (vz_cmd >= 0.001 or vz_cmd <= -0.001),

@@ -42,7 +42,7 @@ GYRO_KI = 0.0005
 GYRO_PRIORITY_KP = 0.46
 GYRO_PRIORITY_KI = 0.0
 GYRO_OUTPUT_LIMIT = 14.0
-GYRO_OUTPUT_BASE_LIMIT = 3.5
+GYRO_OUTPUT_BASE_LIMIT = 2.6
 GYRO_OUTPUT_TARGET_GAIN = 2.2
 GYRO_OUTPUT_MAX_LIMIT = 22.0
 GYRO_PRIORITY_OUTPUT_BASE_LIMIT = 6.5
@@ -1381,7 +1381,7 @@ def update_follow_targets(gyro_z):
         last_angle_priority_active = True
     if ENABLE_GYRO_LOOP and gyro_pid is not None:
         if abs(turn_rate_cmd) > 0.001 or orbit_brake_active or normal_brake_active:
-            if angle_priority_active or normal_brake_active:
+            if priority_turn_mode or normal_brake_active:
                 gyro_pid.gyro_kp = GYRO_PRIORITY_KP
                 gyro_pid.gyro_ki = GYRO_PRIORITY_KI
                 gyro_pid.gyro_output_limit = gyro_limit_for_turn(

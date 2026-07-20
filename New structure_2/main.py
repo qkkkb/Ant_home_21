@@ -1263,16 +1263,6 @@ def update_follow_targets(gyro_z):
             else:
                 vx = (vx - body_vx) + body_vx * xy_scale
                 vy = (vy - body_vy) + body_vy * xy_scale
-                body_vx *= xy_scale
-                body_vy *= xy_scale
-
-    if seen and mode_key == 0:
-        vx -= body_vx
-        vy -= body_vy
-        body_vx = ramp_value(body_vx, last_visual_vx, 0.5)
-        body_vy = ramp_value(body_vy, last_visual_vy, 0.75)
-        vx += body_vx
-        vy += body_vy
 
     if push_follow_active and fresh_motion and seen:
         vx = add_feedforward_direct(
@@ -1620,19 +1610,6 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
     if not fast_reverse and last_follow_mode_key == 0 and last_pwm * target < 0.0:
         last_pwm = 0
     cmd = apply_start_pwm(cmd, min_pwm)
-    target_abs = abs(target)
-    if (
-        not fast_reverse
-        and last_follow_mode_key == 0
-        and target_abs <= FOLLOW_REVERSE_BOOST_TARGET
-    ):
-        low_limit = FOLLOW_START_PWM_MID + int(
-            FOLLOW_START_PWM
-            * (target_abs - WHEEL_TARGET_IDLE_EPS)
-            / (FOLLOW_REVERSE_BOOST_TARGET - WHEEL_TARGET_IDLE_EPS)
-        )
-        cmd = clamp(cmd, -low_limit, low_limit)
-        last_pwm = clamp(last_pwm, -low_limit, low_limit)
     if not fast_reverse and last_follow_mode_key == 0 and last_pwm * cmd < 0:
         return smooth_value(cmd, smooth_value(cmd, last_pwm))
     if master_edge_until_ms and last_follow_mode_key == 0:

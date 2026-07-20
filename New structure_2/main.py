@@ -68,9 +68,8 @@ WHEEL_TARGET_STOP_EPS = 0.05
 WHEEL_TARGET_IDLE_EPS = 1.2
 FOLLOW_START_PWM = 6200
 FOLLOW_START_PWM_MID = 3600
-FOLLOW_STATIC_LOCK_PWM_LIMIT = 14000
+FOLLOW_STATIC_LOCK_PWM_LIMIT = 12000
 FOLLOW_STALL_BOOST_PWM = 8800
-FOLLOW_START_PWM_LOW_TARGET = 1.2
 FOLLOW_START_PWM_MID_TARGET = 2.8
 FOLLOW_STALL_BOOST_TARGET = 2.8
 FOLLOW_REVERSE_BOOST_TARGET = 4.0
@@ -121,6 +120,7 @@ Follow_Push_Feedforward_Forward_Limit = 18.0
 Follow_Push_Feedforward_Lateral_Limit = 16.0
 Follow_Normal_Visual_Forward_Scale = 0.90
 Follow_Normal_Visual_Lateral_Scale = 1.30
+Follow_Static_Visual_Scale = 0.60
 Follow_Close_Guard_Full_Error = 8.0
 Follow_Close_Feedforward_Min_Scale = 0.25
 Follow_Normal_Hold_Feedforward_Gain = 1.00
@@ -1226,6 +1226,11 @@ def update_follow_targets(gyro_z):
             orbit_mode_active,
             spin_mode_active,
         )
+        if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
+            vx -= body_vx * (1.0 - Follow_Static_Visual_Scale)
+            vy -= body_vy * (1.0 - Follow_Static_Visual_Scale)
+            body_vx *= Follow_Static_Visual_Scale
+            body_vy *= Follow_Static_Visual_Scale
         if orbit_mode_active:
             position_priority_active = True
         if angle_pose_mode_active:
@@ -1597,8 +1602,6 @@ def follow_start_pwm_for_target(target, stall_boost):
         return 0
     if stall_boost and target_abs >= FOLLOW_STALL_BOOST_TARGET:
         return FOLLOW_STALL_BOOST_PWM
-    if target_abs < FOLLOW_START_PWM_LOW_TARGET:
-        return 0
     if target_abs < FOLLOW_START_PWM_MID_TARGET:
         return FOLLOW_START_PWM_MID
     return FOLLOW_START_PWM

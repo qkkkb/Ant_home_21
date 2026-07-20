@@ -37,7 +37,7 @@ GYRO_SIGN = 1.0
 GYRO_OFFSET_Z = 0.0
 GYRO_SCALE = -1.0
 GYRO_DEADBAND_DPS = 0.8
-GYRO_KP = 0.24
+GYRO_KP = 0.20
 GYRO_KI = 0.0005
 GYRO_PRIORITY_KP = 0.46
 GYRO_PRIORITY_KI = 0.0
@@ -913,15 +913,20 @@ def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z, spin_priority=False):
         out = err * GYRO_PRIORITY_BRAKE_KP
         return clamp(out, -GYRO_PRIORITY_BRAKE_LIMIT, GYRO_PRIORITY_BRAKE_LIMIT)
 
-    out = clamp(err * GYRO_PRIORITY_KP, -limit, limit)
+    gain = GYRO_PRIORITY_KP
+    min_output = GYRO_PRIORITY_MIN_OUTPUT
+    if not spin_priority and last_follow_mode_key != 1:
+        gain = GYRO_KP
+        min_output = 0.8
+    out = clamp(err * gain, -limit, limit)
     if (
         turn_abs >= GYRO_PRIORITY_MIN_CMD
         and (not same_dir or gyro_abs < turn_abs * GYRO_PRIORITY_MIN_RATE_RATIO)
     ):
-        if 0.0 < out < GYRO_PRIORITY_MIN_OUTPUT:
-            out = GYRO_PRIORITY_MIN_OUTPUT
-        elif -GYRO_PRIORITY_MIN_OUTPUT < out < 0.0:
-            out = -GYRO_PRIORITY_MIN_OUTPUT
+        if 0.0 < out < min_output:
+            out = min_output
+        elif -min_output < out < 0.0:
+            out = -min_output
     return clamp(out, -limit, limit)
 
 
@@ -1398,7 +1403,7 @@ def update_follow_targets(gyro_z):
                 output_ramp = (
                     Follow_Spin_Gyro_Output_Ramp
                     if spin_mode_active
-                    else Follow_Pose_Gyro_Output_Ramp
+                    else (0.6 if mode_key == 0 else Follow_Pose_Gyro_Output_Ramp)
                 )
                 vz_cmd = ramp_value(vz_cmd, last_ap_vz_cmd, output_ramp)
                 last_ap_vz_cmd = vz_cmd

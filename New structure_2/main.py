@@ -1705,7 +1705,16 @@ def speed_ctrl_follow(pid, actual_speed, target_speed, idle_event, reverse_event
         return 0.0
     if pid.tar_spd_last * target_speed < 0.0:
         debug_event_mask |= reverse_event
-    return speed_ctrl(pid, actual_speed, target_speed)
+    output = speed_ctrl(pid, actual_speed, target_speed)
+    if (
+        last_follow_mode_key == 0
+        and not master_edge_until_ms
+        and output * target_speed < 0.0
+        and actual_speed * target_speed <= target_speed * target_speed
+    ):
+        speed_reset(pid)
+        return 0.0
+    return output
 
 
 def update_nav_led_display():

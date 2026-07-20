@@ -1618,7 +1618,11 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
     )
     min_pwm = follow_start_pwm_for_target(target, stall_boost)
     if min_pwm <= 0:
-        return smooth_value(0, last_pwm) if last_follow_mode_key == 0 else 0
+        if last_follow_mode_key != 0:
+            return 0
+        if -WHEEL_TARGET_STOP_EPS <= target <= WHEEL_TARGET_STOP_EPS:
+            return smooth_value(0, last_pwm)
+        return smooth_value(0 if wheel_target_idle(target) else cmd, last_pwm)
     if (
         fast_reverse
         and (target >= FOLLOW_REVERSE_BOOST_TARGET or target <= -FOLLOW_REVERSE_BOOST_TARGET)
@@ -1680,14 +1684,9 @@ def encoders_stalled(e_fl, e_fr, e_b):
 
 
 def wheel_target_idle(target):
-    if (
-        last_follow_mode_key == 0
-        and (last_turn_rate_cmd >= 0.001 or last_turn_rate_cmd <= -0.001)
-        and -0.001 < cam_target_vx < 0.001
-        and -0.001 < cam_target_vy < 0.001
-    ):
-        return -WHEEL_TARGET_STOP_EPS <= target <= WHEEL_TARGET_STOP_EPS
     if last_follow_mode_key == 0:
+        if cam_target_vx or cam_target_vy or last_turn_rate_cmd:
+            return False
         return -WHEEL_TARGET_NORMAL_IDLE_EPS <= target <= WHEEL_TARGET_NORMAL_IDLE_EPS
     return -WHEEL_TARGET_IDLE_EPS <= target <= WHEEL_TARGET_IDLE_EPS
 

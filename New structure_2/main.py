@@ -1317,10 +1317,7 @@ def update_follow_targets(gyro_z):
             )
         else:
             turn_rate_cmd = follow_ff_wz * Follow_Normal_Wz_Feedforward_Gain
-    priority_turn_mode = (
-        (orbit_mode_active and (not push_follow_active))
-        or spin_mode_active
-    )
+    priority_turn_mode = orbit_mode_active or spin_mode_active or angle_pose_mode_active
     orbit_brake_active = (
         priority_turn_mode
         and (
@@ -1329,7 +1326,8 @@ def update_follow_targets(gyro_z):
         )
     )
     normal_brake_active = (
-        (not priority_turn_mode)
+        (not orbit_mode_active)
+        and (not spin_mode_active)
         and abs(gyro_z) >= 40.0
         and (
             (
@@ -1383,7 +1381,7 @@ def update_follow_targets(gyro_z):
         last_angle_priority_active = True
     if ENABLE_GYRO_LOOP and gyro_pid is not None:
         if abs(turn_rate_cmd) > 0.001 or orbit_brake_active or normal_brake_active:
-            if priority_turn_mode or normal_brake_active:
+            if angle_priority_active or normal_brake_active:
                 gyro_pid.gyro_kp = GYRO_PRIORITY_KP
                 gyro_pid.gyro_ki = GYRO_PRIORITY_KI
                 gyro_pid.gyro_output_limit = gyro_limit_for_turn(
@@ -1428,7 +1426,7 @@ def update_follow_targets(gyro_z):
         last_ap_vz_cmd = 0.0
         vz_cmd = turn_rate_cmd
 
-    if not priority_turn_mode:
+    if (not orbit_mode_active) and (not spin_mode_active):
         vz_cmd = clamp(
             vz_cmd,
             -GYRO_OUTPUT_BASE_LIMIT,
@@ -1437,7 +1435,8 @@ def update_follow_targets(gyro_z):
     if ENABLE_GYRO_LOOP and gyro_pid is not None:
         gyro_output_limit = gyro_pid.gyro_output_limit
         if (
-            (not priority_turn_mode)
+            (not orbit_mode_active)
+            and (not spin_mode_active)
             and GYRO_OUTPUT_BASE_LIMIT < gyro_output_limit
         ):
             gyro_output_limit = GYRO_OUTPUT_BASE_LIMIT
@@ -1462,9 +1461,19 @@ def update_follow_targets(gyro_z):
         cam_target_vx,
         cam_target_vy,
         vz_cmd,
-        priority_turn_mode,
+        (priority_turn_mode and (not push_follow_active))
+        or (normal_brake_active and (not master_edge_until_ms)),
         (
-            normal_brake_active
+            priority_turn_mode
+            or (normal_brake_active and (not master_edge_until_ms))
+            or (
+                mode_key == 0
+                and fresh_motion
+                and (
+                    master_vy >= Follow_Master_Edge_Delta
+                    or master_vy <= -Follow_Master_Edge_Delta
+                )
+            )
         )
         and (not orbit_mode_active)
         and (not spin_mode_active)
@@ -1647,10 +1656,7 @@ def encoders_stalled(e_fl, e_fr, e_b):
 
 def wheel_target_idle(target):
     if (
-        (
-            last_follow_mode_key == 0
-            or (master_flags & MASTER_MOTION_FLAG_PUSH) != 0
-        )
+        last_follow_mode_key == 0
         and (last_turn_rate_cmd >= 0.001 or last_turn_rate_cmd <= -0.001)
         and -0.001 < cam_target_vx < 0.001
         and -0.001 < cam_target_vy < 0.001

@@ -684,9 +684,9 @@ def solve_follow_pose_twist(
         )
     else:
         position_priority = position_priority_needed(
-            cam_vy,
-            cam_vx,
-            angle_active,
+            error_y,
+            error_x,
+            False,
             Follow_Normal_Position_Priority_Error,
             Follow_Normal_Position_Priority_Error,
         )
@@ -1232,9 +1232,7 @@ def update_follow_targets(gyro_z):
             vy -= body_vy * (1.0 - Follow_Static_Visual_Scale)
             body_vx *= Follow_Static_Visual_Scale
             body_vy *= Follow_Static_Visual_Scale
-        if orbit_mode_active:
-            position_priority_active = True
-        if angle_pose_mode_active:
+        if orbit_mode_active or spin_mode_active:
             position_priority_active = True
         last_angle_priority_active = angle_priority_active or angle_pose_mode_active
     else:

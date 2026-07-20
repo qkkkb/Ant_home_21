@@ -22,6 +22,8 @@ from coop_protocol import (
 speed_ctrl = _pid_mod.speed_ctrl
 gyro_ctrl = _pid_mod.gyro_ctrl
 speed_reset = _pid_mod.speed_reset
+speed_follow_guard = _pid_mod.speed_follow_guard
+follow_low_pwm = _pid_mod.follow_low_pwm
 
 
 # ====================== Base config ======================
@@ -1575,26 +1577,13 @@ def smooth_value(target, last):
     return clamp_duty(target)
 
 
-def apply_motor_duty(cmd, motor):
-    cmd = int(cmd)
-    if 0 < abs(cmd) < MOTOR_DUTY_MIN:
-        cmd = MOTOR_DUTY_MIN if cmd > 0 else -MOTOR_DUTY_MIN
-    motor.duty(cmd)
-
-
 def apply_start_pwm(cmd, min_pwm):
     cmd = int(cmd)
-    if cmd > 0:
-        if cmd < min_pwm:
-            cmd = min_pwm
-    elif cmd < 0:
-        if cmd > -min_pwm:
-            cmd = -min_pwm
-    if cmd > FOLLOW_RUN_PWM_LIMIT:
-        cmd = FOLLOW_RUN_PWM_LIMIT
-    elif cmd < -FOLLOW_RUN_PWM_LIMIT:
-        cmd = -FOLLOW_RUN_PWM_LIMIT
-    return cmd
+    if 0 < cmd < min_pwm:
+        cmd = min_pwm
+    elif -min_pwm < cmd < 0:
+        cmd = -min_pwm
+    return clamp(cmd, -FOLLOW_RUN_PWM_LIMIT, FOLLOW_RUN_PWM_LIMIT)
 
 
 def follow_start_pwm_for_target(target, stall_boost):
@@ -1620,9 +1609,15 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
     if min_pwm <= 0:
         if last_follow_mode_key != 0:
             return 0
-        if -WHEEL_TARGET_STOP_EPS <= target <= WHEEL_TARGET_STOP_EPS:
-            return smooth_value(0, last_pwm)
-        return smooth_value(0 if wheel_target_idle(target) else cmd, last_pwm)
+        return follow_low_pwm(
+            cmd,
+            target,
+            speed_err,
+            last_pwm,
+            WHEEL_TARGET_STOP_EPS,
+            MOTOR_DUTY_MIN,
+            smooth_value,
+        )
     if (
         fast_reverse
         and (target >= FOLLOW_REVERSE_BOOST_TARGET or target <= -FOLLOW_REVERSE_BOOST_TARGET)
@@ -1631,8 +1626,6 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
             return FOLLOW_STALL_BOOST_PWM if target > 0.0 else -FOLLOW_STALL_BOOST_PWM
         if last_pwm == 0 and (target - speed_err) * target < 0.0:
             return FOLLOW_STALL_BOOST_PWM if target > 0.0 else -FOLLOW_STALL_BOOST_PWM
-    if not fast_reverse and last_follow_mode_key == 0 and last_pwm * target < 0.0:
-        last_pwm = 0
     cmd = apply_start_pwm(cmd, min_pwm)
     if not fast_reverse and last_follow_mode_key == 0 and last_pwm * cmd < 0:
         return smooth_value(cmd, smooth_value(cmd, last_pwm))
@@ -1650,12 +1643,16 @@ def set_three_pwm_follow(u_fl, u_fr, u_b, t_fl, t_fr, t_b, stall_boost):
     s_fl = clamp(s_fl, -follow_output_limit, follow_output_limit)
     s_fr = clamp(s_fr, -follow_output_limit, follow_output_limit)
     s_b = clamp(s_b, -follow_output_limit, follow_output_limit)
-    apply_motor_duty(s_fl, motor_fl)
-    apply_motor_duty(s_fr, motor_fr)
-    apply_motor_duty(s_b, motor_b)
+    s_fl = motor_fl.duty(s_fl, MOTOR_DUTY_MIN)
+    s_fr = motor_fr.duty(s_fr, MOTOR_DUTY_MIN)
+    s_b = motor_b.duty(s_b, MOTOR_DUTY_MIN)
     last_pwm_fl = s_fl
     last_pwm_fr = s_fr
     last_pwm_b = s_b
+    if last_follow_mode_key == 0:
+        pid_fl.output = s_fl
+        pid_fr.output = s_fr
+        pid_b.output = s_b
     return s_fl, s_fr, s_b
 
 
@@ -1684,9 +1681,14 @@ def encoders_stalled(e_fl, e_fr, e_b):
 
 
 def wheel_target_idle(target):
+    if (
+        last_follow_mode_key == 0
+        and (last_turn_rate_cmd >= 0.001 or last_turn_rate_cmd <= -0.001)
+        and -0.001 < cam_target_vx < 0.001
+        and -0.001 < cam_target_vy < 0.001
+    ):
+        return -WHEEL_TARGET_STOP_EPS <= target <= WHEEL_TARGET_STOP_EPS
     if last_follow_mode_key == 0:
-        if cam_target_vx or cam_target_vy or last_turn_rate_cmd:
-            return False
         return -WHEEL_TARGET_NORMAL_IDLE_EPS <= target <= WHEEL_TARGET_NORMAL_IDLE_EPS
     return -WHEEL_TARGET_IDLE_EPS <= target <= WHEEL_TARGET_IDLE_EPS
 
@@ -1696,19 +1698,21 @@ def speed_ctrl_follow(pid, actual_speed, target_speed, idle_event, reverse_event
 
     if wheel_target_idle(target_speed):
         debug_event_mask |= idle_event
-        speed_reset(pid)
-        return 0.0
+        if last_follow_mode_key != 0:
+            speed_reset(pid)
+            return 0.0
     if pid.tar_spd_last * target_speed < 0.0:
         debug_event_mask |= reverse_event
     output = speed_ctrl(pid, actual_speed, target_speed)
-    if (
-        last_follow_mode_key == 0
-        and not master_edge_until_ms
-        and output * target_speed < 0.0
-        and actual_speed * target_speed <= target_speed * target_speed
-    ):
-        speed_reset(pid)
-        return 0.0
+    if last_follow_mode_key == 0:
+        output = speed_follow_guard(
+            pid,
+            output,
+            actual_speed,
+            target_speed,
+            WHEEL_TARGET_STOP_EPS,
+            not master_edge_until_ms,
+        )
     return output
 
 

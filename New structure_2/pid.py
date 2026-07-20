@@ -67,6 +67,32 @@ def speed_ctrl(pid, actual_speed, tar_spd):
     return pid.output
 
 
+def speed_follow_guard(pid, output, actual_speed, target_speed, stop_eps, unload_wrong):
+    if -stop_eps <= target_speed <= stop_eps:
+        if actual_speed == 0:
+            return 0.0
+        return -pid.kp * actual_speed
+    if (
+        unload_wrong
+        and output * target_speed < 0.0
+        and actual_speed * target_speed <= target_speed * target_speed
+    ):
+        return 0.0
+    return output
+
+
+def follow_low_pwm(cmd, target, speed_err, last_pwm, stop_eps, min_duty, smooth):
+    target_zero = -stop_eps <= target <= stop_eps
+    if target_zero and target == speed_err:
+        return 0
+    if last_pwm * cmd < 0:
+        last_pwm = smooth(cmd, last_pwm)
+    cmd = smooth(cmd, last_pwm)
+    if target_zero and -min_duty < cmd < min_duty:
+        return 0
+    return cmd
+
+
 def speed_reset(pid):
     pid.output = 0.0
     pid.err_last = 0.0

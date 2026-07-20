@@ -63,7 +63,7 @@ GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
 
 GC_DIV = 50
-DEBUG_LOG_PERIOD_MS = 200
+DEBUG_LOG_PERIOD_MS = 100
 WHEEL_TARGET_STOP_EPS = 0.05
 WHEEL_TARGET_IDLE_EPS = 1.2
 FOLLOW_START_PWM = 6200
@@ -381,10 +381,24 @@ def gyro_limit_for_turn(turn_rate_cmd, priority=False, spin_priority=False):
 
 def update_cam_target(err_x, err_y, err_angle=0):
     global cam_error_x, cam_error_y, cam_error_angle, cam_last_rx_ms
+    global debug_event_mask
 
-    cam_error_x = int(err_x)
-    cam_error_y = int(err_y)
-    cam_error_angle = int(err_angle)
+    err_x = int(err_x)
+    err_y = int(err_y)
+    err_angle = int(err_angle)
+    if cam_error_x * err_x < 0 or cam_error_y * err_y < 0:
+        debug_event_mask |= 65536
+    if cam_error_angle * err_angle < 0:
+        debug_event_mask |= 131072
+    if (
+        abs(err_x - cam_error_x) >= 12
+        or abs(err_y - cam_error_y) >= 12
+        or abs(err_angle - cam_error_angle) >= 12
+    ):
+        debug_event_mask |= 262144
+    cam_error_x = err_x
+    cam_error_y = err_y
+    cam_error_angle = err_angle
     cam_last_rx_ms = utime.ticks_ms()
 
 
@@ -1349,6 +1363,8 @@ def update_follow_targets(gyro_z):
             )
         )
     )
+    if normal_brake_active:
+        debug_event_mask |= 4194304
     if -0.001 < turn_rate_cmd < 0.001:
         turn_rate_cmd = 0.0
         if orbit_brake_active or normal_brake_active:
@@ -1670,13 +1686,15 @@ def wheel_target_idle(target):
     return -WHEEL_TARGET_IDLE_EPS <= target <= WHEEL_TARGET_IDLE_EPS
 
 
-def speed_ctrl_follow(pid, actual_speed, target_speed, idle_event):
+def speed_ctrl_follow(pid, actual_speed, target_speed, idle_event, reverse_event):
     global debug_event_mask
 
     if wheel_target_idle(target_speed):
         debug_event_mask |= idle_event
         speed_reset(pid)
         return 0.0
+    if pid.tar_spd_last * target_speed < 0.0:
+        debug_event_mask |= reverse_event
     return speed_ctrl(pid, actual_speed, target_speed)
 
 
@@ -1830,9 +1848,9 @@ def calc_speed_closed_loop():
             last_stall_count = 0
         last_stall_boost = last_stall_count >= FOLLOW_STALL_BOOST_FRAMES
 
-        u_fl = speed_ctrl_follow(pid_fl, e_fl, t_fl, 1)
-        u_fr = speed_ctrl_follow(pid_fr, e_fr, t_fr, 2)
-        u_b = speed_ctrl_follow(pid_b, e_b, t_b, 4)
+        u_fl = speed_ctrl_follow(pid_fl, e_fl, t_fl, 1, 524288)
+        u_fr = speed_ctrl_follow(pid_fr, e_fr, t_fr, 2, 1048576)
+        u_b = speed_ctrl_follow(pid_b, e_b, t_b, 4, 2097152)
 
         s_fl, s_fr, s_b = set_three_pwm_follow(
             u_fl, u_fr, u_b, t_fl, t_fr, t_b, last_stall_boost
@@ -1869,7 +1887,7 @@ def calc_speed_closed_loop():
                 1 if last_hard_stop else 0,
                 1 if last_stall_boost else 0,
                 1 if last_angle_priority_active else 0,
-                0,
+                1 if master_edge_until_ms else 0,
                 cam_error_x,
                 cam_error_y,
                 cam_error_angle,
@@ -1900,9 +1918,9 @@ def calc_speed_closed_loop():
                 int(last_turn_rate_cmd),
                 int(cam_target_vx - last_visual_vx),
                 int(cam_target_vy - last_visual_vy),
-                int(round(master_vx * 10.0)),
-                int(round(master_vy * 10.0)),
-                int(round(master_wz * 10.0)),
+                int(pid_fl.delta_ud),
+                int(pid_fr.delta_ud),
+                int(pid_b.delta_ud),
                 last_follow_mode_key,
                 master_age_ms,
                 cam_age_ms,

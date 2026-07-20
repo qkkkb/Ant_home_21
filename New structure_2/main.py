@@ -1262,7 +1262,7 @@ def update_follow_targets(gyro_z):
         last_angle_priority_active = False
 
     if seen:
-        if angle_pose_mode_active:
+        if angle_pose_mode_active and (orbit_mode_active or spin_mode_active):
             xy_scale = angle_xy_lock_scale(
                 cam_error_angle,
                 orbit_mode_active,
@@ -1271,12 +1271,9 @@ def update_follow_targets(gyro_z):
             if push_follow_active:
                 vx = (vx - body_vx) + body_vx * xy_scale
                 vy = (vy - body_vy) + body_vy * xy_scale
-            elif orbit_mode_active or spin_mode_active:
+            else:
                 vx *= xy_scale
                 vy *= xy_scale
-            else:
-                vx = (vx - body_vx) + body_vx * xy_scale
-                vy = (vy - body_vy) + body_vy * xy_scale
 
     if push_follow_active and fresh_motion and seen:
         vx = add_feedforward_direct(
@@ -1579,8 +1576,6 @@ def apply_motor_duty(cmd, motor):
 
 
 def apply_start_pwm(cmd, min_pwm):
-    if min_pwm <= 0:
-        return 0
     cmd = int(cmd)
     if cmd > 0:
         if cmd < min_pwm:
@@ -1607,7 +1602,8 @@ def follow_start_pwm_for_target(target, stall_boost):
 
 
 def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
-    if wheel_target_idle(target):
+    target_idle = wheel_target_idle(target)
+    if last_follow_mode_key != 0 and target_idle:
         return 0
     fast_reverse = (
         master_edge_until_ms
@@ -1623,9 +1619,16 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
             return FOLLOW_STALL_BOOST_PWM if target > 0.0 else -FOLLOW_STALL_BOOST_PWM
         if last_pwm == 0 and (target - speed_err) * target < 0.0:
             return FOLLOW_STALL_BOOST_PWM if target > 0.0 else -FOLLOW_STALL_BOOST_PWM
-    if not fast_reverse and last_follow_mode_key == 0 and last_pwm * target < 0.0:
+    if (
+        not target_idle
+        and not fast_reverse
+        and last_follow_mode_key == 0
+        and last_pwm * target < 0.0
+    ):
         last_pwm = 0
     cmd = apply_start_pwm(cmd, min_pwm)
+    if target_idle:
+        return smooth_value(cmd, last_pwm)
     if not fast_reverse and last_follow_mode_key == 0 and last_pwm * cmd < 0:
         return smooth_value(cmd, smooth_value(cmd, last_pwm))
     if master_edge_until_ms and last_follow_mode_key == 0:
@@ -1691,8 +1694,9 @@ def speed_ctrl_follow(pid, actual_speed, target_speed, idle_event, reverse_event
 
     if wheel_target_idle(target_speed):
         debug_event_mask |= idle_event
-        speed_reset(pid)
-        return 0.0
+        if last_follow_mode_key != 0:
+            speed_reset(pid)
+            return 0.0
     if pid.tar_spd_last * target_speed < 0.0:
         debug_event_mask |= reverse_event
     return speed_ctrl(pid, actual_speed, target_speed)

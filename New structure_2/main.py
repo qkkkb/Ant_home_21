@@ -65,7 +65,7 @@ GYRO_CALIBRATE_DELAY_MS = 2
 GC_DIV = 50
 DEBUG_LOG_PERIOD_MS = 200
 WHEEL_TARGET_STOP_EPS = 0.05
-WHEEL_TARGET_IDLE_EPS = 0.35
+WHEEL_TARGET_IDLE_EPS = 1.2
 FOLLOW_START_PWM = 6200
 FOLLOW_START_PWM_MID = 3600
 FOLLOW_STATIC_LOCK_PWM_LIMIT = 14000
@@ -1145,9 +1145,9 @@ def update_follow_targets(gyro_z):
     follow_output_limit = FOLLOW_RUN_PWM_LIMIT
     if (
         mode_key == 0
-        and -0.001 < ff_vx < 0.001
-        and -0.001 < ff_vy < 0.001
-        and -0.001 < follow_ff_wz < 0.001
+        and -Follow_Master_Edge_Delta < ff_vx < Follow_Master_Edge_Delta
+        and -Follow_Master_Edge_Delta < ff_vy < Follow_Master_Edge_Delta
+        and -Follow_Master_Edge_Delta < follow_ff_wz < Follow_Master_Edge_Delta
     ):
         follow_output_limit = FOLLOW_STATIC_LOCK_PWM_LIMIT
     if last_follow_mode_key != mode_key:
@@ -1605,14 +1605,14 @@ def follow_start_pwm_for_target(target, stall_boost):
 
 
 def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
+    if wheel_target_idle(target):
+        return 0
     fast_reverse = (
         master_edge_until_ms
         or last_ff_wz >= Follow_Spin_Latch_Min_Wz
         or last_ff_wz <= -Follow_Spin_Latch_Min_Wz
     )
     min_pwm = follow_start_pwm_for_target(target, stall_boost)
-    if min_pwm <= 0:
-        return smooth_value(cmd, last_pwm)
     if (
         fast_reverse
         and (target >= FOLLOW_REVERSE_BOOST_TARGET or target <= -FOLLOW_REVERSE_BOOST_TARGET)

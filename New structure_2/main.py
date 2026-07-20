@@ -1614,6 +1614,8 @@ def follow_start_pwm_for_target(target, stall_boost):
 
 def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
     if wheel_target_idle(target):
+        if last_follow_mode_key == 0:
+            return smooth_value(0, last_pwm)
         return 0
     fast_reverse = (
         master_edge_until_ms
@@ -1622,6 +1624,8 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
     )
     min_pwm = follow_start_pwm_for_target(target, stall_boost)
     if min_pwm <= 0:
+        if last_follow_mode_key == 0:
+            return smooth_value(0, last_pwm)
         return 0
     if (
         fast_reverse
@@ -1713,6 +1717,9 @@ def speed_ctrl_follow(pid, actual_speed, target_speed, idle_event, reverse_event
         and actual_speed * target_speed <= target_speed * target_speed
     ):
         speed_reset(pid)
+        pid.err = target_speed - actual_speed
+        pid.err_last = pid.err
+        pid.tar_spd_last = target_speed
         return 0.0
     return output
 

@@ -105,7 +105,6 @@ Follow_Orbit_Forward_Deadband = 2
 Follow_Orbit_Lateral_Deadband = 2
 Follow_Orbit_Position_X_Error = 4
 Follow_Orbit_Position_Y_Error = 4
-Follow_Normal_Position_Priority_Error = 18
 Follow_Distance_Far_Boost_Error = 6
 Follow_Distance_Far_Boost_Gain = 0.70
 Follow_Distance_Close_Gain = 0.70
@@ -544,22 +543,6 @@ def follow_limit(base_limit, master_value):
     return limit
 
 
-def position_priority_needed(
-    error_x,
-    error_y,
-    angle_active,
-    x_limit=Follow_Orbit_Position_X_Error,
-    y_limit=Follow_Orbit_Position_Y_Error,
-):
-    return (
-        angle_active
-        or error_x >= x_limit
-        or error_x <= -x_limit
-        or error_y >= y_limit
-        or error_y <= -y_limit
-    )
-
-
 def calc_follow_forward(error_y, position_priority=False):
     deadband = Follow_Orbit_Forward_Deadband if position_priority else Follow_Forward_Deadband
     error_y = soft_deadband(error_y, deadband, deadband * 2)
@@ -677,19 +660,15 @@ def solve_follow_pose_twist(
     if cam_vx > 0.0:
         cam_vy -= cam_vx * 5 // 13
     if orbit_mode or spin_mode:
-        position_priority = position_priority_needed(
-            cam_vy,
-            cam_vx,
-            angle_active and (not spin_mode),
+        position_priority = (
+            (angle_active and (not spin_mode))
+            or cam_vy >= Follow_Orbit_Position_X_Error
+            or cam_vy <= -Follow_Orbit_Position_X_Error
+            or cam_vx >= Follow_Orbit_Position_Y_Error
+            or cam_vx <= -Follow_Orbit_Position_Y_Error
         )
     else:
-        position_priority = position_priority_needed(
-            error_y,
-            error_x,
-            False,
-            Follow_Normal_Position_Priority_Error,
-            Follow_Normal_Position_Priority_Error,
-        )
+        position_priority = False
     body_vx = -calc_follow_forward(cam_vx, position_priority)
     body_vy = calc_follow_lateral(cam_vy, position_priority)
     if (not orbit_mode) and (not spin_mode):
@@ -1597,7 +1576,7 @@ def apply_start_pwm(cmd, min_pwm):
 
 def follow_start_pwm_for_target(target, stall_boost):
     target_abs = abs(target)
-    if target_abs <= WHEEL_TARGET_IDLE_EPS:
+    if wheel_target_idle(target):
         return 0
     if stall_boost and target_abs >= FOLLOW_STALL_BOOST_TARGET:
         return FOLLOW_STALL_BOOST_PWM
@@ -1676,6 +1655,13 @@ def encoders_stalled(e_fl, e_fr, e_b):
 
 
 def wheel_target_idle(target):
+    if (
+        last_follow_mode_key == 0
+        and (last_turn_rate_cmd >= 0.001 or last_turn_rate_cmd <= -0.001)
+        and -0.001 < cam_target_vx < 0.001
+        and -0.001 < cam_target_vy < 0.001
+    ):
+        return -WHEEL_TARGET_STOP_EPS <= target <= WHEEL_TARGET_STOP_EPS
     return -WHEEL_TARGET_IDLE_EPS <= target <= WHEEL_TARGET_IDLE_EPS
 
 
@@ -1827,7 +1813,13 @@ def calc_speed_closed_loop():
         last_hard_stop = True
     else:
         last_hard_stop = False
-        if encoders_stalled(e_fl, e_fr, e_b):
+        if (
+            wheel_target_idle(t_fl)
+            and wheel_target_idle(t_fr)
+            and wheel_target_idle(t_b)
+        ):
+            last_stall_count = 0
+        elif encoders_stalled(e_fl, e_fr, e_b):
             last_stall_count += 1
         else:
             last_stall_count = 0

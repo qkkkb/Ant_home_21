@@ -43,7 +43,6 @@ GYRO_PRIORITY_KP = 0.46
 GYRO_PRIORITY_KI = 0.0
 GYRO_OUTPUT_LIMIT = 14.0
 GYRO_OUTPUT_BASE_LIMIT = 2.6
-GYRO_NORMAL_BRAKE_OUTPUT_LIMIT = 3.2
 GYRO_OUTPUT_TARGET_GAIN = 2.2
 GYRO_OUTPUT_MAX_LIMIT = 22.0
 GYRO_PRIORITY_OUTPUT_BASE_LIMIT = 6.5
@@ -67,6 +66,7 @@ GC_DIV = 50
 DEBUG_LOG_PERIOD_MS = 100
 WHEEL_TARGET_STOP_EPS = 0.05
 WHEEL_TARGET_IDLE_EPS = 1.2
+WHEEL_TARGET_NORMAL_IDLE_EPS = 0.35
 FOLLOW_START_PWM = 6200
 FOLLOW_START_PWM_MID = 3600
 FOLLOW_STATIC_LOCK_PWM_LIMIT = 12000
@@ -189,7 +189,7 @@ Follow_Spin_Command_Hold_Ms = 900
 Follow_Spin_Latch_Release_Angle = 6
 Follow_Orbit_Brake_Gyro_Threshold = 4.0
 Follow_Orbit_Brake_Output_Limit = 8.0
-Follow_Normal_Brake_Wheel_Reserve = 1.6
+Follow_Normal_Brake_Wheel_Reserve = 1.5
 Master_Motion_Timeout_Ms = 250
 Follow_Master_Edge_Delta = 4.0
 Follow_Master_Edge_Hold_Ms = 120
@@ -1448,23 +1448,20 @@ def update_follow_targets(gyro_z):
         last_ap_vz_cmd = 0.0
         vz_cmd = turn_rate_cmd
 
-    normal_gyro_output_limit = GYRO_OUTPUT_BASE_LIMIT
-    if normal_brake_active:
-        normal_gyro_output_limit = GYRO_NORMAL_BRAKE_OUTPUT_LIMIT
     if (not orbit_mode_active) and (not spin_mode_active):
         vz_cmd = clamp(
             vz_cmd,
-            -normal_gyro_output_limit,
-            normal_gyro_output_limit,
+            -GYRO_OUTPUT_BASE_LIMIT,
+            GYRO_OUTPUT_BASE_LIMIT,
         )
     if ENABLE_GYRO_LOOP and gyro_pid is not None:
         gyro_output_limit = gyro_pid.gyro_output_limit
         if (
             (not orbit_mode_active)
             and (not spin_mode_active)
-            and normal_gyro_output_limit < gyro_output_limit
+            and GYRO_OUTPUT_BASE_LIMIT < gyro_output_limit
         ):
-            gyro_output_limit = normal_gyro_output_limit
+            gyro_output_limit = GYRO_OUTPUT_BASE_LIMIT
         if gyro_output_limit > 0.0 and (
             vz_cmd >= gyro_output_limit - 0.001
             or vz_cmd <= -gyro_output_limit + 0.001
@@ -1605,6 +1602,8 @@ def follow_start_pwm_for_target(target, stall_boost):
         return 0
     if stall_boost and target_abs >= FOLLOW_STALL_BOOST_TARGET:
         return FOLLOW_STALL_BOOST_PWM
+    if last_follow_mode_key == 0 and target_abs < WHEEL_TARGET_IDLE_EPS:
+        return 0
     if target_abs < FOLLOW_START_PWM_MID_TARGET:
         return FOLLOW_START_PWM_MID
     return FOLLOW_START_PWM
@@ -1619,6 +1618,8 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
         or last_ff_wz <= -Follow_Spin_Latch_Min_Wz
     )
     min_pwm = follow_start_pwm_for_target(target, stall_boost)
+    if min_pwm <= 0:
+        return 0
     if (
         fast_reverse
         and (target >= FOLLOW_REVERSE_BOOST_TARGET or target <= -FOLLOW_REVERSE_BOOST_TARGET)
@@ -1687,6 +1688,8 @@ def wheel_target_idle(target):
         and -0.001 < cam_target_vy < 0.001
     ):
         return -WHEEL_TARGET_STOP_EPS <= target <= WHEEL_TARGET_STOP_EPS
+    if last_follow_mode_key == 0:
+        return -WHEEL_TARGET_NORMAL_IDLE_EPS <= target <= WHEEL_TARGET_NORMAL_IDLE_EPS
     return -WHEEL_TARGET_IDLE_EPS <= target <= WHEEL_TARGET_IDLE_EPS
 
 

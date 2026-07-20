@@ -1263,6 +1263,16 @@ def update_follow_targets(gyro_z):
             else:
                 vx = (vx - body_vx) + body_vx * xy_scale
                 vy = (vy - body_vy) + body_vy * xy_scale
+                body_vx *= xy_scale
+                body_vy *= xy_scale
+
+    if seen and mode_key == 0:
+        vx -= body_vx
+        vy -= body_vy
+        body_vx = ramp_value(body_vx, last_visual_vx, 0.5)
+        body_vy = ramp_value(body_vy, last_visual_vy, 0.75)
+        vx += body_vx
+        vy += body_vy
 
     if push_follow_active and fresh_motion and seen:
         vx = add_feedforward_direct(
@@ -1585,6 +1595,12 @@ def follow_start_pwm_for_target(target, stall_boost):
         return 0
     if stall_boost and target_abs >= FOLLOW_STALL_BOOST_TARGET:
         return FOLLOW_STALL_BOOST_PWM
+    if last_follow_mode_key == 0 and target_abs < FOLLOW_REVERSE_BOOST_TARGET:
+        return int(
+            FOLLOW_START_PWM
+            * (target_abs - WHEEL_TARGET_IDLE_EPS)
+            / (FOLLOW_REVERSE_BOOST_TARGET - WHEEL_TARGET_IDLE_EPS)
+        )
     if target_abs < FOLLOW_START_PWM_MID_TARGET:
         return FOLLOW_START_PWM_MID
     return FOLLOW_START_PWM

@@ -1338,7 +1338,7 @@ def update_follow_targets(gyro_z):
             turn_rate_cmd = follow_ff_wz * Follow_Normal_Wz_Feedforward_Gain
     priority_turn_mode = orbit_mode_active or spin_mode_active or angle_pose_mode_active
     orbit_brake_active = (
-        priority_turn_mode
+        (orbit_mode_active or spin_mode_active)
         and (
             gyro_z >= Follow_Orbit_Brake_Gyro_Threshold
             or gyro_z <= -Follow_Orbit_Brake_Gyro_Threshold

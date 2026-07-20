@@ -1286,13 +1286,13 @@ def update_follow_targets(gyro_z):
                 vy = body_vy + (vy - body_vy) * xy_scale
 
     if push_follow_active and fresh_motion and seen:
-        vx = add_feedforward_assist(
+        vx = add_feedforward_direct(
             vx,
             ff_vx,
             Follow_Push_Feedforward_Forward_Gain,
             Follow_Push_Feedforward_Forward_Limit,
         )
-        vy = add_feedforward_assist(
+        vy = add_feedforward_direct(
             vy,
             ff_vy,
             Follow_Push_Feedforward_Lateral_Gain,
@@ -1696,13 +1696,6 @@ def speed_ctrl_follow(pid, actual_speed, target_speed, idle_event, reverse_event
         debug_event_mask |= reverse_event
         speed_reset(pid)
         return 0.0
-    if (
-        last_follow_mode_key == 0
-        and pid.tar_spd_last * target_speed > 0.0
-        and pid.output * target_speed > 0.0
-        and abs(target_speed) < abs(pid.tar_spd_last)
-    ):
-        pid.output *= target_speed / pid.tar_spd_last
     output = speed_ctrl(pid, actual_speed, target_speed)
     if output * target_speed < 0.0 and pid.err * target_speed >= 0.0:
         debug_event_mask |= reverse_event

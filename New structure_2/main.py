@@ -42,13 +42,13 @@ GYRO_KI = 0.0005
 GYRO_PRIORITY_KP = 0.46
 GYRO_PRIORITY_KI = 0.0
 GYRO_OUTPUT_LIMIT = 14.0
-GYRO_OUTPUT_BASE_LIMIT = 6.0
+GYRO_OUTPUT_BASE_LIMIT = 4.5
 GYRO_OUTPUT_TARGET_GAIN = 2.2
 GYRO_OUTPUT_MAX_LIMIT = 22.0
 GYRO_PRIORITY_OUTPUT_BASE_LIMIT = 6.5
 GYRO_PRIORITY_OUTPUT_TARGET_GAIN = 0.90
 GYRO_PRIORITY_OUTPUT_MAX_LIMIT = 32.0
-GYRO_PRIORITY_MIN_OUTPUT = 3.2
+GYRO_PRIORITY_MIN_OUTPUT = 2.4
 GYRO_PRIORITY_MIN_RATE_RATIO = 0.45
 GYRO_PRIORITY_MIN_CMD = 6.5
 GYRO_PRIORITY_OVERSPEED_RATIO = 2.25
@@ -175,7 +175,7 @@ Follow_Command_Ramp_Wz = 11.0
 Follow_Orbit_Command_Ramp_Wz = 18.0
 Follow_Spin_Command_Ramp_Wz = 64.0
 Follow_Spin_Gyro_Output_Ramp = 12.0
-Follow_Pose_Gyro_Output_Ramp = 4.0
+Follow_Pose_Gyro_Output_Ramp = 2.0
 Follow_Normal_Target_Lost_Hold_Ms = 500
 Follow_Target_Lost_Hold_Ms = 250
 Follow_Orbit_Mode_FfWz_On = 18.0
@@ -1145,6 +1145,7 @@ def update_follow_targets(gyro_z):
     follow_output_limit = FOLLOW_RUN_PWM_LIMIT
     if (
         mode_key == 0
+        and master_flags == 5
         and -Follow_Master_Edge_Delta < ff_vx < Follow_Master_Edge_Delta
         and -Follow_Master_Edge_Delta < ff_vy < Follow_Master_Edge_Delta
         and -Follow_Master_Edge_Delta < follow_ff_wz < Follow_Master_Edge_Delta

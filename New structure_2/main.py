@@ -1595,12 +1595,6 @@ def follow_start_pwm_for_target(target, stall_boost):
         return 0
     if stall_boost and target_abs >= FOLLOW_STALL_BOOST_TARGET:
         return FOLLOW_STALL_BOOST_PWM
-    if last_follow_mode_key == 0 and target_abs < FOLLOW_REVERSE_BOOST_TARGET:
-        return int(
-            FOLLOW_START_PWM
-            * (target_abs - WHEEL_TARGET_IDLE_EPS)
-            / (FOLLOW_REVERSE_BOOST_TARGET - WHEEL_TARGET_IDLE_EPS)
-        )
     if target_abs < FOLLOW_START_PWM_MID_TARGET:
         return FOLLOW_START_PWM_MID
     return FOLLOW_START_PWM
@@ -1626,6 +1620,19 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
     if not fast_reverse and last_follow_mode_key == 0 and last_pwm * target < 0.0:
         last_pwm = 0
     cmd = apply_start_pwm(cmd, min_pwm)
+    target_abs = abs(target)
+    if (
+        not fast_reverse
+        and last_follow_mode_key == 0
+        and target_abs <= FOLLOW_REVERSE_BOOST_TARGET
+    ):
+        low_limit = FOLLOW_START_PWM_MID + int(
+            FOLLOW_START_PWM
+            * (target_abs - WHEEL_TARGET_IDLE_EPS)
+            / (FOLLOW_REVERSE_BOOST_TARGET - WHEEL_TARGET_IDLE_EPS)
+        )
+        cmd = clamp(cmd, -low_limit, low_limit)
+        last_pwm = clamp(last_pwm, -low_limit, low_limit)
     if not fast_reverse and last_follow_mode_key == 0 and last_pwm * cmd < 0:
         return smooth_value(cmd, smooth_value(cmd, last_pwm))
     if master_edge_until_ms and last_follow_mode_key == 0:

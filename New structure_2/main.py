@@ -149,8 +149,8 @@ Follow_Orbit_Pose_Angle_Gain = -1.35
 Follow_Orbit_Pose_Angle_Limit = 74.0
 Follow_Orbit_Pose_Angle_Min_Error = 14
 Follow_Orbit_Pose_Angle_Min_Turn = 30.0
-Follow_Normal_Pose_Angle_Deadband = 8
-Follow_Normal_Pose_Angle_Active_Error = 18
+Follow_Normal_Pose_Angle_Deadband = 4
+Follow_Normal_Pose_Angle_Active_Error = 10
 Follow_Spin_Target_Point_Wz_To_Vx = 0.08
 Follow_Spin_Target_Point_Wz_To_Vy = -0.08
 Follow_Spin_Feedforward_Forward_Gain = 0.95
@@ -766,7 +766,7 @@ def solve_follow_pose_twist(
                 Follow_Feedforward_Lateral_Limit,
                 ff_scale,
             )
-            wz = add_feedforward_direct(
+            wz = add_feedforward_assist(
                 wz,
                 ff_wz,
                 Follow_Normal_Wz_Feedforward_Gain,

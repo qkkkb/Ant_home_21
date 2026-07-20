@@ -43,6 +43,7 @@ GYRO_PRIORITY_KP = 0.46
 GYRO_PRIORITY_KI = 0.0
 GYRO_OUTPUT_LIMIT = 14.0
 GYRO_OUTPUT_BASE_LIMIT = 2.6
+GYRO_NORMAL_BRAKE_OUTPUT_LIMIT = 3.2
 GYRO_OUTPUT_TARGET_GAIN = 2.2
 GYRO_OUTPUT_MAX_LIMIT = 22.0
 GYRO_PRIORITY_OUTPUT_BASE_LIMIT = 6.5
@@ -188,7 +189,7 @@ Follow_Spin_Command_Hold_Ms = 900
 Follow_Spin_Latch_Release_Angle = 6
 Follow_Orbit_Brake_Gyro_Threshold = 4.0
 Follow_Orbit_Brake_Output_Limit = 8.0
-Follow_Normal_Brake_Wheel_Reserve = 1.5
+Follow_Normal_Brake_Wheel_Reserve = 1.6
 Master_Motion_Timeout_Ms = 250
 Follow_Master_Edge_Delta = 4.0
 Follow_Master_Edge_Hold_Ms = 120
@@ -1447,20 +1448,23 @@ def update_follow_targets(gyro_z):
         last_ap_vz_cmd = 0.0
         vz_cmd = turn_rate_cmd
 
+    normal_gyro_output_limit = GYRO_OUTPUT_BASE_LIMIT
+    if normal_brake_active:
+        normal_gyro_output_limit = GYRO_NORMAL_BRAKE_OUTPUT_LIMIT
     if (not orbit_mode_active) and (not spin_mode_active):
         vz_cmd = clamp(
             vz_cmd,
-            -GYRO_OUTPUT_BASE_LIMIT,
-            GYRO_OUTPUT_BASE_LIMIT,
+            -normal_gyro_output_limit,
+            normal_gyro_output_limit,
         )
     if ENABLE_GYRO_LOOP and gyro_pid is not None:
         gyro_output_limit = gyro_pid.gyro_output_limit
         if (
             (not orbit_mode_active)
             and (not spin_mode_active)
-            and GYRO_OUTPUT_BASE_LIMIT < gyro_output_limit
+            and normal_gyro_output_limit < gyro_output_limit
         ):
-            gyro_output_limit = GYRO_OUTPUT_BASE_LIMIT
+            gyro_output_limit = normal_gyro_output_limit
         if gyro_output_limit > 0.0 and (
             vz_cmd >= gyro_output_limit - 0.001
             or vz_cmd <= -gyro_output_limit + 0.001

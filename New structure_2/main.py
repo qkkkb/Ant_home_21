@@ -1628,6 +1628,8 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
     if not fast_reverse and last_follow_mode_key == 0 and last_pwm * target < 0.0:
         last_pwm = 0
     cmd = apply_start_pwm(cmd, min_pwm)
+    if not fast_reverse and last_follow_mode_key == 0 and last_pwm * cmd < 0:
+        return smooth_value(cmd, smooth_value(cmd, last_pwm))
     if master_edge_until_ms and last_follow_mode_key == 0:
         return smooth_value(cmd, smooth_value(cmd, last_pwm))
     return smooth_value(cmd, last_pwm)

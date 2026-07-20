@@ -37,7 +37,7 @@ GYRO_SIGN = 1.0
 GYRO_OFFSET_Z = 0.0
 GYRO_SCALE = -1.0
 GYRO_DEADBAND_DPS = 0.8
-GYRO_KP = 0.20
+GYRO_KP = 0.10
 GYRO_KI = 0.0005
 GYRO_PRIORITY_KP = 0.46
 GYRO_PRIORITY_KI = 0.0
@@ -925,7 +925,10 @@ def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z, spin_priority=False):
         or (turn_rate_cmd < 0.0 and gyro_z < 0.0)
     )
     if same_dir and gyro_abs > turn_abs * overspeed_ratio:
-        out = err * GYRO_PRIORITY_BRAKE_KP
+        brake_gain = GYRO_PRIORITY_BRAKE_KP
+        if not spin_priority and last_follow_mode_key != 1:
+            brake_gain = GYRO_KP
+        out = err * brake_gain
         return clamp(out, -GYRO_PRIORITY_BRAKE_LIMIT, GYRO_PRIORITY_BRAKE_LIMIT)
 
     gain = GYRO_PRIORITY_KP

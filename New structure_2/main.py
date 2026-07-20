@@ -111,7 +111,6 @@ Follow_Distance_Far_Boost_Error = 6
 Follow_Distance_Far_Boost_Gain = 0.70
 Follow_Distance_Close_Gain = 0.70
 Follow_Distance_Close_Limit = 22.0
-Follow_Normal_StandOff_Error_Y = 7
 Follow_Feedforward_Forward_Gain = 1.00
 Follow_Feedforward_Lateral_Gain = 1.00
 Follow_Feedforward_Forward_Limit = 20.0
@@ -194,8 +193,6 @@ Follow_Normal_Brake_Wheel_Reserve = 2.0
 Master_Motion_Timeout_Ms = 250
 Follow_Master_Edge_Delta = 4.0
 Follow_Master_Edge_Hold_Ms = 120
-Camera_Right_Yaw_Cos = 0.5
-Camera_Right_Yaw_Sin = -0.8660254
 # ====================== Runtime state ======================
 car_started = False
 last_c9_state = 1
@@ -255,7 +252,7 @@ last_hard_stop = False
 last_stall_count = 0
 last_stall_boost = False
 follow_output_limit = FOLLOW_RUN_PWM_LIMIT
-# Bits 0-2: low target reset; 3-5: reverse reset; 6: mode reset;
+# Bits 0-2: low target reset; 3-5: reserved; 6: mode reset;
 # 7: explicit camera loss; 8: camera timeout edge; 9: push-settle orbit FF gate;
 # 10-12: final PWM saturation; 13: pose limiter; 14: gyro limit.
 debug_event_mask = 0
@@ -356,7 +353,7 @@ def orbit_feedforward_position_scale(error_x, error_y):
 
 
 def orbit_close_depth(error_y):
-    depth = -error_y - Follow_Forward_Deadband
+    depth = error_y - Follow_Forward_Deadband
     if depth < 0:
         return 0.0
     return depth
@@ -539,12 +536,6 @@ def update_orbit_follow_mode(
     return orbit_follow_active
 
 
-def rotate_camera_velocity_to_body(cam_vx, cam_vy):
-    body_vx = cam_vx * Camera_Right_Yaw_Cos + cam_vy * Camera_Right_Yaw_Sin
-    body_vy = -cam_vx * Camera_Right_Yaw_Sin + cam_vy * Camera_Right_Yaw_Cos
-    return body_vx, body_vy
-
-
 def follow_limit(base_limit, master_value):
     limit = base_limit
     master_abs = abs(master_value)
@@ -680,19 +671,18 @@ def solve_follow_pose_twist(
         error_angle >= active_error
         or error_angle <= -active_error
     )
+    # Local pose features around the calibrated nonparallel formation.
+    cam_vx = error_x + error_angle
+    cam_vy = -error_y
+    if cam_vx > 0.0:
+        cam_vy += cam_vx * 5 // 13
     if orbit_mode or spin_mode:
         position_priority = position_priority_needed(
-            error_x,
-            error_y,
+            cam_vy,
+            cam_vx,
             angle_active and (not spin_mode),
         )
-        cam_vx = calc_follow_forward(error_y, position_priority)
-        cam_vy = calc_follow_lateral(error_x, position_priority)
-        body_vx, body_vy = rotate_camera_velocity_to_body(cam_vx, cam_vy)
     else:
-        error_y -= Follow_Normal_StandOff_Error_Y
-        cam_vx = (13 * error_x + 16 * error_y) / 29
-        cam_vy = (26 * error_y - 27 * error_x) / 53
         position_priority = position_priority_needed(
             cam_vy,
             cam_vx,
@@ -700,8 +690,9 @@ def solve_follow_pose_twist(
             Follow_Normal_Position_Priority_Error,
             Follow_Normal_Position_Priority_Error,
         )
-        body_vx = -calc_follow_forward(cam_vx, position_priority)
-        body_vy = calc_follow_lateral(cam_vy, position_priority)
+    body_vx = -calc_follow_forward(cam_vx, position_priority)
+    body_vy = calc_follow_lateral(cam_vy, position_priority)
+    if (not orbit_mode) and (not spin_mode):
         body_vx *= Follow_Normal_Visual_Forward_Scale
         body_vy *= Follow_Normal_Visual_Lateral_Scale
     vx = body_vx
@@ -709,7 +700,7 @@ def solve_follow_pose_twist(
     wz = vision_wz
     if use_ff:
         if orbit_mode:
-            ff_scale = orbit_feedforward_position_scale(error_x, error_y)
+            ff_scale = orbit_feedforward_position_scale(cam_vy, cam_vx)
             target_ff_vx = ff_vx + ff_wz * Follow_Orbit_Target_Point_Wz_To_Vx
             target_ff_vy = ff_vy + ff_wz * Follow_Orbit_Target_Point_Wz_To_Vy
             target_ff_vx *= ff_scale
@@ -1276,14 +1267,14 @@ def update_follow_targets(gyro_z):
                 spin_mode_active,
             )
             if push_follow_active:
-                vx = body_vx + (vx - body_vx) * xy_scale
-                vy = body_vy + (vy - body_vy) * xy_scale
+                vx = (vx - body_vx) + body_vx * xy_scale
+                vy = (vy - body_vy) + body_vy * xy_scale
             elif orbit_mode_active or spin_mode_active:
                 vx *= xy_scale
                 vy *= xy_scale
             else:
-                vx = body_vx + (vx - body_vx) * xy_scale
-                vy = body_vy + (vy - body_vy) * xy_scale
+                vx = (vx - body_vx) + body_vx * xy_scale
+                vy = (vy - body_vy) + body_vy * xy_scale
 
     if push_follow_active and fresh_motion and seen:
         vx = add_feedforward_direct(
@@ -1619,8 +1610,6 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
         or last_ff_wz >= Follow_Spin_Latch_Min_Wz
         or last_ff_wz <= -Follow_Spin_Latch_Min_Wz
     )
-    if (not fast_reverse) and last_pwm * target < 0.0:
-        return 0
     min_pwm = follow_start_pwm_for_target(target, stall_boost)
     if min_pwm <= 0:
         return smooth_value(cmd, last_pwm)
@@ -1680,30 +1669,18 @@ def encoders_stalled(e_fl, e_fr, e_b):
     return e_fl == 0 and e_fr == 0 and e_b == 0
 
 
-def wheel_target_idle(pid, target):
-    limit = WHEEL_TARGET_IDLE_EPS if pid.tar_spd_last else FOLLOW_START_PWM_LOW_TARGET
-    return -limit < target < limit
+def wheel_target_idle(target):
+    return -WHEEL_TARGET_IDLE_EPS <= target <= WHEEL_TARGET_IDLE_EPS
 
 
-def speed_ctrl_follow(pid, actual_speed, target_speed, idle_event, reverse_event):
+def speed_ctrl_follow(pid, actual_speed, target_speed, idle_event):
     global debug_event_mask
 
-    if wheel_target_idle(pid, target_speed):
+    if wheel_target_idle(target_speed):
         debug_event_mask |= idle_event
         speed_reset(pid)
         return 0.0
-    if pid.tar_spd_last * target_speed < 0.0:
-        debug_event_mask |= reverse_event
-        speed_reset(pid)
-        return 0.0
-    output = speed_ctrl(pid, actual_speed, target_speed)
-    if output * target_speed < 0.0 and pid.err * target_speed >= 0.0:
-        debug_event_mask |= reverse_event
-        speed_reset(pid)
-        output = speed_ctrl(pid, actual_speed, target_speed)
-    output = clamp(output, -follow_output_limit, follow_output_limit)
-    pid.output = output
-    return output
+    return speed_ctrl(pid, actual_speed, target_speed)
 
 
 def update_nav_led_display():
@@ -1850,9 +1827,9 @@ def calc_speed_closed_loop():
             last_stall_count = 0
         last_stall_boost = last_stall_count >= FOLLOW_STALL_BOOST_FRAMES
 
-        u_fl = speed_ctrl_follow(pid_fl, e_fl, t_fl, 1, 8)
-        u_fr = speed_ctrl_follow(pid_fr, e_fr, t_fr, 2, 16)
-        u_b = speed_ctrl_follow(pid_b, e_b, t_b, 4, 32)
+        u_fl = speed_ctrl_follow(pid_fl, e_fl, t_fl, 1)
+        u_fr = speed_ctrl_follow(pid_fr, e_fr, t_fr, 2)
+        u_b = speed_ctrl_follow(pid_b, e_b, t_b, 4)
 
         s_fl, s_fr, s_b = set_three_pwm_follow(
             u_fl, u_fr, u_b, t_fl, t_fr, t_b, last_stall_boost

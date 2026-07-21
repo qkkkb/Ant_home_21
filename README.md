@@ -19,7 +19,7 @@ Ant_Home/
 
 `Control/` 是主车控制模块。当前真实运行入口主要是 `Control/main.py`，它负责三轮底盘速度闭环、陀螺仪 yaw/gyro rate 控制、ART 视觉串口解析、目标推送/回库状态机和按键启停；`Control/coop_master.py` 负责主车运动反馈广播。当前 `COOP_ENABLE = False`，主车不恢复完整双车协同状态机，也不等待从车协同；`MSG_MASTER_MOTION` 运动反馈广播保持开启。详细说明见 `Control/README.md`。
 
-`New structure/` 是新车部署用目录。`main_lsm6dsv16x_95.py` 保留基于 `95eb1b3` 的主控逻辑并适配 LSM6DSV16X 陀螺仪运行时；`move_base_polarity_wireless_test.py` 通过 `C14` 选动作、`C9` 执行动作，配合 `move_base.calc_wheel_spd()` 校验新车电机极性和运动映射，无线串口只做备用控制和纯 ASCII 日志输出，并打印 `TAR/PWM/DIR/ENC/ESIGN` 便于调极性。当前新车 `config.py` 按 `move_base` 逻辑轮位映射为 FL=`C29/C28` INV=0、FR=`C31/C30` INV=0、B=`D5/D4` INV=0，编码器映射为 FL=`C0/C1` INV=1、FR=`C2/C3` INV=1、B=`D13/D14` INV=1，测试期望编码器符号与目标轮速符号一致。
+`New structure/` 是新车部署用目录。`main_lsm6dsv16x_95.py` 保留基于 `95eb1b3` 的主控逻辑，适配 LSM6DSV16X 陀螺仪运行时，并包含目标推送完成后的回库状态机；`move_base_polarity_wireless_test.py` 通过 `C14` 选动作、`C9` 执行动作，配合 `move_base.calc_wheel_spd()` 校验新车电机极性和运动映射，无线串口只做备用控制和纯 ASCII 日志输出，并打印 `TAR/PWM/DIR/ENC/ESIGN` 便于调极性。当前新车 `config.py` 按 `move_base` 逻辑轮位映射为 FL=`C29/C28` INV=0、FR=`C31/C30` INV=0、B=`D5/D4` INV=0，编码器映射为 FL=`C0/C1` INV=1、FR=`C2/C3` INV=1、B=`D13/D14` INV=1，测试期望编码器符号与目标轮速符号一致。
 
 `New structure_2/` 是新结构从车调参目录。它从 `NO.2/` 复制从车控制和红外视觉代码，用于在不影响已验证从车版本的前提下重新标定视觉中心、灯点几何和 LSM6DSV16X 陀螺仪调用；当前电机和编码器映射跟随 `New structure/`，红外视觉端使用 `UART(2)`，速度环参数先按主车新结构基准调参。
 

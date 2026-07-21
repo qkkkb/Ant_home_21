@@ -254,7 +254,7 @@ last_hard_stop = False
 last_stall_count = 0
 last_stall_boost = False
 follow_output_limit = FOLLOW_RUN_PWM_LIMIT
-# Bits 0-2: low target reset; 3-5: reserved; 6: mode reset;
+# Bits 0-2: wheel target idle; 3-5: reserved; 6: mode reset;
 # 7: explicit camera loss; 8: camera timeout edge; 9: push-settle orbit FF gate;
 # 10-12: final PWM saturation; 13: pose limiter; 14: gyro limit.
 debug_event_mask = 0

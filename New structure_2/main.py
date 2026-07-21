@@ -528,28 +528,28 @@ def update_orbit_follow_mode(
         return False
 
     stable = (
-        -Follow_Orbit_Brake_Gyro_Threshold
-        < gyro_z
-        < Follow_Orbit_Brake_Gyro_Threshold
-        and (
-            (not seen)
-            or (
-                (
-                    (not fresh_motion)
-                    or (-Follow_Orbit_Mode_FfWz_Off <= ff_wz <= Follow_Orbit_Mode_FfWz_Off)
-                )
-                and (
-                    -Follow_Normal_Pose_Angle_Deadband
-                    <= error_angle
-                    <= Follow_Normal_Pose_Angle_Deadband
-                )
+        (not seen)
+        or (
+            (
+                (not fresh_motion)
+                or (-Follow_Orbit_Mode_FfWz_Off <= ff_wz <= Follow_Orbit_Mode_FfWz_Off)
+            )
+            and (
+                -Follow_Normal_Pose_Angle_Deadband
+                <= error_angle
+                <= Follow_Normal_Pose_Angle_Deadband
             )
         )
     )
     if stable:
         if orbit_follow_exit_since_ms == 0:
             orbit_follow_exit_since_ms = now
-        elif utime.ticks_diff(now, orbit_follow_exit_since_ms) >= Follow_Orbit_Mode_Exit_Ms:
+        elif (
+            utime.ticks_diff(now, orbit_follow_exit_since_ms) >= Follow_Orbit_Mode_Exit_Ms
+            and -Follow_Orbit_Brake_Gyro_Threshold
+            < gyro_z
+            < Follow_Orbit_Brake_Gyro_Threshold
+        ):
             orbit_follow_active = False
             orbit_follow_exit_since_ms = 0
     else:

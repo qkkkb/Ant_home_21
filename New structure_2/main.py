@@ -1151,7 +1151,7 @@ def update_follow_targets(gyro_z):
         mode_key = 1
     else:
         mode_key = 0
-    _orbit = mode_key == 1 and not push_follow_active
+    _orbit = mode_key == 1
     follow_output_limit = FOLLOW_RUN_PWM_LIMIT
     if (
         mode_key == 0
@@ -1607,7 +1607,7 @@ def follow_start_pwm_for_target(target, stall_boost):
 
 def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
     fast_reverse = (
-        not _orbit
+        (not _orbit or (master_flags & MASTER_MOTION_FLAG_PUSH))
         and (
             master_edge_until_ms
             or last_ff_wz >= Follow_Spin_Latch_Min_Wz

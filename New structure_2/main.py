@@ -149,8 +149,8 @@ Follow_Orbit_Pose_Angle_Gain = -1.35
 Follow_Orbit_Pose_Angle_Limit = 74.0
 Follow_Orbit_Pose_Angle_Min_Error = 14
 Follow_Orbit_Pose_Angle_Min_Turn = 30.0
-Follow_Normal_Pose_Angle_Deadband = 4
-Follow_Normal_Pose_Angle_Active_Error = 6
+Follow_Normal_Pose_Angle_Deadband = 8
+Follow_Normal_Pose_Angle_Active_Error = 18
 Follow_Spin_Target_Point_Wz_To_Vx = 0.08
 Follow_Spin_Target_Point_Wz_To_Vy = -0.08
 Follow_Spin_Feedforward_Forward_Gain = 0.95
@@ -374,12 +374,6 @@ def gyro_limit_for_turn(turn_rate_cmd, priority=False, spin_priority=False):
         base_limit = GYRO_OUTPUT_BASE_LIMIT
         target_gain = GYRO_OUTPUT_TARGET_GAIN
         max_limit = GYRO_OUTPUT_MAX_LIMIT
-    if last_follow_mode_key == 0:
-        max_limit = (
-            4.5
-            if priority and last_angle_priority_active and abs(cam_error_angle) >= 12
-            else GYRO_OUTPUT_BASE_LIMIT
-        )
     limit = base_limit + abs(turn_rate_cmd) * target_gain
     if limit > max_limit:
         return max_limit
@@ -772,7 +766,7 @@ def solve_follow_pose_twist(
                 Follow_Feedforward_Lateral_Limit,
                 ff_scale,
             )
-            wz = add_feedforward_assist(
+            wz = add_feedforward_direct(
                 wz,
                 ff_wz,
                 Follow_Normal_Wz_Feedforward_Gain,
@@ -936,21 +930,17 @@ def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z, spin_priority=False):
         brake_gain = GYRO_PRIORITY_BRAKE_KP
         if not spin_priority and last_follow_mode_key != 1:
             brake_gain = GYRO_KP
-        else:
-            limit = GYRO_PRIORITY_BRAKE_LIMIT
         out = err * brake_gain
-        return clamp(out, -limit, limit)
+        return clamp(out, -GYRO_PRIORITY_BRAKE_LIMIT, GYRO_PRIORITY_BRAKE_LIMIT)
 
     gain = GYRO_PRIORITY_KP
     min_output = GYRO_PRIORITY_MIN_OUTPUT
-    min_cmd = GYRO_PRIORITY_MIN_CMD
     if not spin_priority and last_follow_mode_key != 1:
-        gain = 0.16 if limit > GYRO_OUTPUT_BASE_LIMIT else GYRO_KP
-        min_output = 1.25
-        min_cmd = 2.0
+        gain = GYRO_KP
+        min_output = 0.8
     out = clamp(err * gain, -limit, limit)
     if (
-        turn_abs >= min_cmd
+        turn_abs >= GYRO_PRIORITY_MIN_CMD
         and (not same_dir or gyro_abs < turn_abs * GYRO_PRIORITY_MIN_RATE_RATIO)
     ):
         if 0.0 < out < min_output:
@@ -1363,7 +1353,7 @@ def update_follow_targets(gyro_z):
     normal_brake_active = (
         (not orbit_mode_active)
         and (not spin_mode_active)
-        and abs(gyro_z) >= 12.0
+        and abs(gyro_z) >= 40.0
         and (
             (
                 fresh_motion
@@ -1463,8 +1453,20 @@ def update_follow_targets(gyro_z):
         last_ap_vz_cmd = 0.0
         vz_cmd = turn_rate_cmd
 
+    if (not orbit_mode_active) and (not spin_mode_active):
+        vz_cmd = clamp(
+            vz_cmd,
+            -GYRO_OUTPUT_BASE_LIMIT,
+            GYRO_OUTPUT_BASE_LIMIT,
+        )
     if ENABLE_GYRO_LOOP and gyro_pid is not None:
         gyro_output_limit = gyro_pid.gyro_output_limit
+        if (
+            (not orbit_mode_active)
+            and (not spin_mode_active)
+            and GYRO_OUTPUT_BASE_LIMIT < gyro_output_limit
+        ):
+            gyro_output_limit = GYRO_OUTPUT_BASE_LIMIT
         if gyro_output_limit > 0.0 and (
             vz_cmd >= gyro_output_limit - 0.001
             or vz_cmd <= -gyro_output_limit + 0.001

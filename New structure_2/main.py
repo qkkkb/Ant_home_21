@@ -1055,7 +1055,7 @@ def update_follow_targets(gyro_z):
     global last_stall_count, last_stall_boost
     global follow_output_limit
     global last_angle_priority_active
-    global last_follow_mode_key
+    global last_follow_mode_key, _orbit
     global master_edge_until_ms, master_zero_since_ms
     global debug_event_mask
 
@@ -1146,6 +1146,7 @@ def update_follow_targets(gyro_z):
         mode_key = 1
     else:
         mode_key = 0
+    _orbit = mode_key == 1 and not push_follow_active
     follow_output_limit = FOLLOW_RUN_PWM_LIMIT
     if (
         mode_key == 0
@@ -1601,13 +1602,16 @@ def follow_start_pwm_for_target(target, stall_boost):
 
 def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
     fast_reverse = (
-        master_edge_until_ms
-        or last_ff_wz >= Follow_Spin_Latch_Min_Wz
-        or last_ff_wz <= -Follow_Spin_Latch_Min_Wz
+        not _orbit
+        and (
+            master_edge_until_ms
+            or last_ff_wz >= Follow_Spin_Latch_Min_Wz
+            or last_ff_wz <= -Follow_Spin_Latch_Min_Wz
+        )
     )
     min_pwm = follow_start_pwm_for_target(target, stall_boost)
     if min_pwm <= 0:
-        if last_follow_mode_key != 0:
+        if last_follow_mode_key and not _orbit:
             return 0
         return follow_low_pwm(
             cmd,
@@ -1649,7 +1653,7 @@ def set_three_pwm_follow(u_fl, u_fr, u_b, t_fl, t_fr, t_b, stall_boost):
     last_pwm_fl = s_fl
     last_pwm_fr = s_fr
     last_pwm_b = s_b
-    if last_follow_mode_key == 0:
+    if not last_follow_mode_key or _orbit:
         pid_fl.output = s_fl
         pid_fr.output = s_fr
         pid_b.output = s_b
@@ -1698,13 +1702,13 @@ def speed_ctrl_follow(pid, actual_speed, target_speed, idle_event, reverse_event
 
     if wheel_target_idle(target_speed):
         debug_event_mask |= idle_event
-        if last_follow_mode_key != 0:
+        if last_follow_mode_key and not _orbit:
             speed_reset(pid)
             return 0.0
     if pid.tar_spd_last * target_speed < 0.0:
         debug_event_mask |= reverse_event
     output = speed_ctrl(pid, actual_speed, target_speed)
-    if last_follow_mode_key == 0:
+    if not last_follow_mode_key or _orbit:
         output = speed_follow_guard(
             pid,
             output,

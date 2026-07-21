@@ -377,7 +377,7 @@ def gyro_limit_for_turn(turn_rate_cmd, priority=False, spin_priority=False):
     if last_follow_mode_key == 0:
         max_limit = (
             4.5
-            if priority and last_angle_priority_active
+            if priority and last_angle_priority_active and abs(cam_error_angle) >= 12
             else GYRO_OUTPUT_BASE_LIMIT
         )
     limit = base_limit + abs(turn_rate_cmd) * target_gain
@@ -936,14 +936,16 @@ def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z, spin_priority=False):
         brake_gain = GYRO_PRIORITY_BRAKE_KP
         if not spin_priority and last_follow_mode_key != 1:
             brake_gain = GYRO_KP
+        else:
+            limit = GYRO_PRIORITY_BRAKE_LIMIT
         out = err * brake_gain
-        return clamp(out, -GYRO_PRIORITY_BRAKE_LIMIT, GYRO_PRIORITY_BRAKE_LIMIT)
+        return clamp(out, -limit, limit)
 
     gain = GYRO_PRIORITY_KP
     min_output = GYRO_PRIORITY_MIN_OUTPUT
     min_cmd = GYRO_PRIORITY_MIN_CMD
     if not spin_priority and last_follow_mode_key != 1:
-        gain = 0.16 if last_angle_priority_active else GYRO_KP
+        gain = 0.16 if limit > GYRO_OUTPUT_BASE_LIMIT else GYRO_KP
         min_output = 1.25
         min_cmd = 2.0
     out = clamp(err * gain, -limit, limit)
@@ -1361,7 +1363,7 @@ def update_follow_targets(gyro_z):
     normal_brake_active = (
         (not orbit_mode_active)
         and (not spin_mode_active)
-        and abs(gyro_z) >= 40.0
+        and abs(gyro_z) >= 12.0
         and (
             (
                 fresh_motion

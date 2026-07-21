@@ -153,6 +153,7 @@ Nav_Push_Prepare_Ok_Y_Min = -8
 Nav_Push_Prepare_Ok_Y_Max = 8  #准备阶段横移误差小于该值即认为前进准备就绪
 Nav_Push_Prepare_Ok_Yaw = 6   #准备阶段定向误差小于该值即认为定向准备就绪
 Nav_Push_Prepare_Ok_Ms = 70
+Nav_Ball_Prepare_Right_Offset_X = 5
 Nav_Push_Execute_Forward_Speed = 10.0    #执行阶段前进速度
 Nav_Push_Execute_Gyro_Limit = 16.0
 Nav_Push_Line_Lost_Ms = 150
@@ -667,12 +668,12 @@ def nav_set_state(new_state, reason="", force=False):
             log("[NAV] -> %s" % new_state)
 
 
-def apply_nav_targets(vx, vy, vx_limit, vy_limit):
+def apply_nav_targets(vx, vy, vx_limit, vy_limit, lateral_error_x):
     global cam_target_vx, cam_target_vy
 
     if -Nav_Forward_Deadband <= cam_error_y <= Nav_Forward_Deadband:
         vx = 0.0
-    if -Nav_Lateral_Deadband <= cam_error_x <= Nav_Lateral_Deadband:
+    if -Nav_Lateral_Deadband <= lateral_error_x <= Nav_Lateral_Deadband:
         vy = 0.0
 
     if vx > vx_limit:
@@ -899,6 +900,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             -cam_error_x * lat_gain,
             Nav_Coarse_Forward_Limit,
             Nav_Coarse_Lateral_Limit,
+            cam_error_x,
         )
         if seen and cam_error_y <= Nav_Coarse_Exit_Y:
             if nav_coarse_ok_since_ms == 0:
@@ -983,6 +985,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 -cam_error_x * fine_lateral_gain,
                 Nav_Fine_Forward_Limit,
                 fine_lateral_limit,
+                cam_error_x,
             )
         elif (not Nav_Fine_Lateral_Brake_Enable) or nav_fine_brake_since_ms == 0:
             apply_nav_targets(
@@ -990,6 +993,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 -cam_error_x * fine_lateral_gain,
                 Nav_Fine_Forward_Limit,
                 fine_lateral_limit,
+                cam_error_x,
             )
         elif utime.ticks_diff(now, nav_fine_brake_since_ms) < fine_lateral_brake_ms:
             fine_braking = True
@@ -1008,6 +1012,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 -cam_error_x * fine_lateral_gain,
                 Nav_Fine_Forward_Limit,
                 fine_lateral_limit,
+                cam_error_x,
             )
         fine_yaw_ok = (
             (not push_orbit_done)
@@ -1168,17 +1173,20 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             nav_push_prepare_ok_since_ms = 0
             nav_push_prepare_back_since_ms = 0
             return
+        prepare_error_x = cam_error_x
+        if push_dir_code == Push_Dir_Up:
+            prepare_error_x -= Nav_Ball_Prepare_Right_Offset_X
         prepare_braking = False
         current_prepare_x_sign = 0
-        if cam_error_x > Nav_Push_Prepare_Ok_X:
+        if prepare_error_x > Nav_Push_Prepare_Ok_X:
             current_prepare_x_sign = 1
-        elif cam_error_x < -Nav_Push_Prepare_Ok_X:
+        elif prepare_error_x < -Nav_Push_Prepare_Ok_X:
             current_prepare_x_sign = -1
         if current_prepare_x_sign != 0:
             if (
                 nav_fine_last_x_sign != 0
                 and current_prepare_x_sign != nav_fine_last_x_sign
-                and abs(cam_error_x) <= Nav_Push_Prepare_Kick_X
+                and abs(prepare_error_x) <= Nav_Push_Prepare_Kick_X
             ):
                 nav_fine_brake_since_ms = now
                 nav_fine_brake_vy = -current_prepare_x_sign * Nav_Push_Prepare_Lateral_Brake_Speed
@@ -1213,12 +1221,12 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                     vx_cmd = Nav_Push_Prepare_Min_Vx
                 elif -Nav_Push_Prepare_Min_Vx < vx_cmd < 0.0:
                     vx_cmd = -Nav_Push_Prepare_Min_Vx
-            if -Nav_Push_Prepare_Ok_X <= cam_error_x <= Nav_Push_Prepare_Ok_X:
+            if -Nav_Push_Prepare_Ok_X <= prepare_error_x <= Nav_Push_Prepare_Ok_X:
                 vy_cmd = 0.0
             else:
-                vy_cmd = -cam_error_x * Nav_Push_Prepare_Lateral_Gain
+                vy_cmd = -prepare_error_x * Nav_Push_Prepare_Lateral_Gain
                 min_vy = Nav_Push_Prepare_Min_Vy
-                if abs(cam_error_x) <= Nav_Push_Prepare_Kick_X:
+                if abs(prepare_error_x) <= Nav_Push_Prepare_Kick_X:
                     min_vy = Nav_Push_Prepare_Kick_Vy
                 if 0.0 < vy_cmd < min_vy:
                     vy_cmd = min_vy
@@ -1231,10 +1239,10 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 vy_cmd = vy_cmd * Nav_Push_Prepare_Soft_Scale
                 vx_limit = vx_limit * Nav_Push_Prepare_Soft_Scale
                 vy_limit = vy_limit * Nav_Push_Prepare_Soft_Scale
-            apply_nav_targets(vx_cmd, vy_cmd, vx_limit, vy_limit)
+            apply_nav_targets(vx_cmd, vy_cmd, vx_limit, vy_limit, prepare_error_x)
         if (
             seen
-            and abs(cam_error_x) <= Nav_Push_Prepare_Ok_X
+            and abs(prepare_error_x) <= Nav_Push_Prepare_Ok_X
             and cam_error_y >= Nav_Push_Prepare_Ok_Y_Min
             and cam_error_y <= Nav_Push_Prepare_Ok_Y_Max
             and yaw_prepare_err_abs <= Nav_Push_Prepare_Ok_Yaw

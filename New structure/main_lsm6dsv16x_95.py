@@ -179,22 +179,22 @@ Nav_Post_Turn_No_Target_Ms = 100
 Nav_Post_Turn_Forward_Ms = 1500
 Nav_Post_Turn_Forward_Speed = 6.5
 Nav_Object_Total = 1
-Nav_Return_Left_Speed = 6.0
+Nav_Return_Left_Speed = 11.0
 Nav_Return_Left_Start_Yaw = 10.0
-Nav_Return_Left_Max_Ms = 20000
-Nav_Return_Back_Speed = 4.0
-Nav_Return_Back_Ms = 2600
+Nav_Return_Left_Max_Ms = 10000
+Nav_Return_Back_Speed = 8.0
+Nav_Return_Back_Ms = 1300
 Nav_Return_Turn_Dir = 1
 Nav_Return_Turn_Slow_Yaw = 55.0
-Nav_Return_Turn_Fast_Rate = 37.5
-Nav_Return_Turn_Slow_Rate = 14.0
-Nav_Return_Turn_Gyro_Limit = 7.0
+Nav_Return_Turn_Fast_Rate = 62.5
+Nav_Return_Turn_Slow_Rate = 26.0
+Nav_Return_Turn_Gyro_Limit = 10.0
 Nav_Return_Turn_Ok_Yaw = 6.0
 Nav_Return_Turn_Recover_Yaw = 12.0
 Nav_Return_Turn_Ok_Ms = 120
-Nav_Return_Final_Back_Speed = 3.5
-Nav_Return_Final_Line_Extra_Ms = 120
-Nav_Return_Max_Ms = 12000
+Nav_Return_Final_Back_Speed = 7.0
+Nav_Return_Final_Line_Extra_Ms = 60
+Nav_Return_Max_Ms = 6000
 
 # ====================== 全局状态变量 ======================
 # 小车启动标志：False=上电静止，True=已启动

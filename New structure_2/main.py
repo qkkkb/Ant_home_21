@@ -1078,15 +1078,7 @@ def update_follow_targets(gyro_z):
     ff_wz = master_wz if fresh_motion else 0.0
     if (
         fresh_motion
-        and (
-            master_flags
-            & (
-                MASTER_MOTION_FLAG_ORBIT
-                | MASTER_MOTION_FLAG_PUSH
-                | MASTER_MOTION_FLAG_SPIN
-            )
-        )
-        == 0
+        and not (master_flags & 0x38)
         and last_follow_mode_key == 0
         and ff_vx == 0.0
         and ff_vy == 0.0

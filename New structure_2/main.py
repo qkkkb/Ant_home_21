@@ -1838,9 +1838,9 @@ def calc_speed_closed_loop():
     vz_cmd = update_follow_targets(gyro_z)
     calc_wheel_spd(move_cmd, cam_target_vx, cam_target_vy, vz_cmd)
 
-    e_fl = enc_fl.get()
-    e_fr = enc_fr.get()
-    e_b = enc_b.get()
+    e_fl = _pid_mod.encoder_window(pid_fl, enc_fl.get())
+    e_fr = _pid_mod.encoder_window(pid_fr, enc_fr.get())
+    e_b = _pid_mod.encoder_window(pid_b, enc_b.get())
     t_fl = move_cmd.speed_fl
     t_fr = move_cmd.speed_fr
     t_b = move_cmd.speed_b

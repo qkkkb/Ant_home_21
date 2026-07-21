@@ -21,6 +21,9 @@ class SpeedPID:
         self.delta_tar_last = 0.0
         self.delta_tar = 0.0
         self.delta_ud = 0.0
+        self.enc_samples = [0] * 4
+        self.enc_sum = 0
+        self.enc_index = 0
         self.kd = 30.0
         self.gama = 0.25
         self.kp = 3000.0

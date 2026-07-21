@@ -176,13 +176,13 @@ Follow_Orbit_Command_Ramp_Vy = 14.0
 Follow_Command_Ramp_Wz = 11.0
 Follow_Orbit_Command_Ramp_Wz = 18.0
 Follow_Spin_Command_Ramp_Wz = 64.0
-Follow_Spin_Gyro_Output_Ramp = 12.0
+Follow_Spin_Gyro_Output_Ramp = 8.0
 Follow_Pose_Gyro_Output_Ramp = 2.0
 Follow_Normal_Target_Lost_Hold_Ms = 500
 Follow_Target_Lost_Hold_Ms = 250
 Follow_Orbit_Mode_FfWz_On = 18.0
 Follow_Orbit_Mode_FfWz_Off = 7.0
-Follow_Orbit_Mode_Exit_Ms = 120
+Follow_Orbit_Mode_Exit_Ms = 40
 Follow_Orbit_Mode_FfWz_Filter = 0.22
 Follow_Normal_Wz_Feedforward_Limit = 15.0
 Follow_Spin_Mode_FfWz_On = 32.0
@@ -528,28 +528,28 @@ def update_orbit_follow_mode(
         return False
 
     stable = (
-        (not seen)
-        or (
-            (
-                (not fresh_motion)
-                or (-Follow_Orbit_Mode_FfWz_Off <= ff_wz <= Follow_Orbit_Mode_FfWz_Off)
-            )
-            and (
-                -Follow_Normal_Pose_Angle_Deadband
-                <= error_angle
-                <= Follow_Normal_Pose_Angle_Deadband
+        -Follow_Orbit_Brake_Gyro_Threshold
+        < gyro_z
+        < Follow_Orbit_Brake_Gyro_Threshold
+        and (
+            (not seen)
+            or (
+                (
+                    (not fresh_motion)
+                    or (-Follow_Orbit_Mode_FfWz_Off <= ff_wz <= Follow_Orbit_Mode_FfWz_Off)
+                )
+                and (
+                    -Follow_Normal_Pose_Angle_Deadband
+                    <= error_angle
+                    <= Follow_Normal_Pose_Angle_Deadband
+                )
             )
         )
     )
     if stable:
         if orbit_follow_exit_since_ms == 0:
             orbit_follow_exit_since_ms = now
-        elif (
-            utime.ticks_diff(now, orbit_follow_exit_since_ms) >= Follow_Orbit_Mode_Exit_Ms
-            and -Follow_Orbit_Brake_Gyro_Threshold
-            < gyro_z
-            < Follow_Orbit_Brake_Gyro_Threshold
-        ):
+        elif utime.ticks_diff(now, orbit_follow_exit_since_ms) >= Follow_Orbit_Mode_Exit_Ms:
             orbit_follow_active = False
             orbit_follow_exit_since_ms = 0
     else:
@@ -1104,16 +1104,10 @@ def update_follow_targets(gyro_z):
     )
     spin_mode_active = (
         fresh_motion
-        and not explicit_orbit
-        and not explicit_push
-        and (
-            abs(spin_ff_wz) >= (
-                Follow_Spin_Latch_Min_Wz if explicit_spin else Follow_Spin_Mode_FfWz_On
-            )
-            or (
-                last_follow_mode_key == 3
-                and abs(gyro_z) >= Follow_Orbit_Brake_Gyro_Threshold
-            )
+        and (not explicit_orbit)
+        and (not explicit_push)
+        and abs(spin_ff_wz) >= (
+            Follow_Spin_Latch_Min_Wz if explicit_spin else Follow_Spin_Mode_FfWz_On
         )
     )
     filtered_wz = update_filtered_ff_wz(spin_ff_wz if spin_mode_active else ff_wz, fresh_motion)
@@ -1147,7 +1141,7 @@ def update_follow_targets(gyro_z):
         mode_key = 1
     else:
         mode_key = 0
-    _orbit = mode_key != 0
+    _orbit = mode_key == 1
     follow_output_limit = FOLLOW_RUN_PWM_LIMIT
     if (
         mode_key == 0
@@ -1528,7 +1522,7 @@ def stop_all():
     motor_b.duty(0)
 
 
-def reset_speed_outputs():
+def reset_speed_outputs(keep_orbit_state=False):
     global last_pwm_fl, last_pwm_fr, last_pwm_b
     global last_stall_count, last_stall_boost
     global last_cmd_vx, last_cmd_vy, last_cmd_wz, last_ap_vz_cmd
@@ -1551,12 +1545,13 @@ def reset_speed_outputs():
     last_cmd_wz = 0.0
     last_ap_vz_cmd = 0.0
     last_angle_priority_active = False
-    orbit_follow_active = False
-    orbit_follow_exit_since_ms = 0
-    filtered_ff_wz = 0.0
+    if not keep_orbit_state:
+        orbit_follow_active = False
+        orbit_follow_exit_since_ms = 0
+        filtered_ff_wz = 0.0
+        last_follow_mode_key = -1
     spin_latched_wz = 0.0
     spin_latch_until_ms = 0
-    last_follow_mode_key = -1
     master_edge_until_ms = 0
     master_zero_since_ms = 0
 
@@ -1850,7 +1845,7 @@ def calc_speed_closed_loop():
     t_b = move_cmd.speed_b
 
     if wheel_targets_zero(t_fl, t_fr, t_b):
-        reset_speed_outputs()
+        reset_speed_outputs(orbit_follow_active)
         s_fl, s_fr, s_b = set_three_pwm_zero()
         u_fl = 0.0
         u_fr = 0.0

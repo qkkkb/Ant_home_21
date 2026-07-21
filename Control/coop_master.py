@@ -106,11 +106,14 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             vx = cmd_vx
             vy = cmd_vy
             wz = cmd_wz
-        elif state_code == 9:
-            flags |= _FLAG_SPIN
+        elif state_code == 9 or 11 <= state_code <= 14:
+            if state_code == 9 or state_code == 13:
+                flags |= _FLAG_SPIN
             vx = cmd_vx
             vy = cmd_vy
             wz = cmd_wz
+        elif state_code == 15:
+            vx = vy = wz = 0.0
     if target_seen:
         flags |= _FLAG_TARGET
     _put_u8(0, 0xA5)

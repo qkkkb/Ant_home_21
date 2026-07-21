@@ -81,13 +81,7 @@ Push_Dir_Left = 3
 Push_Dir_Down = 4
 Nav_Detect_Ms = 200
 Nav_Target_Lost_Ms = 500
-Nav_Search_Turn_Yaw = 30.0
-Nav_Search_Turn_Ok_Yaw = 5.0
-Nav_Search_Turn_Ok_Ms = 120
-Nav_Search_Turn_Gyro_Th = 3.0
-Nav_Search_Turn_Max_Rate = 4.0
-Nav_Search_Turn_Gyro_Limit = 2.5
-Nav_Search_Turn_Open_Vz = 1.1
+Nav_Search_Forward_Ms = 1000
 Nav_Coarse_Exit_Y = 190
 Nav_Coarse_Ok_Ms = 80
 Nav_Fine_Classify_Ok_X = 30
@@ -185,13 +179,6 @@ Nav_Return_Left_Max_Ms = 10000
 Nav_Return_Back_Speed = 8.0
 Nav_Return_Back_Ms = 1300
 Nav_Return_Turn_Dir = 1
-Nav_Return_Turn_Slow_Yaw = 55.0
-Nav_Return_Turn_Fast_Rate = 62.5
-Nav_Return_Turn_Slow_Rate = 26.0
-Nav_Return_Turn_Gyro_Limit = 10.0
-Nav_Return_Turn_Ok_Yaw = 6.0
-Nav_Return_Turn_Recover_Yaw = 12.0
-Nav_Return_Turn_Ok_Ms = 120
 Nav_Return_Final_Back_Speed = 7.0
 Nav_Return_Final_Line_Extra_Ms = 60
 Nav_Return_Max_Ms = 6000
@@ -218,7 +205,6 @@ cam_valid_target_since_ms = 0
 nav_state = NAV_STATE_SEARCH
 nav_detect_since_ms = 0
 nav_target_lost_since_ms = 0
-nav_search_turn_ok_since_ms = 0
 nav_coarse_ok_since_ms = 0
 nav_fine_ok_since_ms = 0
 nav_fine_last_x_sign = 0
@@ -411,16 +397,6 @@ def get_push_turn_rate(yaw_err_abs):
     return Nav_Push_Turn_Slow_Rate + (Nav_Push_Turn_Fast_Rate - Nav_Push_Turn_Slow_Rate) * ratio
 
 
-def get_return_turn_rate(yaw_err_abs):
-    if yaw_err_abs <= Nav_Return_Turn_Ok_Yaw:
-        return 0.0
-    if yaw_err_abs > Nav_Return_Turn_Slow_Yaw:
-        return Nav_Return_Turn_Fast_Rate
-    span = Nav_Return_Turn_Slow_Yaw - Nav_Return_Turn_Ok_Yaw
-    ratio = (yaw_err_abs - Nav_Return_Turn_Ok_Yaw) / span
-    return Nav_Return_Turn_Slow_Rate + (Nav_Return_Turn_Fast_Rate - Nav_Return_Turn_Slow_Rate) * ratio
-
-
 def update_push_orbit_radius(err_y):
     global push_orbit_radius_ratio
 
@@ -524,7 +500,7 @@ def nav_state_code(state):
 
 
 def nav_set_state(new_state, reason="", force=False):
-    global nav_state, nav_detect_since_ms, nav_target_lost_since_ms, nav_search_turn_ok_since_ms
+    global nav_state, nav_detect_since_ms, nav_target_lost_since_ms
     global nav_coarse_ok_since_ms, nav_fine_ok_since_ms, nav_transition_ms
     global nav_fine_last_x_sign, nav_fine_last_y_sign
     global nav_fine_brake_since_ms, nav_fine_brake_vy, nav_fine_forward_brake_since_ms
@@ -547,7 +523,6 @@ def nav_set_state(new_state, reason="", force=False):
     nav_state = new_state
     nav_detect_since_ms = 0
     nav_target_lost_since_ms = 0
-    nav_search_turn_ok_since_ms = 0
     nav_coarse_ok_since_ms = 0
     nav_fine_ok_since_ms = 0
     nav_fine_last_x_sign = 0
@@ -662,7 +637,7 @@ def nav_set_state(new_state, reason="", force=False):
         motor_b.duty(0)
 
     if new_state == NAV_STATE_SEARCH_TURN:
-        search_turn_yaw_target = normalize_yaw_deg(field_up_yaw + Nav_Search_Turn_Yaw)
+        search_turn_yaw_target = field_up_yaw
         yaw_ref_deg = search_turn_yaw_target
     elif new_state == NAV_STATE_FINE:
         if push_orbit_done:
@@ -748,17 +723,17 @@ def update_return_home(now, yaw_deg, low_speed, gyro_z):
         cam_target_vx = 0.0
         cam_target_vy = 0.0
         yaw_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg))
-        if yaw_err_abs <= Nav_Return_Turn_Ok_Yaw:
+        if yaw_err_abs <= Nav_Push_Turn_Ok_Yaw:
             if not push_turn_settle:
                 reset_gyro_pid_state()
             push_turn_settle = True
-        elif push_turn_settle and yaw_err_abs > Nav_Return_Turn_Recover_Yaw:
+        elif push_turn_settle and yaw_err_abs > Nav_Push_Turn_Recover_Yaw:
             push_turn_settle = False
             nav_push_turn_ok_since_ms = 0
         if push_turn_settle and low_speed and abs(gyro_z) <= 8.0:
             if nav_push_turn_ok_since_ms == 0:
                 nav_push_turn_ok_since_ms = now
-            elif utime.ticks_diff(now, nav_push_turn_ok_since_ms) >= Nav_Return_Turn_Ok_Ms:
+            elif utime.ticks_diff(now, nav_push_turn_ok_since_ms) >= Nav_Push_Turn_Ok_Ms:
                 imu_runtime.reset_yaw(field_up_yaw)
                 nav_set_state(NAV_STATE_RETURN_FINAL)
         else:
@@ -795,7 +770,7 @@ def update_return_home(now, yaw_deg, low_speed, gyro_z):
 
 
 def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
-    global nav_detect_since_ms, nav_target_lost_since_ms, nav_search_turn_ok_since_ms
+    global nav_detect_since_ms, nav_target_lost_since_ms
     global nav_coarse_ok_since_ms, nav_fine_ok_since_ms
     global nav_fine_last_x_sign, nav_fine_last_y_sign
     global nav_fine_brake_since_ms, nav_fine_brake_vy, nav_fine_forward_brake_since_ms
@@ -847,25 +822,15 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
 
     if nav_state == NAV_STATE_SEARCH_TURN:
         nav_ready_for_push = False
-        cam_target_vx = 0.0
+        cam_target_vx = Nav_Coarse_Forward_Limit
         cam_target_vy = 0.0
         if seen:
             yaw_ref_deg = yaw_deg
             nav_set_state(NAV_STATE_COARSE, "target_seen_during_search_turn")
             return
         yaw_ref_deg = search_turn_yaw_target
-        yaw_search_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg))
-        search_turn_stable = (
-            yaw_search_err_abs <= Nav_Search_Turn_Ok_Yaw
-            and abs(gyro_z) <= Nav_Search_Turn_Gyro_Th
-        )
-        if search_turn_stable:
-            if nav_search_turn_ok_since_ms == 0:
-                nav_search_turn_ok_since_ms = now
-            elif utime.ticks_diff(now, nav_search_turn_ok_since_ms) >= Nav_Search_Turn_Ok_Ms:
-                nav_set_state(NAV_STATE_SEARCH, "search_turn_done")
-        else:
-            nav_search_turn_ok_since_ms = 0
+        if utime.ticks_diff(now, nav_transition_ms) >= Nav_Search_Forward_Ms:
+            nav_set_state(NAV_STATE_SEARCH, "search_forward_done")
         return
 
     if nav_state == NAV_STATE_SEARCH:
@@ -1676,35 +1641,6 @@ def calc_speed_closed_loop():
         return None
 
     yaw_err_deg = -wrapped_yaw_error(yaw_ref_deg, yaw_deg)
-    if nav_state == NAV_STATE_SEARCH_TURN:
-        if yaw_err_deg > Nav_Search_Turn_Ok_Yaw:
-            turn_rate_cmd = Nav_Search_Turn_Open_Vz
-            vz_cmd = Nav_Search_Turn_Open_Vz
-        elif yaw_err_deg < -Nav_Search_Turn_Ok_Yaw:
-            turn_rate_cmd = -Nav_Search_Turn_Open_Vz
-            vz_cmd = -Nav_Search_Turn_Open_Vz
-        else:
-            turn_rate_cmd = 0.0
-            vz_cmd = 0.0
-        move_cmd.tar_spd_x = cam_target_vx
-        move_cmd.tar_spd_y = cam_target_vy
-        move_cmd.tar_spd_z = vz_cmd
-        last_turn_rate_cmd = turn_rate_cmd
-        last_vz_cmd = vz_cmd
-        calc_wheel_spd(move_cmd, cam_target_vx, cam_target_vy, vz_cmd)
-
-        e_fl = enc_fl.get()
-        e_fr = enc_fr.get()
-        e_b = enc_b.get()
-        t_fl = move_cmd.speed_fl
-        t_fr = move_cmd.speed_fr
-        t_b = move_cmd.speed_b
-        u_fl = speed_ctrl(pid_fl, e_fl, t_fl)
-        u_fr = speed_ctrl(pid_fr, e_fr, t_fr)
-        u_b = speed_ctrl(pid_b, e_b, t_b)
-        set_three_pwm_smooth(u_fl, u_fr, u_b)
-        return None
-
     gyro_rate_mode = False
     if nav_state == NAV_STATE_PUSH_ORIENT:
         orbit_remaining = max(0.0, push_orbit_target_delta - push_orbit_progress_deg)
@@ -1739,16 +1675,19 @@ def calc_speed_closed_loop():
                 turn_rate_cmd = 0.0
         gyro_rate_mode = True
     elif nav_state == NAV_STATE_RETURN_TURN:
-        return_turn_remaining = yaw_delta_in_turn_dir(
-            field_up_yaw,
-            yaw_deg,
-            Nav_Return_Turn_Dir,
-        )
-        return_turn_rate_mag = get_return_turn_rate(return_turn_remaining)
-        if return_turn_rate_mag > 0.0:
-            turn_rate_cmd = Nav_Return_Turn_Dir * return_turn_rate_mag
-        else:
+        if push_turn_settle:
             turn_rate_cmd = 0.0
+        else:
+            return_turn_remaining = yaw_delta_in_turn_dir(
+                field_up_yaw,
+                yaw_deg,
+                Nav_Return_Turn_Dir,
+            )
+            return_turn_rate_mag = get_push_turn_rate(return_turn_remaining)
+            if return_turn_rate_mag > 0.0:
+                turn_rate_cmd = Nav_Return_Turn_Dir * return_turn_rate_mag
+            else:
+                turn_rate_cmd = 0.0
         gyro_rate_mode = True
 
     if gyro_rate_mode:
@@ -1757,31 +1696,22 @@ def calc_speed_closed_loop():
         turn_pid.err_last = 0.0
     else:
         turn_rate_cmd = turn_ctrl(turn_pid, yaw_err_deg, 0)
-        if nav_state == NAV_STATE_SEARCH_TURN:
-            if turn_rate_cmd > Nav_Search_Turn_Max_Rate:
-                turn_rate_cmd = Nav_Search_Turn_Max_Rate
-            elif turn_rate_cmd < -Nav_Search_Turn_Max_Rate:
-                turn_rate_cmd = -Nav_Search_Turn_Max_Rate
 
     # 陀螺仪内环（方向控制）
-    if nav_state == NAV_STATE_PUSH_TURN:
+    if nav_state in (NAV_STATE_PUSH_TURN, NAV_STATE_RETURN_TURN):
         gyro_pid.gyro_kp = Nav_Push_Turn_Gyro_Kp
         gyro_pid.gyro_ki = Nav_Push_Turn_Gyro_Ki
     else:
         gyro_pid.gyro_kp = GYRO_KP
         gyro_pid.gyro_ki = GYRO_KI
 
-    if nav_state == NAV_STATE_SEARCH_TURN:
-        gyro_pid.gyro_output_limit = Nav_Search_Turn_Gyro_Limit
-    elif nav_state == NAV_STATE_PUSH_ORIENT:
+    if nav_state == NAV_STATE_PUSH_ORIENT:
         gyro_pid.gyro_output_limit = Nav_Push_Orbit_Gyro_Limit
     elif nav_state == NAV_STATE_PUSH:
         gyro_pid.gyro_output_limit = Nav_Push_Execute_Gyro_Limit
-    elif nav_state == NAV_STATE_PUSH_TURN:
+    elif nav_state in (NAV_STATE_PUSH_TURN, NAV_STATE_RETURN_TURN):
         gyro_pid.gyro_output_limit = Nav_Push_Turn_Gyro_Limit
-    elif nav_state == NAV_STATE_RETURN_TURN:
-        gyro_pid.gyro_output_limit = Nav_Return_Turn_Gyro_Limit
-    elif nav_state in (NAV_STATE_COARSE, NAV_STATE_FINE, NAV_STATE_PUSH_CLASSIFY, NAV_STATE_PUSH_PREPARE):
+    elif nav_state in (NAV_STATE_SEARCH_TURN, NAV_STATE_COARSE, NAV_STATE_FINE, NAV_STATE_PUSH_CLASSIFY, NAV_STATE_PUSH_PREPARE):
         gyro_pid.gyro_output_limit = Nav_Track_Gyro_Limit
     else:
         gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT

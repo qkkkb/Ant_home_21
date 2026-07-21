@@ -95,7 +95,7 @@ ART_MODE_IDLE_CMD = b"IDLE\n"
 
 # ====================== Follow control ======================
 Follow_Forward_Gain = 0.46
-Follow_Lateral_Gain = 0.76
+Follow_Lateral_Gain = 0.92
 Follow_Orbit_Forward_Gain = 1.00
 Follow_Orbit_Lateral_Gain = 0.92
 Follow_Forward_Error_Sign = 1.0
@@ -1104,19 +1104,15 @@ def update_follow_targets(gyro_z):
     )
     spin_mode_active = (
         fresh_motion
-        and (not explicit_orbit)
-        and (not explicit_push)
+        and not explicit_orbit
+        and not explicit_push
         and (
-            (
-                explicit_spin
-                and (
-                    spin_ff_wz >= Follow_Spin_Latch_Min_Wz
-                    or spin_ff_wz <= -Follow_Spin_Latch_Min_Wz
-                )
+            abs(spin_ff_wz) >= (
+                Follow_Spin_Latch_Min_Wz if explicit_spin else Follow_Spin_Mode_FfWz_On
             )
             or (
-                spin_ff_wz >= Follow_Spin_Mode_FfWz_On
-                or spin_ff_wz <= -Follow_Spin_Mode_FfWz_On
+                last_follow_mode_key == 3
+                and abs(gyro_z) >= Follow_Orbit_Brake_Gyro_Threshold
             )
         )
     )
@@ -1151,7 +1147,7 @@ def update_follow_targets(gyro_z):
         mode_key = 1
     else:
         mode_key = 0
-    _orbit = mode_key == 1
+    _orbit = mode_key != 0
     follow_output_limit = FOLLOW_RUN_PWM_LIMIT
     if (
         mode_key == 0

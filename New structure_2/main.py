@@ -528,16 +528,21 @@ def update_orbit_follow_mode(
         return False
 
     stable = (
-        (not seen)
-        or (
-            (
-                (not fresh_motion)
-                or (-Follow_Orbit_Mode_FfWz_Off <= ff_wz <= Follow_Orbit_Mode_FfWz_Off)
-            )
-            and (
-                -Follow_Normal_Pose_Angle_Deadband
-                <= error_angle
-                <= Follow_Normal_Pose_Angle_Deadband
+        -Follow_Orbit_Brake_Gyro_Threshold
+        < gyro_z
+        < Follow_Orbit_Brake_Gyro_Threshold
+        and (
+            (not seen)
+            or (
+                (
+                    (not fresh_motion)
+                    or (-Follow_Orbit_Mode_FfWz_Off <= ff_wz <= Follow_Orbit_Mode_FfWz_Off)
+                )
+                and (
+                    -Follow_Normal_Pose_Angle_Deadband
+                    <= error_angle
+                    <= Follow_Normal_Pose_Angle_Deadband
+                )
             )
         )
     )

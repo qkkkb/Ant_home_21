@@ -112,8 +112,8 @@ Follow_Distance_Far_Boost_Error = 6
 Follow_Distance_Far_Boost_Gain = 0.70
 Follow_Distance_Close_Gain = 0.70
 Follow_Distance_Close_Limit = 22.0
-Follow_Feedforward_Forward_Gain = 1.00
-Follow_Feedforward_Lateral_Gain = 1.00
+Follow_Feedforward_Forward_Gain = 1.18
+Follow_Feedforward_Lateral_Gain = 1.18
 Follow_Feedforward_Forward_Limit = 20.0
 Follow_Feedforward_Lateral_Limit = 18.0
 Follow_Push_Feedforward_Forward_Gain = 1.18
@@ -1078,7 +1078,15 @@ def update_follow_targets(gyro_z):
     ff_wz = master_wz if fresh_motion else 0.0
     if (
         fresh_motion
-        and master_flags == 5
+        and (
+            master_flags
+            & (
+                MASTER_MOTION_FLAG_ORBIT
+                | MASTER_MOTION_FLAG_PUSH
+                | MASTER_MOTION_FLAG_SPIN
+            )
+        )
+        == 0
         and last_follow_mode_key == 0
         and ff_vx == 0.0
         and ff_vy == 0.0
@@ -1155,7 +1163,6 @@ def update_follow_targets(gyro_z):
     follow_output_limit = FOLLOW_RUN_PWM_LIMIT
     if (
         mode_key == 0
-        and master_flags == 5
         and -Follow_Master_Edge_Delta < ff_vx < Follow_Master_Edge_Delta
         and -Follow_Master_Edge_Delta < ff_vy < Follow_Master_Edge_Delta
         and -Follow_Master_Edge_Delta < follow_ff_wz < Follow_Master_Edge_Delta

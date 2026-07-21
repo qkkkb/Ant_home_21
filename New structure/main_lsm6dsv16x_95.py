@@ -2,7 +2,6 @@ from machine import Pin, UART
 import gc
 import utime
 from smartcar import ticker, encoder
-from seekfree import WIRELESS_UART
 from lsm6dsv16x_gyro_runtime import LSM6DSV16XYawRuntime
 from models import AnglePID, MoveBase, SpeedPID
 from move_base import calc_wheel_spd
@@ -43,11 +42,8 @@ GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
 
 
-# 调试与退出配置
+# 退出与回收配置
 GC_DIV = 50
-DEBUG_LOG_ENABLE = False
-DEBUG_LOG_PERIOD_MS = 200
-debug_wireless = None
 
 Cam_Error_Offset = 120
 Cam_Error_Scale = 2
@@ -732,9 +728,9 @@ def update_return_home(now, yaw_deg, low_speed, gyro_z):
         else:
             cam_target_vx = Nav_Return_Left_Speed
             if line_crossed:
-                nav_set_state(NAV_STATE_RETURN_BACK, "return_left_line_seen")
+                nav_set_state(NAV_STATE_RETURN_BACK)
         if utime.ticks_diff(now, nav_transition_ms) >= Nav_Return_Left_Max_Ms:
-            nav_set_state(NAV_STATE_RETURN_DONE, "return_left_timeout")
+            nav_set_state(NAV_STATE_RETURN_DONE)
         return
 
     if nav_state == NAV_STATE_RETURN_BACK:
@@ -743,7 +739,7 @@ def update_return_home(now, yaw_deg, low_speed, gyro_z):
         cam_target_vx = -Nav_Return_Back_Speed
         cam_target_vy = 0.0
         if utime.ticks_diff(now, nav_transition_ms) >= Nav_Return_Back_Ms:
-            nav_set_state(NAV_STATE_RETURN_TURN, "return_back_done")
+            nav_set_state(NAV_STATE_RETURN_TURN)
         return
 
     if nav_state == NAV_STATE_RETURN_TURN:
@@ -764,11 +760,11 @@ def update_return_home(now, yaw_deg, low_speed, gyro_z):
                 nav_push_turn_ok_since_ms = now
             elif utime.ticks_diff(now, nav_push_turn_ok_since_ms) >= Nav_Return_Turn_Ok_Ms:
                 imu_runtime.reset_yaw(field_up_yaw)
-                nav_set_state(NAV_STATE_RETURN_FINAL, "return_turn_done")
+                nav_set_state(NAV_STATE_RETURN_FINAL)
         else:
             nav_push_turn_ok_since_ms = 0
         if utime.ticks_diff(now, nav_transition_ms) >= Nav_Return_Max_Ms:
-            nav_set_state(NAV_STATE_RETURN_DONE, "return_turn_timeout")
+            nav_set_state(NAV_STATE_RETURN_DONE)
         return
 
     if nav_state == NAV_STATE_RETURN_FINAL:
@@ -787,7 +783,7 @@ def update_return_home(now, yaw_deg, low_speed, gyro_z):
                 if push_line_extra_since_ms == 0:
                     push_line_extra_since_ms = now
                 elif utime.ticks_diff(now, push_line_extra_since_ms) >= Nav_Return_Final_Line_Extra_Ms:
-                    nav_set_state(NAV_STATE_RETURN_DONE, "return_final_line_crossed")
+                    nav_set_state(NAV_STATE_RETURN_DONE)
         return
 
     nav_ready_for_push = False
@@ -1315,7 +1311,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         cam_target_vy = 0.0
         yaw_ref_deg = push_yaw_target
         if final_return_mode == 2 and line_crossed:
-            nav_set_state(NAV_STATE_RETURN_BACK, "return_bag_line_seen")
+            nav_set_state(NAV_STATE_RETURN_BACK)
             return
         if utime.ticks_diff(now, nav_transition_ms) >= Nav_Push_Back_Ms:
             nav_set_state(NAV_STATE_PUSH_TURN, "push_back_done")
@@ -1340,7 +1336,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             elif utime.ticks_diff(now, nav_push_turn_ok_since_ms) >= Nav_Push_Turn_Ok_Ms:
                 imu_runtime.reset_yaw(push_return_yaw_target)
                 if pushed_object_count >= Nav_Object_Total:
-                    nav_set_state(NAV_STATE_RETURN_LEFT, "all_objects_done")
+                    nav_set_state(NAV_STATE_RETURN_LEFT)
                 else:
                     nav_set_state(NAV_STATE_POST_TURN_FORWARD, "push_finish_wait_target")
         else:
@@ -1571,41 +1567,8 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
     last_pwm_fr = s_fr
     last_pwm_b = s_b
 
-    return s_fl, s_fr, s_b
-
-def init_debug_wireless():
-    global debug_wireless
-    try:
-        debug_wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
-    except Exception:
-        debug_wireless = None
-
-
-def debug_send(text):
-    if debug_wireless is None:
-        return
-    try:
-        debug_wireless.send_str(text)
-        debug_wireless.send_str("\r\n")
-    except Exception:
-        pass
-
-
-def debug_due(now):
-    global debug_log_last_ms
-    if not DEBUG_LOG_ENABLE:
-        return False
-    if debug_wireless is None:
-        return False
-    if utime.ticks_diff(now, debug_log_last_ms) < DEBUG_LOG_PERIOD_MS:
-        return False
-    debug_log_last_ms = now
-    return True
-
 # ====================== 初始化 LED 显示 ======================
 update_nav_led_display()
-if DEBUG_LOG_ENABLE:
-    init_debug_wireless()
 coop_master.init()
 log("[INIT] boot, vision loop waiting")
 log("[INFO] C9=start C8=exit")
@@ -1661,14 +1624,12 @@ loop_count = 0
 last_vz_cmd = 0.0
 last_turn_rate_cmd = 0.0
 yaw_ref_deg = 0.0
-debug_log_last_ms = start_time
 
 
 # ====================== 速度闭环主函数（含发车判断） ======================
 def calc_speed_closed_loop():
     global last_vz_cmd, last_turn_rate_cmd
     global last_pwm_fl, last_pwm_fr, last_pwm_b
-    global debug_log_last_ms
     global cam_target_vx, cam_target_vy
 
     # 未发车：直接输出 0，占空比清零
@@ -1679,7 +1640,6 @@ def calc_speed_closed_loop():
     # 已发车：执行闭环逻辑
     # 读取陀螺仪数据
     gyro_z = imu_runtime.read_gyro_z()
-    raw_gyro_z = imu_runtime.raw_gyro_z
     yaw_deg = imu_runtime.read_yaw()
     e_fl = enc_fl.get()
     e_fr = enc_fr.get()
@@ -1742,25 +1702,7 @@ def calc_speed_closed_loop():
         u_fl = speed_ctrl(pid_fl, e_fl, t_fl)
         u_fr = speed_ctrl(pid_fr, e_fr, t_fr)
         u_b = speed_ctrl(pid_b, e_b, t_b)
-        s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
-        now_log = utime.ticks_ms()
-        if debug_due(now_log):
-            debug_send(
-                "S %d %d %d %d %d %d %d %d %d"
-                % (
-                    nav_state_code(nav_state),
-                    1 if cam_target_seen() else 0,
-                    cam_error_x,
-                    cam_error_y,
-                    utime.ticks_diff(now_log, cam_last_rx_ms),
-                    int(yaw_err_deg),
-                    int(gyro_z),
-                    int(turn_rate_cmd),
-                    int(vz_cmd),
-                )
-            )
-            debug_send("E %d %d %d %d %d %d" % (e_fl, e_fr, e_b, int(t_fl), int(t_fr), int(t_b)))
-            debug_send("P %d %d %d %d %d %d" % (s_fl, s_fr, s_b, int(u_fl), int(u_fr), int(u_b)))
+        set_three_pwm_smooth(u_fl, u_fr, u_b)
         return None
 
     gyro_rate_mode = False
@@ -1869,25 +1811,7 @@ def calc_speed_closed_loop():
     u_b = speed_ctrl(pid_b, e_b, t_b)
 
     # PWM 平滑输出
-    s_fl, s_fr, s_b = set_three_pwm_smooth(u_fl, u_fr, u_b)
-    now_log = utime.ticks_ms()
-    if debug_due(now_log):
-        debug_send(
-            "S %d %d %d %d %d %d %d %d %d"
-            % (
-                nav_state_code(nav_state),
-                1 if cam_target_seen() else 0,
-                cam_error_x,
-                cam_error_y,
-                utime.ticks_diff(now_log, cam_last_rx_ms),
-                int(yaw_err_deg),
-                int(gyro_z),
-                int(turn_rate_cmd),
-                int(vz_cmd),
-            )
-        )
-        debug_send("E %d %d %d %d %d %d" % (e_fl, e_fr, e_b, int(t_fl), int(t_fr), int(t_b)))
-        debug_send("P %d %d %d %d %d %d" % (s_fl, s_fr, s_b, int(u_fl), int(u_fr), int(u_b)))
+    set_three_pwm_smooth(u_fl, u_fr, u_b)
 
     return None
 

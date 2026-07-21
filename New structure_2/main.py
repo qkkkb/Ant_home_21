@@ -150,7 +150,7 @@ Follow_Orbit_Pose_Angle_Limit = 74.0
 Follow_Orbit_Pose_Angle_Min_Error = 14
 Follow_Orbit_Pose_Angle_Min_Turn = 30.0
 Follow_Normal_Pose_Angle_Deadband = 4
-Follow_Normal_Pose_Angle_Active_Error = 10
+Follow_Normal_Pose_Angle_Active_Error = 6
 Follow_Spin_Target_Point_Wz_To_Vx = 0.08
 Follow_Spin_Target_Point_Wz_To_Vy = -0.08
 Follow_Spin_Feedforward_Forward_Gain = 0.95
@@ -935,12 +935,14 @@ def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z, spin_priority=False):
 
     gain = GYRO_PRIORITY_KP
     min_output = GYRO_PRIORITY_MIN_OUTPUT
+    min_cmd = GYRO_PRIORITY_MIN_CMD
     if not spin_priority and last_follow_mode_key != 1:
         gain = GYRO_KP
-        min_output = 0.8
+        min_output = 1.25
+        min_cmd = 2.0
     out = clamp(err * gain, -limit, limit)
     if (
-        turn_abs >= GYRO_PRIORITY_MIN_CMD
+        turn_abs >= min_cmd
         and (not same_dir or gyro_abs < turn_abs * GYRO_PRIORITY_MIN_RATE_RATIO)
     ):
         if 0.0 < out < min_output:

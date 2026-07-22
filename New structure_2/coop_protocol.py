@@ -10,8 +10,6 @@ MASTER_MOTION_FLAG_PUSH = 0x20
 
 
 class CoopFrameParser:
-    __slots__ = ("state", "n", "idx", "sum", "msg", "seq", "payload")
-
     def __init__(self):
         self.state = 0
         self.n = 0

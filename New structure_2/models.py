@@ -1,4 +1,13 @@
 class AnglePID:
+    __slots__ = (
+        "err",
+        "output",
+        "err_last",
+        "gyro_kp",
+        "gyro_ki",
+        "gyro_output_limit",
+    )
+
     def __init__(self):
         self.err = 0.0
         self.output = 0.0
@@ -9,6 +18,27 @@ class AnglePID:
 
 
 class SpeedPID:
+    __slots__ = (
+        "temp",
+        "c1",
+        "c2",
+        "c3",
+        "err",
+        "err_last",
+        "tar_spd_last",
+        "output",
+        "delta_tar_last",
+        "delta_tar",
+        "delta_ud",
+        "enc_samples",
+        "enc_sum",
+        "enc_index",
+        "kd",
+        "gama",
+        "kp",
+        "ki",
+    )
+
     def __init__(self):
         self.temp = 0.0
         self.c1 = 0.0
@@ -37,6 +67,8 @@ class SpeedPID:
 
 
 class MoveBase:
+    __slots__ = ("speed_fl", "speed_fr", "speed_b")
+
     def __init__(self):
         self.speed_fl = 0.0
         self.speed_fr = 0.0

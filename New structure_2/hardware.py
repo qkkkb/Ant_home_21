@@ -2,6 +2,8 @@ from machine import Pin, PWM
 
 
 class Motor:
+    __slots__ = ("invert", "ph", "pwm")
+
     def __init__(self, ph_pin, pwm_pin, freq=13000, invert=False):
         self.invert = invert
         self.ph = Pin(ph_pin, Pin.OUT, value=0)

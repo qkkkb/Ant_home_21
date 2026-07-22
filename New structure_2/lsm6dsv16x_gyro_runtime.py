@@ -1,27 +1,39 @@
 from machine import Pin, SPI
+from micropython import const
 import gc
 import utime
 
 
-_LSM_FUNC_CFG_ACCESS = 0x01
-_LSM_IF_CFG = 0x03
-_LSM_CHIP_ID = 0x0F
-_LSM_CTRL1 = 0x10
-_LSM_CTRL2 = 0x11
-_LSM_CTRL3 = 0x12
-_LSM_CTRL6 = 0x15
-_LSM_CTRL7 = 0x16
-_LSM_CTRL8 = 0x17
-_LSM_CTRL9 = 0x18
-_LSM_OUTX_L_G = 0x22
-_LSM_SPI_R = 0x80
-_LSM_TIMEOUT_COUNT = 0xFF
-_LSM_SW_RESET_VALUE = 0x04
-_LSM_CTRL3_BDU_INC = 0x44
+_LSM_FUNC_CFG_ACCESS = const(0x01)
+_LSM_IF_CFG = const(0x03)
+_LSM_CHIP_ID = const(0x0F)
+_LSM_CTRL1 = const(0x10)
+_LSM_CTRL2 = const(0x11)
+_LSM_CTRL3 = const(0x12)
+_LSM_CTRL6 = const(0x15)
+_LSM_CTRL7 = const(0x16)
+_LSM_CTRL8 = const(0x17)
+_LSM_CTRL9 = const(0x18)
+_LSM_OUTX_L_G = const(0x22)
+_LSM_SPI_R = const(0x80)
+_LSM_TIMEOUT_COUNT = const(0xFF)
+_LSM_SW_RESET_VALUE = const(0x04)
+_LSM_CTRL3_BDU_INC = const(0x44)
 
 
 class LSM6DSV16XGyroOnly:
-    """Small SPI gyro-only LSM6DSV16X driver."""
+    __slots__ = (
+        "cs",
+        "spi",
+        "_tx2",
+        "_rx2",
+        "_tx7",
+        "_rx7",
+        "gyro_factor",
+        "_last_chip_id",
+        "gyro_fs",
+        "accel_fs",
+    )
 
     def __init__(
         self,
@@ -141,12 +153,19 @@ class LSM6DSV16XGyroOnly:
         self.cs(1)
         return self._i16(rx[5], rx[6]) / self.gyro_factor
 
-    def info(self):
-        print("LSM6DSV16X gyro-only SPI mode")
-
-
 class LSM6DSV16XYawRuntime:
-    """Yaw runtime wrapper that keeps the old main.py interface."""
+    __slots__ = (
+        "sign",
+        "gyro_offset_z",
+        "gyro_scale",
+        "deadband_dps",
+        "tick_period_ms",
+        "imu",
+        "raw_gyro_z",
+        "gyro_z_deg",
+        "yaw_deg",
+        "last_update_ms",
+    )
 
     def __init__(
         self,
@@ -171,22 +190,6 @@ class LSM6DSV16XYawRuntime:
         self.gyro_z_deg = 0.0
         self.yaw_deg = 0.0
         self.last_update_ms = utime.ticks_ms()
-
-    @staticmethod
-    def help():
-        print("LSM6DSV16X gyro-only runtime: gyro Z -> yaw-rate")
-
-    def info(self):
-        self.imu.info()
-
-    def capture_device(self):
-        return None
-
-    def set_sign(self, sign):
-        self.sign = float(sign)
-
-    def set_offset_z(self, offset_z):
-        self.gyro_offset_z = float(offset_z)
 
     def reset_yaw(self, yaw_deg=0.0):
         self.yaw_deg = float(yaw_deg) % 360.0

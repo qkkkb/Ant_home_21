@@ -583,6 +583,8 @@ def update_follow_relock_state(
     global last_cmd_vx, last_cmd_vy, last_cmd_wz, last_ap_vz_cmd
     global last_angle_priority_active, master_edge_until_ms
     global orbit_follow_active, orbit_follow_exit_since_ms
+    global last_pwm_fl, last_pwm_fr, last_pwm_b
+    global last_stall_count, last_stall_boost
     global debug_event_mask
 
     priority_requested = explicit_orbit or explicit_push or explicit_spin
@@ -606,6 +608,14 @@ def update_follow_relock_state(
             last_ap_vz_cmd = 0.0
             last_angle_priority_active = False
             master_edge_until_ms = 0
+            speed_reset(pid_fl)
+            speed_reset(pid_fr)
+            speed_reset(pid_b)
+            last_pwm_fl = 0
+            last_pwm_fr = 0
+            last_pwm_b = 0
+            last_stall_count = 0
+            last_stall_boost = False
             reset_turn_loop_state()
 
     if not follow_relock_active:

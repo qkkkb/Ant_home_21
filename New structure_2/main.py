@@ -1588,8 +1588,6 @@ def follow_start_pwm_for_target(target, stall_boost):
         return 0
     if stall_boost and target_abs >= FOLLOW_STALL_BOOST_TARGET:
         return FOLLOW_STALL_BOOST_PWM
-    if last_follow_mode_key == 0 and target_abs < WHEEL_TARGET_IDLE_EPS:
-        return 0
     if target_abs < FOLLOW_START_PWM_MID_TARGET:
         return FOLLOW_START_PWM_MID
     return FOLLOW_START_PWM
@@ -1606,7 +1604,7 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
     )
     min_pwm = follow_start_pwm_for_target(target, stall_boost)
     if min_pwm <= 0:
-        if last_follow_mode_key and not _orbit:
+        if not _orbit:
             return 0
         return follow_low_pwm(
             cmd,
@@ -1697,7 +1695,7 @@ def speed_ctrl_follow(pid, actual_speed, target_speed, idle_event, reverse_event
 
     if wheel_target_idle(target_speed):
         debug_event_mask |= idle_event
-        if last_follow_mode_key and not _orbit:
+        if not _orbit:
             speed_reset(pid)
             return 0.0
     if pid.tar_spd_last * target_speed < 0.0:
@@ -1915,7 +1913,15 @@ def calc_speed_closed_loop():
         )
         debug_send(
             "E %d %d %d %d %d %d %d"
-            % (log_id, e_fl, e_fr, e_b, int(t_fl), int(t_fr), int(t_b))
+            % (
+                log_id,
+                pid_fl.enc_sum,
+                pid_fr.enc_sum,
+                pid_b.enc_sum,
+                int(t_fl * 4),
+                int(t_fr * 4),
+                int(t_b * 4),
+            )
         )
         debug_send(
             "P %d %d %d %d %d %d %d"

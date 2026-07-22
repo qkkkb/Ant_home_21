@@ -69,15 +69,8 @@ DEBUG_LOG_PERIOD_MS = 100
 WHEEL_TARGET_STOP_EPS = 0.05
 WHEEL_TARGET_IDLE_EPS = 1.2
 WHEEL_TARGET_NORMAL_IDLE_EPS = 0.35
-FOLLOW_START_PWM = 6200
-FOLLOW_START_PWM_MID = 3600
 FOLLOW_STATIC_LOCK_PWM_LIMIT = 12000
-FOLLOW_STALL_BOOST_PWM = 8800
-FOLLOW_START_PWM_MID_TARGET = 2.8
-FOLLOW_STALL_BOOST_TARGET = 2.8
-FOLLOW_REVERSE_BOOST_TARGET = 4.0
 FOLLOW_RUN_PWM_LIMIT = 40000
-FOLLOW_STALL_BOOST_FRAMES = 3
 _pid_mod.PWM_MAX = FOLLOW_RUN_PWM_LIMIT
 
 
@@ -1346,17 +1339,22 @@ def update_follow_targets(gyro_z):
         )
     )
     normal_brake_active = (
-        (not orbit_mode_active)
-        and (not spin_mode_active)
-        and abs(gyro_z) >= 40.0
+        seen
+        and not master_flags
+        and follow_output_limit < FOLLOW_RUN_PWM_LIMIT
+    )
+    normal_brake_active = (
+        mode_key == 0
+        and abs(gyro_z) >= (10.0 if normal_brake_active else 40.0)
         and (
             (
                 fresh_motion
-                and master_flags
+                and (master_flags or normal_brake_active)
                 and -0.001 < turn_rate_cmd < 0.001
             )
             or (
-                (turn_rate_cmd >= 0.001 or turn_rate_cmd <= -0.001)
+                abs(gyro_z) >= 40.0
+                and not (-0.001 < turn_rate_cmd < 0.001)
                 and (
                     (master_flags and turn_rate_cmd * gyro_z < 0.0)
                     or abs(gyro_z) > abs(turn_rate_cmd) * GYRO_PRIORITY_OVERSPEED_RATIO
@@ -1364,16 +1362,6 @@ def update_follow_targets(gyro_z):
             )
         )
     )
-    if (
-        not normal_brake_active
-        and seen
-        and fresh_motion
-        and not master_flags
-        and follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT
-        and -0.001 < turn_rate_cmd < 0.001
-        and (gyro_z >= 10.0 or gyro_z <= -10.0)
-    ):
-        normal_brake_active = True
     if normal_brake_active:
         debug_event_mask |= 4194304
     if -0.001 < turn_rate_cmd < 0.001:
@@ -1596,17 +1584,15 @@ def follow_start_pwm_for_target(target, stall_boost):
     target_abs = abs(target)
     if wheel_target_idle(target):
         return 0
-    if stall_boost and target_abs >= FOLLOW_STALL_BOOST_TARGET:
-        return FOLLOW_STALL_BOOST_PWM
+    if stall_boost and target_abs >= 2.8:
+        return 8800
     if (
-        follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT
+        follow_output_limit < FOLLOW_RUN_PWM_LIMIT
         and -0.001 < cam_target_vx < 0.001
         and -0.001 < cam_target_vy < 0.001
     ):
         return 2600
-    if target_abs < FOLLOW_START_PWM_MID_TARGET:
-        return FOLLOW_START_PWM_MID
-    return FOLLOW_START_PWM
+    return 3600 if target_abs < 2.8 else 6200
 
 
 def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
@@ -1633,12 +1619,12 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
         )
     if (
         fast_reverse
-        and (target >= FOLLOW_REVERSE_BOOST_TARGET or target <= -FOLLOW_REVERSE_BOOST_TARGET)
+        and (target >= 4.0 or target <= -4.0)
     ):
         if last_pwm * target < 0.0:
-            return FOLLOW_STALL_BOOST_PWM if target > 0.0 else -FOLLOW_STALL_BOOST_PWM
+            return 8800 if target > 0.0 else -8800
         if last_pwm == 0 and (target - speed_err) * target < 0.0:
-            return FOLLOW_STALL_BOOST_PWM if target > 0.0 else -FOLLOW_STALL_BOOST_PWM
+            return 8800 if target > 0.0 else -8800
     cmd = apply_start_pwm(cmd, min_pwm)
     if not fast_reverse and last_follow_mode_key == 0 and last_pwm * cmd < 0:
         return smooth_value(cmd, smooth_value(cmd, last_pwm))
@@ -1877,7 +1863,7 @@ def calc_speed_closed_loop():
             last_stall_count += 1
         else:
             last_stall_count = 0
-        last_stall_boost = last_stall_count >= FOLLOW_STALL_BOOST_FRAMES
+        last_stall_boost = last_stall_count >= 3
 
         u_fl = speed_ctrl_follow(pid_fl, e_fl, t_fl, 1, 524288)
         u_fr = speed_ctrl_follow(pid_fr, e_fr, t_fr, 2, 1048576)

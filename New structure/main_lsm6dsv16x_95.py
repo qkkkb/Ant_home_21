@@ -153,7 +153,9 @@ Nav_Push_Prepare_Ok_Y_Min = -8
 Nav_Push_Prepare_Ok_Y_Max = 8  #准备阶段横移误差小于该值即认为前进准备就绪
 Nav_Push_Prepare_Ok_Yaw = 6   #准备阶段定向误差小于该值即认为定向准备就绪
 Nav_Push_Prepare_Ok_Ms = 70
-Nav_Ball_Prepare_Right_Offset_X = 5
+Nav_Ball_Push_Yaw_Offset = 30.0
+Nav_Ball_Field_Vx_Scale = 0.8660254
+Nav_Ball_Field_Vy_Scale = 0.5
 Nav_Push_Execute_Forward_Speed = 10.0    #执行阶段前进速度
 Nav_Push_Execute_Gyro_Limit = 16.0
 Nav_Push_Line_Lost_Ms = 150
@@ -173,7 +175,7 @@ Nav_Push_Turn_Forced_Dir = 1
 Nav_Post_Turn_No_Target_Ms = 100
 Nav_Post_Turn_Forward_Ms = 1500
 Nav_Post_Turn_Forward_Speed = 6.5
-Nav_Object_Total = 1
+Nav_Object_Total = 2
 Nav_Return_Left_Speed = 11.0
 Nav_Return_Left_Start_Yaw = 10.0
 Nav_Return_Left_Max_Ms = 10000
@@ -585,6 +587,8 @@ def nav_set_state(new_state, reason="", force=False):
     elif new_state == NAV_STATE_PUSH_BACK:
         if final_return_mode == 1:
             push_return_yaw_target = field_left_yaw
+        elif push_dir_code == Push_Dir_Up:
+            push_return_yaw_target = field_down_yaw
         else:
             push_return_yaw_target = normalize_yaw_deg(push_yaw_target + 180.0)
         if final_return_mode == 2:
@@ -668,12 +672,12 @@ def nav_set_state(new_state, reason="", force=False):
             log("[NAV] -> %s" % new_state)
 
 
-def apply_nav_targets(vx, vy, vx_limit, vy_limit, lateral_error_x):
+def apply_nav_targets(vx, vy, vx_limit, vy_limit):
     global cam_target_vx, cam_target_vy
 
     if -Nav_Forward_Deadband <= cam_error_y <= Nav_Forward_Deadband:
         vx = 0.0
-    if -Nav_Lateral_Deadband <= lateral_error_x <= Nav_Lateral_Deadband:
+    if -Nav_Lateral_Deadband <= cam_error_x <= Nav_Lateral_Deadband:
         vy = 0.0
 
     if vx > vx_limit:
@@ -900,7 +904,6 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             -cam_error_x * lat_gain,
             Nav_Coarse_Forward_Limit,
             Nav_Coarse_Lateral_Limit,
-            cam_error_x,
         )
         if seen and cam_error_y <= Nav_Coarse_Exit_Y:
             if nav_coarse_ok_since_ms == 0:
@@ -985,7 +988,6 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 -cam_error_x * fine_lateral_gain,
                 Nav_Fine_Forward_Limit,
                 fine_lateral_limit,
-                cam_error_x,
             )
         elif (not Nav_Fine_Lateral_Brake_Enable) or nav_fine_brake_since_ms == 0:
             apply_nav_targets(
@@ -993,7 +995,6 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 -cam_error_x * fine_lateral_gain,
                 Nav_Fine_Forward_Limit,
                 fine_lateral_limit,
-                cam_error_x,
             )
         elif utime.ticks_diff(now, nav_fine_brake_since_ms) < fine_lateral_brake_ms:
             fine_braking = True
@@ -1012,7 +1013,6 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 -cam_error_x * fine_lateral_gain,
                 Nav_Fine_Forward_Limit,
                 fine_lateral_limit,
-                cam_error_x,
             )
         fine_yaw_ok = (
             (not push_orbit_done)
@@ -1081,6 +1081,10 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 elif push_dir_code == Push_Dir_Left:
                     final_return_mode = 2
             push_yaw_target = yaw_from_field_dir(push_dir_code)
+            if push_dir_code == Push_Dir_Up:
+                push_yaw_target = normalize_yaw_deg(
+                    field_up_yaw - Nav_Ball_Push_Yaw_Offset
+                )
             orbit_yaw_err = -wrapped_yaw_error(push_yaw_target, push_face_obj_yaw)
             push_orbit_target_delta = abs(orbit_yaw_err)
             if push_orbit_target_delta <= Nav_Push_Orbit_Skip_Yaw:
@@ -1174,8 +1178,6 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             nav_push_prepare_back_since_ms = 0
             return
         prepare_error_x = cam_error_x
-        if push_dir_code == Push_Dir_Up:
-            prepare_error_x -= Nav_Ball_Prepare_Right_Offset_X
         prepare_braking = False
         current_prepare_x_sign = 0
         if prepare_error_x > Nav_Push_Prepare_Ok_X:
@@ -1239,7 +1241,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 vy_cmd = vy_cmd * Nav_Push_Prepare_Soft_Scale
                 vx_limit = vx_limit * Nav_Push_Prepare_Soft_Scale
                 vy_limit = vy_limit * Nav_Push_Prepare_Soft_Scale
-            apply_nav_targets(vx_cmd, vy_cmd, vx_limit, vy_limit, prepare_error_x)
+            apply_nav_targets(vx_cmd, vy_cmd, vx_limit, vy_limit)
         if (
             seen
             and abs(prepare_error_x) <= Nav_Push_Prepare_Ok_X
@@ -1261,8 +1263,16 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
 
     if nav_state == NAV_STATE_PUSH:
         nav_ready_for_push = True
-        cam_target_vx = Nav_Push_Execute_Forward_Speed
-        cam_target_vy = 0.0
+        if push_dir_code == Push_Dir_Up:
+            cam_target_vx = (
+                Nav_Push_Execute_Forward_Speed * Nav_Ball_Field_Vx_Scale
+            )
+            cam_target_vy = (
+                Nav_Push_Execute_Forward_Speed * Nav_Ball_Field_Vy_Scale
+            )
+        else:
+            cam_target_vx = Nav_Push_Execute_Forward_Speed
+            cam_target_vy = 0.0
         yaw_ref_deg = push_yaw_target
         if line_crossed:
             push_line_seen_once = True
@@ -1280,8 +1290,16 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
 
     if nav_state == NAV_STATE_PUSH_BACK:
         nav_ready_for_push = False
-        cam_target_vx = -Nav_Push_Back_Speed
-        cam_target_vy = 0.0
+        if push_dir_code == Push_Dir_Up:
+            cam_target_vx = (
+                -Nav_Push_Back_Speed * Nav_Ball_Field_Vx_Scale
+            )
+            cam_target_vy = (
+                -Nav_Push_Back_Speed * Nav_Ball_Field_Vy_Scale
+            )
+        else:
+            cam_target_vx = -Nav_Push_Back_Speed
+            cam_target_vy = 0.0
         yaw_ref_deg = push_yaw_target
         if final_return_mode == 2 and line_crossed:
             nav_set_state(NAV_STATE_RETURN_BACK)

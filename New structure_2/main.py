@@ -771,7 +771,7 @@ def solve_follow_pose_twist(
                 Follow_Feedforward_Lateral_Limit,
                 ff_scale,
             )
-            wz = add_feedforward_direct(
+            wz = add_feedforward_assist(
                 wz,
                 ff_wz,
                 Follow_Normal_Wz_Feedforward_Gain,

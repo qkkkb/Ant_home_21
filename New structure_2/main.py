@@ -1364,6 +1364,16 @@ def update_follow_targets(gyro_z):
             )
         )
     )
+    if (
+        not normal_brake_active
+        and seen
+        and fresh_motion
+        and not master_flags
+        and follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT
+        and -0.001 < turn_rate_cmd < 0.001
+        and (gyro_z >= 10.0 or gyro_z <= -10.0)
+    ):
+        normal_brake_active = True
     if normal_brake_active:
         debug_event_mask |= 4194304
     if -0.001 < turn_rate_cmd < 0.001:
@@ -1588,6 +1598,12 @@ def follow_start_pwm_for_target(target, stall_boost):
         return 0
     if stall_boost and target_abs >= FOLLOW_STALL_BOOST_TARGET:
         return FOLLOW_STALL_BOOST_PWM
+    if (
+        follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT
+        and -0.001 < cam_target_vx < 0.001
+        and -0.001 < cam_target_vy < 0.001
+    ):
+        return 2600
     if target_abs < FOLLOW_START_PWM_MID_TARGET:
         return FOLLOW_START_PWM_MID
     return FOLLOW_START_PWM

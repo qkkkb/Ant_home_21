@@ -185,6 +185,9 @@ Follow_Orbit_Mode_FfWz_Off = 7.0
 Follow_Orbit_Mode_Exit_Ms = 40
 Follow_Orbit_Mode_FfWz_Filter = 0.22
 Follow_Normal_Wz_Feedforward_Limit = 15.0
+Follow_Relock_Min_Ms = 180
+Follow_Relock_Max_Ms = 900
+Follow_Relock_Gyro_Threshold = 4.0
 Follow_Spin_Mode_FfWz_On = 32.0
 Follow_Spin_Latch_Min_Wz = 26.0
 Follow_Spin_Command_Hold_Ms = 900
@@ -248,13 +251,15 @@ filtered_ff_wz = 0.0
 spin_latched_wz = 0.0
 spin_latch_until_ms = 0
 last_follow_mode_key = -1
+follow_relock_active = False
+follow_relock_since_ms = 0
 master_edge_until_ms = 0
 master_zero_since_ms = 0
 last_hard_stop = False
 last_stall_count = 0
 last_stall_boost = False
 follow_output_limit = FOLLOW_RUN_PWM_LIMIT
-# Bits 0-2: wheel target idle; 3-5: reserved; 6: mode reset;
+# Bits 0-2: wheel target idle; bit 5: relock active; bit 6: mode reset;
 # 7: explicit camera loss; 8: camera timeout edge; 9: push-settle orbit FF gate;
 # 10-12: final PWM saturation; 13: pose limiter; 14: gyro limit.
 debug_event_mask = 0
@@ -413,7 +418,7 @@ def clear_cam_target_state():
     global last_angle_priority_active
     global orbit_follow_active, orbit_follow_exit_since_ms, filtered_ff_wz
     global spin_latched_wz, spin_latch_until_ms
-    global last_follow_mode_key
+    global last_follow_mode_key, follow_relock_active, follow_relock_since_ms
     global master_edge_until_ms, master_zero_since_ms
 
     cam_error_x = 0
@@ -430,6 +435,8 @@ def clear_cam_target_state():
     spin_latched_wz = 0.0
     spin_latch_until_ms = 0
     last_follow_mode_key = -1
+    follow_relock_active = False
+    follow_relock_since_ms = 0
     master_edge_until_ms = 0
     master_zero_since_ms = 0
     cam_has_target = False
@@ -500,6 +507,11 @@ def update_orbit_follow_mode(
 ):
     global orbit_follow_active, orbit_follow_exit_since_ms
 
+    if follow_relock_active:
+        orbit_follow_active = False
+        orbit_follow_exit_since_ms = 0
+        return False
+
     if explicit_spin:
         orbit_follow_active = False
         orbit_follow_exit_since_ms = 0
@@ -555,6 +567,77 @@ def update_orbit_follow_mode(
     else:
         orbit_follow_exit_since_ms = 0
     return orbit_follow_active
+
+
+def update_follow_relock_state(
+    now,
+    previous_mode,
+    ff_wz,
+    gyro_z,
+    fresh_motion,
+    explicit_orbit,
+    explicit_push,
+    explicit_spin,
+):
+    global follow_relock_active, follow_relock_since_ms
+    global last_cmd_vx, last_cmd_vy, last_cmd_wz, last_ap_vz_cmd
+    global last_angle_priority_active, master_edge_until_ms
+    global orbit_follow_active, orbit_follow_exit_since_ms
+    global debug_event_mask
+
+    priority_requested = explicit_orbit or explicit_push or explicit_spin
+    if priority_requested:
+        follow_relock_active = False
+        follow_relock_since_ms = 0
+        return False
+
+    if not follow_relock_active:
+        leaving_priority_mode = previous_mode > 0 and (
+            -Follow_Orbit_Mode_FfWz_Off <= ff_wz <= Follow_Orbit_Mode_FfWz_Off
+        )
+        if leaving_priority_mode:
+            follow_relock_active = True
+            follow_relock_since_ms = now
+            orbit_follow_active = False
+            orbit_follow_exit_since_ms = 0
+            last_cmd_vx = 0.0
+            last_cmd_vy = 0.0
+            last_cmd_wz = 0.0
+            last_ap_vz_cmd = 0.0
+            last_angle_priority_active = False
+            master_edge_until_ms = 0
+            reset_turn_loop_state()
+
+    if not follow_relock_active:
+        return False
+
+    # A new explicit/strong rotation command takes ownership immediately.
+    if ff_wz >= Follow_Orbit_Mode_FfWz_On or ff_wz <= -Follow_Orbit_Mode_FfWz_On:
+        follow_relock_active = False
+        follow_relock_since_ms = 0
+        return False
+
+    debug_event_mask |= 32
+    elapsed = utime.ticks_diff(now, follow_relock_since_ms)
+    stable_motion = (
+        (not fresh_motion)
+        or (-Follow_Orbit_Mode_FfWz_Off <= ff_wz <= Follow_Orbit_Mode_FfWz_Off)
+    )
+    if (
+        elapsed >= Follow_Relock_Min_Ms
+        and stable_motion
+        and -Follow_Relock_Gyro_Threshold < gyro_z < Follow_Relock_Gyro_Threshold
+    ) or elapsed >= Follow_Relock_Max_Ms:
+        follow_relock_active = False
+        follow_relock_since_ms = 0
+        orbit_follow_active = False
+        orbit_follow_exit_since_ms = 0
+        last_cmd_vx = 0.0
+        last_cmd_vy = 0.0
+        last_cmd_wz = 0.0
+        last_ap_vz_cmd = 0.0
+        return False
+    return True
 
 
 def follow_limit(base_limit, master_value):
@@ -1061,6 +1144,7 @@ def update_follow_targets(gyro_z):
     global follow_output_limit
     global last_angle_priority_active
     global last_follow_mode_key, _orbit
+    global follow_relock_active
     global master_edge_until_ms, master_zero_since_ms
     global debug_event_mask
 
@@ -1094,6 +1178,16 @@ def update_follow_targets(gyro_z):
     explicit_orbit = fresh_motion and ((master_flags & MASTER_MOTION_FLAG_ORBIT) != 0)
     explicit_push = fresh_motion and ((master_flags & MASTER_MOTION_FLAG_PUSH) != 0)
     explicit_spin = fresh_motion and ((master_flags & MASTER_MOTION_FLAG_SPIN) != 0)
+    relock_active = update_follow_relock_state(
+        now,
+        last_follow_mode_key,
+        ff_wz,
+        gyro_z,
+        fresh_motion,
+        explicit_orbit,
+        explicit_push,
+        explicit_spin,
+    )
     spin_ff_wz = update_spin_feedforward_latch(
         now,
         fresh_motion,
@@ -1132,6 +1226,8 @@ def update_follow_targets(gyro_z):
             -Follow_Normal_Wz_Feedforward_Limit,
             Follow_Normal_Wz_Feedforward_Limit,
         )
+    if relock_active:
+        follow_ff_wz = 0.0
     push_follow_active = explicit_push and orbit_mode_active
     if push_follow_active and fresh_motion:
         debug_event_mask |= 512
@@ -1140,6 +1236,8 @@ def update_follow_targets(gyro_z):
     elif orbit_mode_active:
         mode_key = 1
     else:
+        mode_key = 0
+    if relock_active:
         mode_key = 0
     _orbit = mode_key == 1
     follow_output_limit = FOLLOW_RUN_PWM_LIMIT
@@ -1191,11 +1289,14 @@ def update_follow_targets(gyro_z):
         and last_cmd_wz * follow_ff_wz < 0.0
     ):
         reset_turn_loop_state()
-    angle_pose_mode_active = angle_pose_mode_needed(
-        cam_error_angle,
-        orbit_mode_active,
-        spin_mode_active,
-    ) if seen else (orbit_mode_active or spin_mode_active)
+    if relock_active:
+        angle_pose_mode_active = False
+    else:
+        angle_pose_mode_active = angle_pose_mode_needed(
+            cam_error_angle,
+            orbit_mode_active,
+            spin_mode_active,
+        ) if seen else (orbit_mode_active or spin_mode_active)
     body_vx = 0.0
     body_vy = 0.0
     turn_rate_cmd = 0.0
@@ -1204,7 +1305,15 @@ def update_follow_targets(gyro_z):
     position_priority_active = False
     prev_angle_priority_active = last_angle_priority_active
 
-    if seen:
+    if relock_active:
+        target_lost_since_ms = 0
+        vx = 0.0
+        vy = 0.0
+        turn_rate_cmd = 0.0
+        body_vx = 0.0
+        body_vy = 0.0
+        last_angle_priority_active = False
+    elif seen:
         target_lost_since_ms = 0
         use_motion_feedforward = fresh_motion and (not push_follow_active)
         (
@@ -1345,7 +1454,11 @@ def update_follow_targets(gyro_z):
             or gyro_z <= -Follow_Orbit_Brake_Gyro_Threshold
         )
     )
-    normal_brake_active = (
+    relock_brake_active = (
+        relock_active
+        and abs(gyro_z) >= Follow_Relock_Gyro_Threshold
+    )
+    normal_brake_active = relock_brake_active or (
         (not orbit_mode_active)
         and (not spin_mode_active)
         and abs(gyro_z) >= 40.0
@@ -1529,7 +1642,7 @@ def reset_speed_outputs(keep_orbit_state=False):
     global last_angle_priority_active
     global orbit_follow_active, orbit_follow_exit_since_ms, filtered_ff_wz
     global spin_latched_wz, spin_latch_until_ms
-    global last_follow_mode_key
+    global last_follow_mode_key, follow_relock_active, follow_relock_since_ms
     global master_edge_until_ms, master_zero_since_ms
 
     speed_reset(pid_fl)
@@ -1550,6 +1663,8 @@ def reset_speed_outputs(keep_orbit_state=False):
         orbit_follow_exit_since_ms = 0
         filtered_ff_wz = 0.0
         last_follow_mode_key = -1
+        follow_relock_active = False
+        follow_relock_since_ms = 0
     spin_latched_wz = 0.0
     spin_latch_until_ms = 0
     master_edge_until_ms = 0

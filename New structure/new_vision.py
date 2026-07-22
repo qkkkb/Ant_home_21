@@ -81,6 +81,9 @@ LINE_MIN_BOTTOM = int(WORK_H * 0.70)
 LINE_SIDE_MIN_WIDTH = int(WORK_W * 0.16)
 LINE_SIDE_MIN_ASPECT = 1.5
 LINE_SIDE_MIN_FILL = 0.35
+LINE_BALL_SLANT_MIN_WIDTH = int(WORK_W * 0.10)
+LINE_BALL_SLANT_MIN_FILL = 0.12
+LINE_BALL_SLANT_MIN_ELONGATION = 0.55
 LINE_CENTER_MASK_W = int(WORK_W * 0.42)
 LINE_CONFIRM_FRAMES = 2
 
@@ -320,7 +323,7 @@ def classify_target(img, target):
     return None, best_label, best_score
 
 
-def detect_yellow_line(img):
+def detect_yellow_line(img, allow_ball_slant = False):
     roi_h = img.height() - LINE_ROI_Y
     if roi_h <= 0:
         return False, None
@@ -343,11 +346,22 @@ def detect_yellow_line(img):
             h = blob.h()
             aspect = float(w) / max(h, 1)
             fill = float(blob.pixels()) / max(w * h, 1)
-            if (
+            shape_ok = (
                 w >= LINE_SIDE_MIN_WIDTH
-                and (blob.y() + h) >= LINE_MIN_BOTTOM
                 and aspect >= LINE_SIDE_MIN_ASPECT
                 and fill >= LINE_SIDE_MIN_FILL
+            )
+            if (
+                (not shape_ok)
+                and allow_ball_slant
+                and w >= LINE_BALL_SLANT_MIN_WIDTH
+                and fill >= LINE_BALL_SLANT_MIN_FILL
+                and blob.elongation() >= LINE_BALL_SLANT_MIN_ELONGATION
+            ):
+                shape_ok = True
+            if (
+                shape_ok
+                and (blob.y() + h) >= LINE_MIN_BOTTOM
             ):
                 if (best_blob is None) or (blob.pixels() > best_blob.pixels()):
                     best_blob = blob
@@ -423,12 +437,13 @@ uart_rx_buf = bytearray()
 frame_count = 0
 classify_sent = False
 line_confirm_count = 0
+line_ball_slant_enabled = False
 
 
 def set_detect_mode(new_mode, event, clear_state = True):
     global detect_mode, frozen_error, frozen_overlay, ema_bev_x, ema_bev_y
     global coarse_frame_in_interval, freeze_count, coarse_frame_count, classify_sent
-    global line_confirm_count
+    global line_confirm_count, line_ball_slant_enabled
 
     detect_mode = new_mode
     if clear_state:
@@ -442,6 +457,8 @@ def set_detect_mode(new_mode, event, clear_state = True):
         coarse_frame_count = 0
         classify_sent = False
         line_confirm_count = 0
+    if new_mode in ("SEARCH", "COARSE", "CLASSIFY"):
+        line_ball_slant_enabled = False
     print_state_log("UART", event, coarse_frame_count, freeze_count)
 
 
@@ -496,13 +513,14 @@ while True:
                     )
                 else:
                     send_classify_dir(dir_code)
+                    line_ball_slant_enabled = dir_code == CLASSIFY_DIR_UP
                     classify_sent = True
                     print_state_log(
                         "CLASSIFY", classify_dir_name(dir_code), coarse_frame_count, freeze_count,
                         score = class_score, label = class_label, verbose = True
                     )
     elif detect_mode == "LINE":
-        line_crossed, line_rect = detect_yellow_line(img)
+        line_crossed, line_rect = detect_yellow_line(img, line_ball_slant_enabled)
         if line_crossed:
             if line_confirm_count < LINE_CONFIRM_FRAMES:
                 line_confirm_count += 1

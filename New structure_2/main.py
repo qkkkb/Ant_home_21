@@ -39,7 +39,7 @@ GYRO_SIGN = 1.0
 GYRO_OFFSET_Z = 0.0
 GYRO_SCALE = -1.0
 GYRO_DEADBAND_DPS = 0.8
-GYRO_KP = 0.10
+GYRO_KP = 0.16
 GYRO_KI = 0.0005
 GYRO_PRIORITY_KP = 0.46
 GYRO_PRIORITY_KI = 0.0
@@ -939,7 +939,7 @@ def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z, spin_priority=False):
     gain = GYRO_PRIORITY_KP
     min_output = GYRO_PRIORITY_MIN_OUTPUT
     if not spin_priority and last_follow_mode_key != 1:
-        gain = GYRO_PRIORITY_BRAKE_KP
+        gain = GYRO_KP
         min_output = 0.8
     out = clamp(err * gain, -limit, limit)
     if (

@@ -85,6 +85,7 @@ LINE_BALL_SLANT_MIN_WIDTH = int(WORK_W * 0.12)
 LINE_BALL_SLANT_MIN_FILL = 0.18
 LINE_BALL_SLANT_MIN_ELONGATION = 0.68
 LINE_BALL_SLANT_MIN_BOTTOM = (WORK_H * 78 + 99) // 100
+LINE_BALL_EDGE_MARGIN = 2
 LINE_CENTER_MASK_W = int(WORK_W * 0.42)
 LINE_CONFIRM_FRAMES = 2
 LINE_BALL_CONFIRM_FRAMES = 2
@@ -349,24 +350,29 @@ def detect_yellow_line(img, allow_ball_slant = False):
             bottom = blob.y() + h
             aspect = float(w) / max(h, 1)
             fill = float(blob.pixels()) / max(w * h, 1)
-            shape_ok = (
+            normal_shape_ok = (
                 w >= LINE_SIDE_MIN_WIDTH
                 and aspect >= LINE_SIDE_MIN_ASPECT
                 and fill >= LINE_SIDE_MIN_FILL
             )
-            if (
-                (not shape_ok)
-                and allow_ball_slant
-                and w >= LINE_BALL_SLANT_MIN_WIDTH
-                and fill >= LINE_BALL_SLANT_MIN_FILL
-                and blob.elongation() >= LINE_BALL_SLANT_MIN_ELONGATION
-                and bottom >= LINE_BALL_SLANT_MIN_BOTTOM
-            ):
-                shape_ok = True
-            if (
-                shape_ok
-                and bottom >= LINE_MIN_BOTTOM
-            ):
+            if allow_ball_slant:
+                if roi_x == 0:
+                    outer_edge_ok = blob.x() <= LINE_BALL_EDGE_MARGIN
+                else:
+                    outer_edge_ok = (blob.x() + w) >= (img.width() - LINE_BALL_EDGE_MARGIN)
+                slant_shape_ok = (
+                    w >= LINE_BALL_SLANT_MIN_WIDTH
+                    and fill >= LINE_BALL_SLANT_MIN_FILL
+                    and blob.elongation() >= LINE_BALL_SLANT_MIN_ELONGATION
+                )
+                shape_ok = (
+                    outer_edge_ok
+                    and bottom >= LINE_BALL_SLANT_MIN_BOTTOM
+                    and (normal_shape_ok or slant_shape_ok)
+                )
+            else:
+                shape_ok = normal_shape_ok and bottom >= LINE_MIN_BOTTOM
+            if shape_ok:
                 if (best_blob is None) or (blob.pixels() > best_blob.pixels()):
                     best_blob = blob
 

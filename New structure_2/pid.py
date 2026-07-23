@@ -49,7 +49,7 @@ def encoder_window(pid, sample):
     pid.enc_samples[index] = sample
     pid.enc_sum = total
     pid.enc_index = (index + 1) & 3
-    return total * 0.25
+    return total * 0.5
 
 
 def speed_ctrl(pid, actual_speed, tar_spd):

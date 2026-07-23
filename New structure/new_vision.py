@@ -84,10 +84,10 @@ LINE_SIDE_MIN_FILL = 0.35
 LINE_BALL_SLANT_MIN_WIDTH = int(WORK_W * 0.12)
 LINE_BALL_SLANT_MIN_FILL = 0.18
 LINE_BALL_SLANT_MIN_ELONGATION = 0.68
-LINE_BALL_SLANT_MIN_CY = (WORK_H * 76 + 99) // 100
+LINE_BALL_SLANT_MIN_BOTTOM = (WORK_H * 78 + 99) // 100
 LINE_CENTER_MASK_W = int(WORK_W * 0.42)
 LINE_CONFIRM_FRAMES = 2
-LINE_BALL_CONFIRM_FRAMES = 3
+LINE_BALL_CONFIRM_FRAMES = 2
 
 
 # ================= Inverse Perspective =================
@@ -346,6 +346,7 @@ def detect_yellow_line(img, allow_ball_slant = False):
         ):
             w = blob.w()
             h = blob.h()
+            bottom = blob.y() + h
             aspect = float(w) / max(h, 1)
             fill = float(blob.pixels()) / max(w * h, 1)
             shape_ok = (
@@ -359,12 +360,12 @@ def detect_yellow_line(img, allow_ball_slant = False):
                 and w >= LINE_BALL_SLANT_MIN_WIDTH
                 and fill >= LINE_BALL_SLANT_MIN_FILL
                 and blob.elongation() >= LINE_BALL_SLANT_MIN_ELONGATION
-                and blob.cy() >= LINE_BALL_SLANT_MIN_CY
+                and bottom >= LINE_BALL_SLANT_MIN_BOTTOM
             ):
                 shape_ok = True
             if (
                 shape_ok
-                and (blob.y() + h) >= LINE_MIN_BOTTOM
+                and bottom >= LINE_MIN_BOTTOM
             ):
                 if (best_blob is None) or (blob.pixels() > best_blob.pixels()):
                     best_blob = blob

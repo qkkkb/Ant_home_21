@@ -44,7 +44,7 @@ GYRO_KI = 0.0005
 GYRO_PRIORITY_KP = 0.46
 GYRO_PRIORITY_KI = 0.0
 GYRO_OUTPUT_LIMIT = 14.0
-GYRO_OUTPUT_BASE_LIMIT = 2.6
+GYRO_OUTPUT_BASE_LIMIT = 4.5
 GYRO_OUTPUT_TARGET_GAIN = 2.2
 GYRO_OUTPUT_MAX_LIMIT = 22.0
 GYRO_PRIORITY_OUTPUT_BASE_LIMIT = 6.5
@@ -56,8 +56,6 @@ GYRO_PRIORITY_MIN_CMD = 6.5
 GYRO_PRIORITY_OVERSPEED_RATIO = 2.25
 GYRO_PRIORITY_BRAKE_KP = 0.16
 GYRO_PRIORITY_BRAKE_LIMIT = 8.0
-GYRO_NORMAL_POSE_KP = 0.18
-GYRO_NORMAL_POSE_OUTPUT_LIMIT = 4.5
 GYRO_SPIN_PRIORITY_OUTPUT_BASE_LIMIT = 10.0
 GYRO_SPIN_PRIORITY_OUTPUT_TARGET_GAIN = 0.45
 GYRO_SPIN_PRIORITY_OUTPUT_MAX_LIMIT = 58.0
@@ -941,7 +939,7 @@ def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z, spin_priority=False):
     gain = GYRO_PRIORITY_KP
     min_output = GYRO_PRIORITY_MIN_OUTPUT
     if not spin_priority and last_follow_mode_key != 1:
-        gain = GYRO_NORMAL_POSE_KP if last_angle_priority_active else GYRO_KP
+        gain = GYRO_PRIORITY_BRAKE_KP
         min_output = 0.8
     out = clamp(err * gain, -limit, limit)
     if (
@@ -1435,20 +1433,15 @@ def update_follow_targets(gyro_z):
         vz_cmd = turn_rate_cmd
 
     if mode_key == 0:
-        normal_gyro_output_limit = (
-            GYRO_NORMAL_POSE_OUTPUT_LIMIT
-            if angle_pose_mode_active
-            else GYRO_OUTPUT_BASE_LIMIT
-        )
         vz_cmd = clamp(
             vz_cmd,
-            -normal_gyro_output_limit,
-            normal_gyro_output_limit,
+            -GYRO_OUTPUT_BASE_LIMIT,
+            GYRO_OUTPUT_BASE_LIMIT,
         )
     if ENABLE_GYRO_LOOP and gyro_pid is not None:
         gyro_output_limit = gyro_pid.gyro_output_limit
-        if mode_key == 0 and normal_gyro_output_limit < gyro_output_limit:
-            gyro_output_limit = normal_gyro_output_limit
+        if mode_key == 0 and GYRO_OUTPUT_BASE_LIMIT < gyro_output_limit:
+            gyro_output_limit = GYRO_OUTPUT_BASE_LIMIT
         if gyro_output_limit > 0.0 and (
             vz_cmd >= gyro_output_limit - 0.001
             or vz_cmd <= -gyro_output_limit + 0.001

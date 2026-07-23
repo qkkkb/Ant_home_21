@@ -597,7 +597,12 @@ def calc_follow_angle(error_angle, orbit_mode=False, spin_mode=False):
         deadband = Follow_Pose_Angle_Deadband
         full_error = Follow_Pose_Angle_Active_Error
     else:
-        deadband = Follow_Normal_Pose_Angle_Deadband
+        deadband = (
+            10
+            if follow_output_limit < FOLLOW_RUN_PWM_LIMIT
+            and -0.001 < last_turn_rate_cmd < 0.001
+            else Follow_Normal_Pose_Angle_Deadband
+        )
         full_error = Follow_Normal_Pose_Angle_Active_Error
     error_angle = soft_deadband(error_angle, deadband, full_error)
     if error_angle == 0.0:

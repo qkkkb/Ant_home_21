@@ -938,7 +938,7 @@ def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z, spin_priority=False):
 
     gain = GYRO_PRIORITY_KP
     min_output = GYRO_PRIORITY_MIN_OUTPUT
-    if not spin_priority and last_follow_mode_key != 1:
+    if not spin_priority and (last_follow_mode_key != 1 or master_flags & MASTER_MOTION_FLAG_PUSH):
         gain = GYRO_KP
         min_output = 0.8
     out = clamp(err * gain, -limit, limit)
@@ -1129,8 +1129,6 @@ def update_follow_targets(gyro_z):
             Follow_Normal_Wz_Feedforward_Limit,
         )
     push_follow_active = explicit_push and orbit_mode_active
-    if push_follow_active:
-        debug_event_mask |= 512
     mode_key = 3 if spin_mode_active else (1 if orbit_mode_active else 0)
     _orbit = mode_key == 1
     if last_follow_mode_key != mode_key:

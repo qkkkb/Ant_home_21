@@ -1101,12 +1101,10 @@ def update_follow_targets(gyro_z):
         cam_error_angle,
     )
     spin_mode_active = (
-        fresh_motion
+        explicit_spin
         and (not explicit_orbit)
         and (not explicit_push)
-        and abs(spin_ff_wz) >= (
-            Follow_Spin_Latch_Min_Wz if explicit_spin else Follow_Spin_Mode_FfWz_On
-        )
+        and abs(spin_ff_wz) >= Follow_Spin_Latch_Min_Wz
     )
     filtered_wz = update_filtered_ff_wz(spin_ff_wz if spin_mode_active else ff_wz, fresh_motion)
     orbit_mode_active = update_orbit_follow_mode(
@@ -1135,17 +1133,12 @@ def update_follow_targets(gyro_z):
         debug_event_mask |= 512
     mode_key = 3 if spin_mode_active else (1 if orbit_mode_active else 0)
     _orbit = mode_key == 1
-    follow_output_limit = FOLLOW_RUN_PWM_LIMIT
-    if (
-        mode_key == 0
-        and -Follow_Master_Edge_Delta < ff_vx < Follow_Master_Edge_Delta
-        and -Follow_Master_Edge_Delta < ff_vy < Follow_Master_Edge_Delta
-        and -Follow_Master_Edge_Delta < follow_ff_wz < Follow_Master_Edge_Delta
-    ):
-        follow_output_limit = FOLLOW_STATIC_LOCK_PWM_LIMIT
     if last_follow_mode_key != mode_key:
         debug_event_mask |= 64
-        if last_follow_mode_key < 0:
+        if last_follow_mode_key > 0 and mode_key == 0:
+            reset_speed_outputs()
+            follow_ff_wz = 0.0
+        elif last_follow_mode_key < 0:
             speed_reset(pid_fl)
             speed_reset(pid_fr)
             speed_reset(pid_b)
@@ -1163,11 +1156,19 @@ def update_follow_targets(gyro_z):
                 gyro_pid.output = 0.0
                 gyro_pid.err = 0.0
                 gyro_pid.err_last = 0.0
+    follow_output_limit = FOLLOW_RUN_PWM_LIMIT
+    if (
+        mode_key == 0
+        and -Follow_Master_Edge_Delta < ff_vx < Follow_Master_Edge_Delta
+        and -Follow_Master_Edge_Delta < ff_vy < Follow_Master_Edge_Delta
+        and -Follow_Master_Edge_Delta < follow_ff_wz < Follow_Master_Edge_Delta
+    ):
+        follow_output_limit = FOLLOW_STATIC_LOCK_PWM_LIMIT
     if (
         (mode_key != 0 and (not push_follow_active))
         or (not seen)
         or (not fresh_motion)
-        or (last_follow_mode_key > 0 and mode_key == 0)
+        or (last_follow_mode_key != mode_key and mode_key == 0)
     ):
         master_edge_until_ms = 0
     elif (

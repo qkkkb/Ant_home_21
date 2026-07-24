@@ -125,10 +125,10 @@ Nav_Push_Orbit_Skip_Yaw = 15.0
 Nav_Push_Orbit_Opposite_Yaw = 165.0
 Nav_Push_Orient_Max_Ms = 15000
 Nav_Push_Orbit_Slow_Yaw = 40.0
-Nav_Push_Orbit_Fast_Vy = 4.2
-Nav_Push_Orbit_Slow_Vy = 3.4
+Nav_Push_Orbit_Fast_Vy = 3.4
+Nav_Push_Orbit_Slow_Vy = 2.6
 Nav_Push_Orbit_Fast_Rate = 62.5
-Nav_Push_Orbit_Slow_Rate = 50.6
+Nav_Push_Orbit_Slow_Rate = 32.5
 Nav_Push_Orbit_Gyro_Limit = 10.0
 Nav_Push_Orbit_Radius_Base = 2.0   #orbit 基础半径系数，实际轨迹半径=该系数 * 车轮轴距；如果轨迹过大或过小可以调整该值
 Nav_Push_Orbit_Radius_Gain = 0.010

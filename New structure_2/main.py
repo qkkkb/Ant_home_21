@@ -938,7 +938,7 @@ def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z, spin_priority=False):
 
     gain = GYRO_PRIORITY_KP
     min_output = GYRO_PRIORITY_MIN_OUTPUT
-    if not spin_priority and (last_follow_mode_key != 1 or master_flags & MASTER_MOTION_FLAG_PUSH):
+    if not spin_priority and last_follow_mode_key != 1:
         gain = GYRO_KP
         min_output = 0.8
     out = clamp(err * gain, -limit, limit)
@@ -1430,21 +1430,16 @@ def update_follow_targets(gyro_z):
         last_ap_vz_cmd = 0.0
         vz_cmd = turn_rate_cmd
 
-    if mode_key == 0:
+    if mode_key == 0 or (
+        push_follow_active
+        and abs(cam_error_angle) < Follow_Angle_XY_Mode_On_Error
+        and abs(follow_ff_wz) < Follow_Angle_XY_Mode_On_Error
+    ):
         vz_cmd = clamp(
             vz_cmd,
             -GYRO_OUTPUT_BASE_LIMIT,
             GYRO_OUTPUT_BASE_LIMIT,
         )
-    if ENABLE_GYRO_LOOP and gyro_pid is not None:
-        gyro_output_limit = gyro_pid.gyro_output_limit
-        if mode_key == 0 and GYRO_OUTPUT_BASE_LIMIT < gyro_output_limit:
-            gyro_output_limit = GYRO_OUTPUT_BASE_LIMIT
-        if gyro_output_limit > 0.0 and (
-            vz_cmd >= gyro_output_limit - 0.001
-            or vz_cmd <= -gyro_output_limit + 0.001
-        ):
-            debug_event_mask |= 16384
     if normal_brake_active and (not priority_turn_mode):
         normal_brake_reserve = Follow_Normal_Brake_Wheel_Reserve
         if master_flags and abs(gyro_z) >= 40.0 and (

@@ -172,6 +172,9 @@ Nav_Push_Turn_Ok_Yaw = 6.0
 Nav_Push_Turn_Recover_Yaw = 12.0
 Nav_Push_Turn_Ok_Ms = 150
 Nav_Push_Turn_Forced_Dir = 1
+Nav_Push_Turn_Force_Window_Yaw = 170.0  # 接近180度时保留指定首转方向
+Nav_Push_Turn_Correct_Rate = 12.0       # 越过目标后仅做低速最短路修正
+Nav_Push_Turn_Max_Ms = 6000             # 推后回转超时直接停车
 Nav_Post_Turn_No_Target_Ms = 100
 Nav_Post_Turn_Forward_Ms = 1500
 Nav_Post_Turn_Forward_Speed = 6.5
@@ -221,6 +224,7 @@ nav_push_prepare_ok_since_ms = 0
 nav_push_prepare_back_since_ms = 0
 nav_push_turn_ok_since_ms = 0
 push_turn_settle = False
+push_turn_reached_once = False
 nav_ready_for_push = False
 field_up_yaw = 0.0
 field_right_yaw = 90.0
@@ -323,14 +327,6 @@ def push_yaw_error_deg(yaw_deg):
     return -wrapped_yaw_error(push_yaw_target, yaw_deg)
 
 
-def yaw_delta_in_turn_dir(target_yaw, now_yaw, turn_dir):
-    if turn_dir > 0:
-        return normalize_yaw_deg(target_yaw - now_yaw)
-    if turn_dir < 0:
-        return normalize_yaw_deg(now_yaw - target_yaw)
-    return abs(-wrapped_yaw_error(target_yaw, now_yaw))
-
-
 def reset_gyro_pid_state():
     pid = gyro_pid
     if pid is not None:
@@ -398,6 +394,27 @@ def get_push_turn_rate(yaw_err_abs):
     span = Nav_Push_Turn_Slow_Yaw - Nav_Push_Turn_Ok_Yaw
     ratio = (yaw_err_abs - Nav_Push_Turn_Ok_Yaw) / span
     return Nav_Push_Turn_Slow_Rate + (Nav_Push_Turn_Fast_Rate - Nav_Push_Turn_Slow_Rate) * ratio
+
+
+def get_turn_rate_command(target_yaw, now_yaw, preferred_dir, correction_mode):
+    yaw_err = -wrapped_yaw_error(target_yaw, now_yaw)
+    yaw_err_abs = abs(yaw_err)
+    if yaw_err_abs <= Nav_Push_Turn_Ok_Yaw:
+        return 0.0
+
+    # 180度附近的最短路符号容易受微小误差影响，首次转向仍使用指定方向。
+    if (not correction_mode) and yaw_err_abs >= Nav_Push_Turn_Force_Window_Yaw:
+        turn_dir = 1 if preferred_dir > 0 else -1
+    elif yaw_err > 0.0:
+        turn_dir = 1
+    else:
+        turn_dir = -1
+
+    turn_rate_mag = get_push_turn_rate(yaw_err_abs)
+    # 已经过目标后只按最短路低速回修，避免再次执行接近一整圈的转动。
+    if correction_mode and turn_rate_mag > Nav_Push_Turn_Correct_Rate:
+        turn_rate_mag = Nav_Push_Turn_Correct_Rate
+    return turn_dir * turn_rate_mag
 
 
 def update_push_orbit_radius(err_y):
@@ -509,7 +526,8 @@ def nav_set_state(new_state, reason="", force=False):
     global nav_fine_brake_since_ms, nav_fine_brake_vy, nav_fine_forward_brake_since_ms
     global nav_fine_forward_brake_armed
     global nav_push_prepare_ok_since_ms, nav_push_prepare_back_since_ms, nav_push_turn_ok_since_ms
-    global push_turn_settle, nav_ready_for_push, cam_target_vx, cam_target_vy
+    global push_turn_settle, push_turn_reached_once
+    global nav_ready_for_push, cam_target_vx, cam_target_vy
     global yaw_ref_deg, cam_rx_started, push_dir_code, push_dir_name
     global line_crossed, push_line_seen_once, push_line_lost_since_ms, push_line_extra_since_ms
     global push_return_yaw_target, search_turn_yaw_target
@@ -538,6 +556,7 @@ def nav_set_state(new_state, reason="", force=False):
     nav_push_prepare_back_since_ms = 0
     nav_push_turn_ok_since_ms = 0
     push_turn_settle = False
+    push_turn_reached_once = False
     nav_transition_ms = now
     nav_ready_for_push = False
     cam_target_vx = 0.0
@@ -696,6 +715,7 @@ def apply_nav_targets(vx, vy, vx_limit, vy_limit):
 
 def update_return_home(now, yaw_deg, low_speed, gyro_z):
     global nav_push_turn_ok_since_ms, nav_ready_for_push, push_turn_settle
+    global push_turn_reached_once
     global cam_target_vx, cam_target_vy, yaw_ref_deg
     global push_line_seen_once, push_line_lost_since_ms, push_line_extra_since_ms
 
@@ -732,6 +752,7 @@ def update_return_home(now, yaw_deg, low_speed, gyro_z):
             if not push_turn_settle:
                 reset_gyro_pid_state()
             push_turn_settle = True
+            push_turn_reached_once = True
         elif push_turn_settle and yaw_err_abs > Nav_Push_Turn_Recover_Yaw:
             push_turn_settle = False
             nav_push_turn_ok_since_ms = 0
@@ -782,7 +803,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
     global nav_fine_forward_brake_armed
     global nav_push_prepare_ok_since_ms, nav_push_prepare_back_since_ms, nav_push_turn_ok_since_ms
     global nav_ready_for_push
-    global push_turn_settle
+    global push_turn_settle, push_turn_reached_once
     global cam_target_vx, cam_target_vy, yaw_ref_deg, push_yaw_target
     global line_crossed, push_line_seen_once, push_line_lost_since_ms, push_line_extra_since_ms
     global push_return_yaw_target, push_face_obj_yaw
@@ -1318,6 +1339,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             if not push_turn_settle:
                 reset_gyro_pid_state()
             push_turn_settle = True
+            push_turn_reached_once = True
         elif push_turn_settle and yaw_err_abs > Nav_Push_Turn_Recover_Yaw:
             push_turn_settle = False
             nav_push_turn_ok_since_ms = 0
@@ -1332,6 +1354,8 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                     nav_set_state(NAV_STATE_POST_TURN_FORWARD, "push_finish_wait_target")
         else:
             nav_push_turn_ok_since_ms = 0
+        if utime.ticks_diff(now, nav_transition_ms) >= Nav_Push_Turn_Max_Ms:
+            nav_set_state(NAV_STATE_RETURN_DONE, "push_turn_timeout")
         return
 
     cam_target_vx = 0.0
@@ -1689,31 +1713,23 @@ def calc_speed_closed_loop():
             turn_dir = Nav_Push_Turn_Forced_Dir
             if final_return_mode == 1:
                 turn_dir = -1
-            push_turn_remaining = yaw_delta_in_turn_dir(
+            turn_rate_cmd = get_turn_rate_command(
                 push_return_yaw_target,
                 yaw_deg,
                 turn_dir,
+                push_turn_reached_once,
             )
-            push_turn_rate_mag = get_push_turn_rate(push_turn_remaining)
-            if push_turn_rate_mag > 0.0:
-                turn_rate_cmd = turn_dir * push_turn_rate_mag
-            else:
-                turn_rate_cmd = 0.0
         gyro_rate_mode = True
     elif nav_state == NAV_STATE_RETURN_TURN:
         if push_turn_settle:
             turn_rate_cmd = 0.0
         else:
-            return_turn_remaining = yaw_delta_in_turn_dir(
+            turn_rate_cmd = get_turn_rate_command(
                 field_up_yaw,
                 yaw_deg,
                 Nav_Return_Turn_Dir,
+                push_turn_reached_once,
             )
-            return_turn_rate_mag = get_push_turn_rate(return_turn_remaining)
-            if return_turn_rate_mag > 0.0:
-                turn_rate_cmd = Nav_Return_Turn_Dir * return_turn_rate_mag
-            else:
-                turn_rate_cmd = 0.0
         gyro_rate_mode = True
 
     if gyro_rate_mode:

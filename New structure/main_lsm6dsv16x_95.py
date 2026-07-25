@@ -1402,7 +1402,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             if pushed_object_count >= Nav_Object_Total:
                 nav_set_state(NAV_STATE_RETURN_LEFT)
             else:
-                nav_set_state(NAV_STATE_RETURN_DONE, "push_turn_timeout")
+                nav_set_state(NAV_STATE_POST_TURN_FORWARD)
         return
 
     cam_target_vx = 0.0

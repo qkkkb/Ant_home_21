@@ -605,6 +605,11 @@ while True:
                     dx_mm, dy_mm, error_x, error_y, send_x, send_y,
                 )
             else:
+                frozen_error = None
+                frozen_overlay = None
+                ema_bev_x = None
+                ema_bev_y = None
+                coarse_frame_in_interval = 0
                 print_state_log(mode_name, "MISS", coarse_frame_count,
                                 coarse_frame_in_interval, verbose=True)
 

@@ -1399,7 +1399,10 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         else:
             nav_push_turn_ok_since_ms = 0
         if utime.ticks_diff(now, nav_transition_ms) >= Nav_Push_Turn_Max_Ms:
-            nav_set_state(NAV_STATE_RETURN_DONE, "push_turn_timeout")
+            if pushed_object_count >= Nav_Object_Total:
+                nav_set_state(NAV_STATE_RETURN_LEFT)
+            else:
+                nav_set_state(NAV_STATE_RETURN_DONE, "push_turn_timeout")
         return
 
     cam_target_vx = 0.0

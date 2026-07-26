@@ -105,12 +105,12 @@ Follow_Distance_Far_Boost_Error = 6
 Follow_Distance_Far_Boost_Gain = 0.70
 Follow_Distance_Close_Gain = 0.70
 Follow_Distance_Close_Limit = 22.0
-Follow_Feedforward_Forward_Gain = 1.30
-Follow_Feedforward_Lateral_Gain = 1.30
+Follow_Feedforward_Forward_Gain = 1.18
+Follow_Feedforward_Lateral_Gain = 1.18
 Follow_Feedforward_Forward_Limit = 20.0
 Follow_Feedforward_Lateral_Limit = 18.0
-Follow_Push_Feedforward_Forward_Gain = 1.30
-Follow_Push_Feedforward_Lateral_Gain = 1.30
+Follow_Push_Feedforward_Forward_Gain = 1.18
+Follow_Push_Feedforward_Lateral_Gain = 1.18
 Follow_Push_Feedforward_Forward_Limit = 18.0
 Follow_Push_Feedforward_Lateral_Limit = 16.0
 Follow_Normal_Visual_Forward_Scale = 0.72
@@ -811,13 +811,11 @@ def max_wheel_abs(wheel_fr, wheel_fl, wheel_b):
 def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_turn=False):
     global debug_event_mask
 
-    limit = Follow_Pose_Wheel_Target_Limit
-    if last_follow_mode_key == 0 or master_flags & MASTER_MOTION_FLAG_PUSH:
-        limit = 28.0
-    if limit <= 0.0:
+    if Follow_Pose_Wheel_Target_Limit <= 0.0:
         return vx, vy, vz
 
     if preserve_turn:
+        limit = Follow_Pose_Wheel_Target_Limit
         if vz > limit:
             debug_event_mask |= 8192
             vz = limit
@@ -853,9 +851,9 @@ def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_
     if preserve_pose_ratio:
         wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, vz)
         target_max = max_wheel_abs(wheel_fr, wheel_fl, wheel_b)
-        if target_max > limit:
+        if target_max > Follow_Pose_Wheel_Target_Limit:
             debug_event_mask |= 8192
-            scale = limit / target_max
+            scale = Follow_Pose_Wheel_Target_Limit / target_max
             vx *= scale
             vy *= scale
             vz *= scale
@@ -863,9 +861,9 @@ def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_
 
     wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
     pos_max = max_wheel_abs(wheel_fr, wheel_fl, wheel_b)
-    if pos_max > limit:
+    if pos_max > Follow_Pose_Wheel_Target_Limit:
         debug_event_mask |= 8192
-        pos_scale = limit / pos_max
+        pos_scale = Follow_Pose_Wheel_Target_Limit / pos_max
         vx *= pos_scale
         vy *= pos_scale
         wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
@@ -876,11 +874,11 @@ def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_
         return vx, vy, 0.0
 
     if vz > 0.0:
-        remain = limit - wheel_fr
-        tmp = limit - wheel_fl
+        remain = Follow_Pose_Wheel_Target_Limit - wheel_fr
+        tmp = Follow_Pose_Wheel_Target_Limit - wheel_fl
         if tmp < remain:
             remain = tmp
-        tmp = limit - wheel_b
+        tmp = Follow_Pose_Wheel_Target_Limit - wheel_b
         if tmp < remain:
             remain = tmp
         if remain < 0.0:
@@ -889,11 +887,11 @@ def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_
             debug_event_mask |= 8192
             vz = remain
     else:
-        remain = limit + wheel_fr
-        tmp = limit + wheel_fl
+        remain = Follow_Pose_Wheel_Target_Limit + wheel_fr
+        tmp = Follow_Pose_Wheel_Target_Limit + wheel_fl
         if tmp < remain:
             remain = tmp
-        tmp = limit + wheel_b
+        tmp = Follow_Pose_Wheel_Target_Limit + wheel_b
         if tmp < remain:
             remain = tmp
         if remain < 0.0:

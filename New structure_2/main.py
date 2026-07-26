@@ -674,7 +674,7 @@ def solve_follow_pose_twist(
         or error_angle <= -active_error
     )
     # Local pose features around the calibrated nonparallel formation.
-    cam_vx = error_x + error_angle
+    cam_vx = error_x if spin_mode else error_x + error_angle
     cam_vy = error_y
     if cam_vx > 0.0:
         cam_vy -= cam_vx * 5 // 13

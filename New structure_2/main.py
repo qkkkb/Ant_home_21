@@ -169,7 +169,7 @@ Follow_Orbit_Command_Ramp_Vy = 14.0
 Follow_Command_Ramp_Wz = 11.0
 Follow_Orbit_Command_Ramp_Wz = 18.0
 Follow_Spin_Command_Ramp_Wz = 64.0
-Follow_Spin_Gyro_Output_Ramp = 8.0
+Follow_Spin_Gyro_Output_Ramp = 2.0
 Follow_Pose_Gyro_Output_Ramp = 2.0
 Follow_Normal_Target_Lost_Hold_Ms = 500
 Follow_Target_Lost_Hold_Ms = 250
@@ -930,6 +930,8 @@ def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z, spin_priority=False):
         or (turn_rate_cmd < 0.0 and gyro_z < 0.0)
     )
     if same_dir and gyro_abs > turn_abs * overspeed_ratio:
+        if spin_priority:
+            return 0.0
         brake_gain = GYRO_PRIORITY_BRAKE_KP
         if not spin_priority and last_follow_mode_key != 1:
             brake_gain = GYRO_KP

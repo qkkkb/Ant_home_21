@@ -45,7 +45,7 @@ SEND_NEUTRAL_WHEN_EMPTY = True
 DEBUG_DRAW_BOX = False
 PRINT_FPS = False
 PRINT_EVENT = False
-PRINT_VERBOSE = True
+PRINT_VERBOSE = False
 
 ERROR_OFFSET = 120
 ERROR_LIMIT = 240
@@ -90,6 +90,73 @@ LINE_CENTER_MASK_W = int(WORK_W * 0.42)
 LINE_CONFIRM_FRAMES = 2
 LINE_BALL_CONFIRM_FRAMES = 2
 
+# ================= Red brick filtering =================
+# Production path: no draw, no log. These thresholds are copied from the
+# validated debug script and only protect target selection from red-brick
+# false model hits.
+RED_THRESHOLDS = [(12, 100, 18, 127, -5, 127)]
+RED_ROI_X = 0
+RED_ROI_Y = int(WORK_H * 0.08)
+RED_ROI_W = WORK_W
+RED_ROI_H = WORK_H - RED_ROI_Y
+RED_MIN_PIXELS = 30
+RED_MIN_AREA = 40
+RED_MERGE_MARGIN = 3
+RED_BLOB_MAX_COUNT = 6
+RED_BLOB_MIN_W = 4
+RED_BLOB_MIN_H = 5
+RED_BLOB_MAX_W = int(WORK_W * 0.70)
+RED_BLOB_MAX_H = int(WORK_H * 0.70)
+RED_BLOB_MIN_FILL100 = 18
+RED_BRICK_ASPECT_MIN100 = 30
+RED_BRICK_ASPECT_MAX100 = 380
+RED_BRICK_MAX_AREA = int(WORK_W * WORK_H * 0.42)
+RED_MODEL_EDGE_MARGIN = 5
+RED_MODEL_SMALL_AREA = int(WORK_W * WORK_H * 0.045)
+RED_MODEL_MIN_RED_COVER100 = 25
+RED_BLOB_MIN_MODEL_COVER100 = 45
+COMPACT_TARGET_PROTECT_SCORE = 0.85
+COMPACT_TARGET_PROTECT_MIN_AREA = 120
+COMPACT_TARGET_PROTECT_MODEL_COVER100 = 60
+COMPACT_TARGET_PROTECT_BLOB_COVER100 = 70
+COMPACT_TARGET_PROTECT_ASPECT_MIN100 = 45
+COMPACT_TARGET_PROTECT_ASPECT_MAX100 = 220
+REDBAG_PROTECT_MIN_AREA = int(WORK_W * WORK_H * 0.060)
+REDBAG_PROTECT_ASPECT_MIN100 = 45
+REDBAG_PROTECT_ASPECT_MAX100 = 520
+REDBAG_PROTECT_RED_COVER100 = 18
+REDBAG_PROTECT_BLOB_COVER100 = 35
+RED_TARGET_OWNED_BLOB_COVER100 = 55
+RED_TARGET_OWNED_MODEL_COVER100 = 20
+RED_BRICK_CENTER_HALF_W = int(WORK_W * 0.16)
+RED_BRICK_SCORE_Y_WEIGHT = 2
+RED_BRICK_SCORE_PIXELS_WEIGHT = 1
+RED_BRICK_CONFIRM_FRAMES = 2
+RED_BRICK_NONE = 0
+RED_BRICK_LEFT = 1
+RED_BRICK_CENTER = 2
+RED_BRICK_RIGHT = 3
+
+RB_X1 = 0
+RB_Y1 = 1
+RB_X2 = 2
+RB_Y2 = 3
+RB_W = 4
+RB_H = 5
+RB_PIXELS = 6
+RB_AREA = 7
+RB_ASPECT100 = 8
+RB_FILL100 = 9
+RB_EDGE = 10
+RB_BRICKLIKE = 11
+
+M_X1 = 0
+M_Y1 = 1
+M_X2 = 2
+M_Y2 = 3
+M_LABEL = 4
+M_SCORE = 5
+
 
 # ================= Inverse Perspective =================
 # Replace this matrix with your calibration result.
@@ -125,6 +192,29 @@ def clamp(value, low, high):
     if value > high:
         return high
     return value
+
+
+def rect_area(x1, y1, x2, y2):
+    if x2 <= x1 or y2 <= y1:
+        return 0
+    return (x2 - x1) * (y2 - y1)
+
+
+def rect_intersection_area(a, b):
+    x1 = max(a[0], b[0])
+    y1 = max(a[1], b[1])
+    x2 = min(a[2], b[2])
+    y2 = min(a[3], b[3])
+    return rect_area(x1, y1, x2, y2)
+
+
+def rect_touches_edge(x1, y1, x2, y2, margin):
+    return (
+        x1 <= margin
+        or y1 <= margin
+        or x2 >= WORK_W - 1 - margin
+        or y2 >= WORK_H - 1 - margin
+    )
 
 
 def invert_3x3(mtx):
@@ -242,10 +332,228 @@ def classify_dir_name(dir_code):
     return "NONE"
 
 
+def collect_red_blobs(img):
+    blobs = []
+    for blob in img.find_blobs(
+        RED_THRESHOLDS,
+        roi = (RED_ROI_X, RED_ROI_Y, RED_ROI_W, RED_ROI_H),
+        pixels_threshold = RED_MIN_PIXELS,
+        area_threshold = RED_MIN_AREA,
+        merge = True,
+        margin = RED_MERGE_MARGIN,
+    ):
+        x1 = blob.x()
+        y1 = blob.y()
+        w = blob.w()
+        h = blob.h()
+        if w < RED_BLOB_MIN_W or h < RED_BLOB_MIN_H:
+            continue
+        if w > RED_BLOB_MAX_W or h > RED_BLOB_MAX_H:
+            continue
+        area = w * h
+        if area <= 0:
+            continue
+        pixels = blob.pixels()
+        aspect100 = (w * 100) // max(h, 1)
+        fill100 = (pixels * 100) // area
+        edge = 1 if rect_touches_edge(x1, y1, x1 + w, y1 + h, RED_MODEL_EDGE_MARGIN) else 0
+        bricklike = 0
+        if (
+            fill100 >= RED_BLOB_MIN_FILL100
+            and area <= RED_BRICK_MAX_AREA
+            and aspect100 >= RED_BRICK_ASPECT_MIN100
+            and aspect100 <= RED_BRICK_ASPECT_MAX100
+        ):
+            bricklike = 1
+        item = (x1, y1, x1 + w, y1 + h, w, h, pixels, area, aspect100, fill100, edge, bricklike)
+        if len(blobs) < RED_BLOB_MAX_COUNT:
+            blobs.append(item)
+        else:
+            min_idx = 0
+            min_pixels = blobs[0][RB_PIXELS]
+            for idx in range(1, RED_BLOB_MAX_COUNT):
+                if blobs[idx][RB_PIXELS] < min_pixels:
+                    min_idx = idx
+                    min_pixels = blobs[idx][RB_PIXELS]
+            if pixels > min_pixels:
+                blobs[min_idx] = item
+    return blobs
+
+
+def model_area(model):
+    return rect_area(model[M_X1], model[M_Y1], model[M_X2], model[M_Y2])
+
+
+def model_aspect100(model):
+    return ((model[M_X2] - model[M_X1]) * 100) // max(model[M_Y2] - model[M_Y1], 1)
+
+
+def model_touches_edge(model):
+    return rect_touches_edge(
+        model[M_X1],
+        model[M_Y1],
+        model[M_X2],
+        model[M_Y2],
+        RED_MODEL_EDGE_MARGIN,
+    )
+
+
+def best_red_overlap_for_model(model, red_blobs):
+    best_blob = None
+    best_overlap = 0
+    best_model_cover100 = 0
+    best_blob_cover100 = 0
+    model_rect = (model[M_X1], model[M_Y1], model[M_X2], model[M_Y2])
+    area = model_area(model)
+    for rb in red_blobs:
+        rb_rect = (rb[RB_X1], rb[RB_Y1], rb[RB_X2], rb[RB_Y2])
+        overlap = rect_intersection_area(model_rect, rb_rect)
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_blob = rb
+            best_model_cover100 = (overlap * 100) // max(area, 1)
+            best_blob_cover100 = (overlap * 100) // max(rb[RB_AREA], 1)
+    return best_blob, best_overlap, best_model_cover100, best_blob_cover100
+
+
+def model_protects_redbag(model, red_blobs):
+    rb, overlap, model_cover100, blob_cover100 = best_red_overlap_for_model(model, red_blobs)
+    if rb is None or overlap <= 0:
+        return False, None, model_cover100, blob_cover100
+    if model_touches_edge(model):
+        return False, rb, model_cover100, blob_cover100
+    if model_area(model) < REDBAG_PROTECT_MIN_AREA:
+        return False, rb, model_cover100, blob_cover100
+    aspect100 = model_aspect100(model)
+    if aspect100 < REDBAG_PROTECT_ASPECT_MIN100 or aspect100 > REDBAG_PROTECT_ASPECT_MAX100:
+        return False, rb, model_cover100, blob_cover100
+    if model_cover100 >= REDBAG_PROTECT_RED_COVER100 or blob_cover100 >= REDBAG_PROTECT_BLOB_COVER100:
+        return True, rb, model_cover100, blob_cover100
+    return False, rb, model_cover100, blob_cover100
+
+
+def compact_model_target_protects(model, rb, model_cover100, blob_cover100):
+    if rb is None:
+        return False
+    if model_touches_edge(model) or rb[RB_EDGE]:
+        return False
+    if model[M_SCORE] < COMPACT_TARGET_PROTECT_SCORE:
+        return False
+    area = model_area(model)
+    if area < COMPACT_TARGET_PROTECT_MIN_AREA or area > RED_MODEL_SMALL_AREA:
+        return False
+    aspect100 = model_aspect100(model)
+    if (
+        aspect100 < COMPACT_TARGET_PROTECT_ASPECT_MIN100
+        or aspect100 > COMPACT_TARGET_PROTECT_ASPECT_MAX100
+    ):
+        return False
+    return (
+        model_cover100 >= COMPACT_TARGET_PROTECT_MODEL_COVER100
+        and blob_cover100 >= COMPACT_TARGET_PROTECT_BLOB_COVER100
+    )
+
+
+def model_is_suspected_brick(model, red_blobs):
+    protected, rb, model_cover100, blob_cover100 = model_protects_redbag(model, red_blobs)
+    if protected:
+        return False
+    if rb is None:
+        return False
+    if compact_model_target_protects(model, rb, model_cover100, blob_cover100):
+        return False
+    if not rb[RB_BRICKLIKE]:
+        return False
+    weak_model = model_touches_edge(model) or rb[RB_EDGE]
+    enough_overlap = (
+        model_cover100 >= RED_MODEL_MIN_RED_COVER100
+        or blob_cover100 >= RED_BLOB_MIN_MODEL_COVER100
+    )
+    return weak_model and enough_overlap
+
+
+def red_blob_is_target_owned(rb, target):
+    if target is None:
+        return False
+    rb_rect = (rb[RB_X1], rb[RB_Y1], rb[RB_X2], rb[RB_Y2])
+    target_rect = (target[M_X1], target[M_Y1], target[M_X2], target[M_Y2])
+    overlap = rect_intersection_area(rb_rect, target_rect)
+    if overlap <= 0:
+        return False
+    blob_cover100 = (overlap * 100) // max(rb[RB_AREA], 1)
+    target_cover100 = (overlap * 100) // max(model_area(target), 1)
+    return (
+        blob_cover100 >= RED_TARGET_OWNED_BLOB_COVER100
+        or target_cover100 >= RED_TARGET_OWNED_MODEL_COVER100
+    )
+
+
+def calc_red_brick_code(red_blobs, target):
+    best = None
+    best_score = -1
+    for rb in red_blobs:
+        if not rb[RB_BRICKLIKE]:
+            continue
+        if red_blob_is_target_owned(rb, target):
+            continue
+        score = rb[RB_PIXELS] * RED_BRICK_SCORE_PIXELS_WEIGHT + rb[RB_Y2] * RED_BRICK_SCORE_Y_WEIGHT
+        if best is None or score > best_score:
+            best = rb
+            best_score = score
+    if best is None:
+        return RED_BRICK_NONE, None
+    center_x = (best[RB_X1] + best[RB_X2]) // 2
+    if center_x < (WORK_W // 2 - RED_BRICK_CENTER_HALF_W):
+        return RED_BRICK_LEFT, best
+    if center_x > (WORK_W // 2 + RED_BRICK_CENTER_HALF_W):
+        return RED_BRICK_RIGHT, best
+    return RED_BRICK_CENTER, best
+
+
+def calc_red_brick_error(rb):
+    if rb is None:
+        return 0, 0
+    mid_x = (rb[RB_X1] + rb[RB_X2]) // 2
+    bottom_y = rb[RB_Y2]
+    bev_x, bev_y = ipm_transform(mid_x, bottom_y)
+    bev_x, bev_y = normalize_bev_point(bev_x, bev_y)
+    return int(bev_x) - BEV_CENTER_X, BEV_TARGET_Y - int(bev_y)
+
+
+def update_red_brick_state(red_blobs, target):
+    global red_brick_code, red_brick_error_x, red_brick_error_y
+    global red_brick_confirm_count, red_brick_last_code
+
+    raw_code, rb = calc_red_brick_code(red_blobs, target)
+    if raw_code == RED_BRICK_NONE:
+        red_brick_code = RED_BRICK_NONE
+        red_brick_error_x = 0
+        red_brick_error_y = 0
+        red_brick_confirm_count = 0
+        red_brick_last_code = RED_BRICK_NONE
+        return
+
+    if raw_code == red_brick_last_code:
+        if red_brick_confirm_count < RED_BRICK_CONFIRM_FRAMES:
+            red_brick_confirm_count += 1
+    else:
+        red_brick_last_code = raw_code
+        red_brick_confirm_count = 1
+
+    if red_brick_confirm_count >= RED_BRICK_CONFIRM_FRAMES:
+        red_brick_code = raw_code
+        red_brick_error_x, red_brick_error_y = calc_red_brick_error(rb)
+    else:
+        red_brick_code = RED_BRICK_NONE
+        red_brick_error_x = 0
+        red_brick_error_y = 0
+
+
 def find_nearest_target(img):
     img_w = img.width()
     img_h = img.height()
     best = None
+    red_blobs = collect_red_blobs(img)
 
     for obj in tf.detect(net, img):
         x1, y1, x2, y2, label, score = obj
@@ -260,9 +568,14 @@ def find_nearest_target(img):
         if x2 <= x1 or y2 <= y1:
             continue
 
-        if (best is None) or (y2 > best[3]) or ((y2 == best[3]) and (score > best[5])):
-            best = (x1, y1, x2, y2, label, score)
+        target = (x1, y1, x2, y2, label, score)
+        if model_is_suspected_brick(target, red_blobs):
+            continue
 
+        if (best is None) or (y2 > best[3]) or ((y2 == best[3]) and (score > best[5])):
+            best = target
+
+    update_red_brick_state(red_blobs, best)
     return best
 
 
@@ -448,12 +761,19 @@ frame_count = 0
 classify_sent = False
 line_confirm_count = 0
 line_ball_slant_state = 0
+red_brick_code = RED_BRICK_NONE
+red_brick_error_x = 0
+red_brick_error_y = 0
+red_brick_confirm_count = 0
+red_brick_last_code = RED_BRICK_NONE
 
 
 def set_detect_mode(new_mode, event, clear_state = True):
     global detect_mode, frozen_error, frozen_overlay, ema_bev_x, ema_bev_y
     global coarse_frame_in_interval, freeze_count, coarse_frame_count, classify_sent
     global line_confirm_count, line_ball_slant_state
+    global red_brick_code, red_brick_error_x, red_brick_error_y
+    global red_brick_confirm_count, red_brick_last_code
 
     old_mode = detect_mode
     detect_mode = new_mode
@@ -468,6 +788,11 @@ def set_detect_mode(new_mode, event, clear_state = True):
         coarse_frame_count = 0
         classify_sent = False
         line_confirm_count = 0
+        red_brick_code = RED_BRICK_NONE
+        red_brick_error_x = 0
+        red_brick_error_y = 0
+        red_brick_confirm_count = 0
+        red_brick_last_code = RED_BRICK_NONE
     if new_mode in ("SEARCH", "COARSE", "CLASSIFY"):
         line_ball_slant_state = 0
     elif new_mode == "LINE":

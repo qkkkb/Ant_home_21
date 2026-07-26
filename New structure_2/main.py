@@ -59,6 +59,7 @@ GYRO_PRIORITY_BRAKE_LIMIT = 8.0
 GYRO_SPIN_PRIORITY_OUTPUT_BASE_LIMIT = 10.0
 GYRO_SPIN_PRIORITY_OUTPUT_TARGET_GAIN = 0.45
 GYRO_SPIN_PRIORITY_OUTPUT_MAX_LIMIT = 58.0
+GYRO_SPIN_PRIORITY_OVERSPEED_RATIO = 1.25
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True
 GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
@@ -168,7 +169,7 @@ Follow_Orbit_Command_Ramp_Vy = 14.0
 Follow_Command_Ramp_Wz = 11.0
 Follow_Orbit_Command_Ramp_Wz = 18.0
 Follow_Spin_Command_Ramp_Wz = 64.0
-Follow_Spin_Gyro_Output_Ramp = 2.0
+Follow_Spin_Gyro_Output_Ramp = 8.0
 Follow_Pose_Gyro_Output_Ramp = 2.0
 Follow_Normal_Target_Lost_Hold_Ms = 500
 Follow_Target_Lost_Hold_Ms = 250
@@ -674,11 +675,7 @@ def solve_follow_pose_twist(
         or error_angle <= -active_error
     )
     # Local pose features around the calibrated nonparallel formation.
-    cam_vx = error_x + (
-        clamp(error_angle, -8, 8)
-        if spin_mode
-        else error_angle
-    )
+    cam_vx = error_x + error_angle
     cam_vy = error_y
     if cam_vx > 0.0:
         cam_vy -= cam_vx * 5 // 13
@@ -919,16 +916,12 @@ def reset_turn_loop_state():
 
 def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z, spin_priority=False):
     err = turn_rate_cmd - gyro_z
-    if spin_priority:
-        return clamp(
-            err * GYRO_KP,
-            -GYRO_PRIORITY_BRAKE_LIMIT,
-            GYRO_PRIORITY_BRAKE_LIMIT,
-        )
-    limit = gyro_limit_for_turn(turn_rate_cmd, True)
+    limit = gyro_limit_for_turn(turn_rate_cmd, True, spin_priority)
     turn_abs = abs(turn_rate_cmd)
     gyro_abs = abs(gyro_z)
-    if last_follow_mode_key == 1:
+    if spin_priority:
+        overspeed_ratio = GYRO_SPIN_PRIORITY_OVERSPEED_RATIO
+    elif last_follow_mode_key == 1:
         overspeed_ratio = 1.0
     else:
         overspeed_ratio = GYRO_PRIORITY_OVERSPEED_RATIO
@@ -938,14 +931,14 @@ def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z, spin_priority=False):
     )
     if same_dir and gyro_abs > turn_abs * overspeed_ratio:
         brake_gain = GYRO_PRIORITY_BRAKE_KP
-        if last_follow_mode_key != 1:
+        if not spin_priority and last_follow_mode_key != 1:
             brake_gain = GYRO_KP
         out = err * brake_gain
         return clamp(out, -GYRO_PRIORITY_BRAKE_LIMIT, GYRO_PRIORITY_BRAKE_LIMIT)
 
     gain = GYRO_PRIORITY_KP
     min_output = GYRO_PRIORITY_MIN_OUTPUT
-    if last_follow_mode_key != 1:
+    if not spin_priority and last_follow_mode_key != 1:
         gain = GYRO_KP
         min_output = 0.8
     out = clamp(err * gain, -limit, limit)

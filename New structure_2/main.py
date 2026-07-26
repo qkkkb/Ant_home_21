@@ -931,7 +931,8 @@ def priority_gyro_rate_ctrl(turn_rate_cmd, gyro_z, spin_priority=False):
     )
     if same_dir and gyro_abs > turn_abs * overspeed_ratio:
         if spin_priority:
-            return 0.0
+            out = err * GYRO_PRIORITY_BRAKE_KP
+            return clamp(out, -GYRO_PRIORITY_MIN_OUTPUT, GYRO_PRIORITY_MIN_OUTPUT)
         brake_gain = GYRO_PRIORITY_BRAKE_KP
         if not spin_priority and last_follow_mode_key != 1:
             brake_gain = GYRO_KP
@@ -1231,7 +1232,7 @@ def update_follow_targets(gyro_z):
     else:
         if target_lost_since_ms == 0:
             target_lost_since_ms = now
-        if fresh_motion and (not push_follow_active):
+        if fresh_motion:
             use_motion_feedforward = utime.ticks_diff(
                 now,
                 target_lost_since_ms,
@@ -1243,7 +1244,7 @@ def update_follow_targets(gyro_z):
         if use_motion_feedforward:
             xy_scale = (
                 Follow_Normal_Hold_Feedforward_Gain
-                if mode_key == 0
+                if mode_key == 0 or push_follow_active
                 else Follow_Hold_Feedforward_Gain
             )
             vx = ff_vx * xy_scale

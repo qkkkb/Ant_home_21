@@ -127,7 +127,6 @@ REDBAG_PROTECT_ASPECT_MAX100 = 520
 REDBAG_PROTECT_RED_COVER100 = 18
 REDBAG_PROTECT_BLOB_COVER100 = 35
 BOTTOM_REDBAG_PROTECT_SCORE = 0.85
-BOTTOM_REDBAG_PROTECT_MIN_Y = (WORK_H * 2) // 3
 BOTTOM_REDBAG_PROTECT_MIN_AREA = (WORK_W * WORK_H * 4 + 99) // 100
 BOTTOM_REDBAG_PROTECT_MIN_H = (WORK_H * 22 + 99) // 100
 BOTTOM_REDBAG_PROTECT_ASPECT_MIN100 = 40
@@ -432,8 +431,6 @@ def bottom_partial_model_protects_redbag(model, rb, model_cover100, blob_cover10
     if rb is None:
         return False
     if not model_touches_bottom(model):
-        return False
-    if model[M_Y2] < BOTTOM_REDBAG_PROTECT_MIN_Y:
         return False
     if model[M_SCORE] < BOTTOM_REDBAG_PROTECT_SCORE:
         return False

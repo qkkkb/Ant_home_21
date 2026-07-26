@@ -1163,6 +1163,8 @@ def update_follow_targets(gyro_z):
         and -Follow_Master_Edge_Delta < ff_vx < Follow_Master_Edge_Delta
         and -Follow_Master_Edge_Delta < ff_vy < Follow_Master_Edge_Delta
         and -Follow_Master_Edge_Delta < follow_ff_wz < Follow_Master_Edge_Delta
+        and -10 < cam_error_x < 10
+        and -10 < cam_error_y < 10
     ):
         follow_output_limit = FOLLOW_STATIC_LOCK_PWM_LIMIT
     if (

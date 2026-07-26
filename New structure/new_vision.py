@@ -126,6 +126,14 @@ REDBAG_PROTECT_ASPECT_MIN100 = 45
 REDBAG_PROTECT_ASPECT_MAX100 = 520
 REDBAG_PROTECT_RED_COVER100 = 18
 REDBAG_PROTECT_BLOB_COVER100 = 35
+BOTTOM_REDBAG_PROTECT_SCORE = 0.85
+BOTTOM_REDBAG_PROTECT_MIN_Y = (WORK_H * 2) // 3
+BOTTOM_REDBAG_PROTECT_MIN_AREA = (WORK_W * WORK_H * 4 + 99) // 100
+BOTTOM_REDBAG_PROTECT_MIN_H = (WORK_H * 22 + 99) // 100
+BOTTOM_REDBAG_PROTECT_ASPECT_MIN100 = 40
+BOTTOM_REDBAG_PROTECT_ASPECT_MAX100 = 260
+BOTTOM_REDBAG_PROTECT_MODEL_COVER100 = 50
+BOTTOM_REDBAG_PROTECT_BLOB_COVER100 = 50
 RED_TARGET_OWNED_BLOB_COVER100 = 55
 RED_TARGET_OWNED_MODEL_COVER100 = 20
 RED_BRICK_CENTER_HALF_W = int(WORK_W * 0.16)
@@ -398,6 +406,10 @@ def model_touches_edge(model):
     )
 
 
+def model_touches_bottom(model):
+    return model[M_Y2] >= WORK_H - 1 - RED_MODEL_EDGE_MARGIN
+
+
 def best_red_overlap_for_model(model, red_blobs):
     best_blob = None
     best_overlap = 0
@@ -416,10 +428,39 @@ def best_red_overlap_for_model(model, red_blobs):
     return best_blob, best_overlap, best_model_cover100, best_blob_cover100
 
 
+def bottom_partial_model_protects_redbag(model, rb, model_cover100, blob_cover100):
+    if rb is None:
+        return False
+    if not model_touches_bottom(model):
+        return False
+    if model[M_Y2] < BOTTOM_REDBAG_PROTECT_MIN_Y:
+        return False
+    if model[M_SCORE] < BOTTOM_REDBAG_PROTECT_SCORE:
+        return False
+    area = model_area(model)
+    if area < BOTTOM_REDBAG_PROTECT_MIN_AREA:
+        return False
+    height = model[M_Y2] - model[M_Y1]
+    if height < BOTTOM_REDBAG_PROTECT_MIN_H:
+        return False
+    aspect100 = model_aspect100(model)
+    if (
+        aspect100 < BOTTOM_REDBAG_PROTECT_ASPECT_MIN100
+        or aspect100 > BOTTOM_REDBAG_PROTECT_ASPECT_MAX100
+    ):
+        return False
+    return (
+        model_cover100 >= BOTTOM_REDBAG_PROTECT_MODEL_COVER100
+        and blob_cover100 >= BOTTOM_REDBAG_PROTECT_BLOB_COVER100
+    )
+
+
 def model_protects_redbag(model, red_blobs):
     rb, overlap, model_cover100, blob_cover100 = best_red_overlap_for_model(model, red_blobs)
     if rb is None or overlap <= 0:
         return False, None, model_cover100, blob_cover100
+    if bottom_partial_model_protects_redbag(model, rb, model_cover100, blob_cover100):
+        return True, rb, model_cover100, blob_cover100
     if model_touches_edge(model):
         return False, rb, model_cover100, blob_cover100
     if model_area(model) < REDBAG_PROTECT_MIN_AREA:

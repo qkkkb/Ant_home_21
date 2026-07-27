@@ -1276,13 +1276,13 @@ def update_follow_targets(gyro_z):
             vy = (vy - body_vy) + body_vy * xy_scale
 
     if push_follow_active and seen:
-        vx = add_feedforward_direct(
+        vx = add_feedforward_assist(
             vx,
             ff_vx,
             Follow_Push_Feedforward_Forward_Gain,
             Follow_Push_Feedforward_Forward_Limit,
         )
-        vy = add_feedforward_direct(
+        vy = add_feedforward_assist(
             vy,
             ff_vy,
             Follow_Push_Feedforward_Lateral_Gain,

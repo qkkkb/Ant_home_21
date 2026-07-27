@@ -77,7 +77,7 @@ _pid_mod.PWM_MAX = FOLLOW_RUN_PWM_LIMIT
 # ====================== Camera protocol ======================
 Cam_Error_Offset = 120
 Cam_Error_Scale = 2
-Cam_Packet_Timeout_Ms = 200
+Cam_Packet_Timeout_Ms = 300
 Cam_Frame_Head = 0xFF
 No_Target_Marker = 0xFE
 Line_Packet_Tag = 0xFC
@@ -560,6 +560,8 @@ def follow_limit(base_limit, master_value):
 
 def calc_follow_forward(error_y, position_priority=False):
     deadband = Follow_Orbit_Forward_Deadband if position_priority else Follow_Forward_Deadband
+    if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
+        deadband = 1
     error_y = soft_deadband(error_y, deadband, deadband * 2)
     if error_y == 0.0:
         return 0.0
@@ -584,6 +586,8 @@ def calc_follow_forward(error_y, position_priority=False):
 
 def calc_follow_lateral(error_x, position_priority=False):
     deadband = Follow_Orbit_Lateral_Deadband if position_priority else Follow_Lateral_Deadband
+    if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
+        deadband = 1
     error_x = soft_deadband(error_x, deadband, deadband * 2)
     if error_x == 0.0:
         return 0.0

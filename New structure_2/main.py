@@ -113,7 +113,6 @@ Follow_Push_Feedforward_Forward_Gain = 1.42
 Follow_Push_Feedforward_Lateral_Gain = 1.55
 Follow_Push_Feedforward_Forward_Limit = 30.0
 Follow_Push_Feedforward_Lateral_Limit = 32.0
-Follow_Push_Feedforward_Conflict_Scale = 0.65
 Follow_Normal_Visual_Forward_Scale = 0.72
 Follow_Normal_Visual_Lateral_Scale = 1.00
 Follow_Static_Visual_Scale = 0.60
@@ -1131,8 +1130,10 @@ def update_follow_targets(gyro_z):
         and -Follow_Master_Edge_Delta < ff_vx < Follow_Master_Edge_Delta
         and -Follow_Master_Edge_Delta < ff_vy < Follow_Master_Edge_Delta
         and -Follow_Master_Edge_Delta < follow_ff_wz < Follow_Master_Edge_Delta
-        and -10 < cam_error_x < 10
-        and -10 < cam_error_y < 10
+        and (
+            not (master_flags & 1)
+            or (-10 < cam_error_x < 10 and -10 < cam_error_y < 10)
+        )
     ):
         follow_output_limit = FOLLOW_STATIC_LOCK_PWM_LIMIT
     if (
@@ -1243,19 +1244,17 @@ def update_follow_targets(gyro_z):
             vy = (vy - body_vy) + body_vy * xy_scale
 
     if push_follow_active and seen:
-        vx = add_feedforward_direct(
+        vx = add_feedforward_assist(
             vx,
             ff_vx,
             Follow_Push_Feedforward_Forward_Gain,
             Follow_Push_Feedforward_Forward_Limit,
-            Follow_Push_Feedforward_Conflict_Scale,
         )
-        vy = add_feedforward_direct(
+        vy = add_feedforward_assist(
             vy,
             ff_vy,
             Follow_Push_Feedforward_Lateral_Gain,
             Follow_Push_Feedforward_Lateral_Limit,
-            Follow_Push_Feedforward_Conflict_Scale,
         )
         turn_rate_cmd = add_feedforward_assist(
             turn_rate_cmd,

@@ -173,8 +173,8 @@ Follow_Spin_Gyro_Output_Ramp = 6.0
 Follow_Pose_Gyro_Output_Ramp = 2.0
 Follow_Normal_Target_Lost_Hold_Ms = 1000
 Follow_Target_Lost_Hold_Ms = 250
-Follow_Orbit_Mode_FfWz_Off = 7.0
-Follow_Orbit_Mode_Exit_Ms = 80
+Follow_Orbit_Mode_FfWz_Off = 10.0
+Follow_Orbit_Mode_Exit_Ms = 60
 Follow_Orbit_Mode_FfWz_Filter = 0.22
 Follow_Normal_Wz_Feedforward_Limit = 15.0
 Follow_Spin_Mode_FfWz_On = 32.0
@@ -508,8 +508,8 @@ def update_orbit_follow_mode(
     if (
         ff_wz > Follow_Orbit_Mode_FfWz_Off
         or ff_wz < -Follow_Orbit_Mode_FfWz_Off
-        or gyro_z > 12
-        or gyro_z < -12
+        or gyro_z > 25
+        or gyro_z < -25
     ):
         orbit_follow_exit_since_ms = 0
     elif orbit_follow_exit_since_ms == 0:

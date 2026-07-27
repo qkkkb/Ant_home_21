@@ -1642,6 +1642,7 @@ def wheel_target_idle(target):
 def speed_ctrl_follow(pid, actual_speed, target_speed, idle_event, reverse_event):
     global debug_event_mask
 
+    pid.ki = 12.0 if not last_follow_mode_key else 8.0
     if wheel_target_idle(target_speed):
         debug_event_mask |= idle_event
         if not _orbit:

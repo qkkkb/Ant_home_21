@@ -173,9 +173,8 @@ Follow_Spin_Gyro_Output_Ramp = 6.0
 Follow_Pose_Gyro_Output_Ramp = 2.0
 Follow_Normal_Target_Lost_Hold_Ms = 1000
 Follow_Target_Lost_Hold_Ms = 250
-Follow_Orbit_Mode_FfWz_On = 18.0
 Follow_Orbit_Mode_FfWz_Off = 7.0
-Follow_Orbit_Mode_Exit_Ms = 40
+Follow_Orbit_Mode_Exit_Ms = 80
 Follow_Orbit_Mode_FfWz_Filter = 0.22
 Follow_Normal_Wz_Feedforward_Limit = 15.0
 Follow_Spin_Mode_FfWz_On = 32.0
@@ -480,11 +479,8 @@ def update_filtered_ff_wz(ff_wz, fresh_motion):
 
 def update_orbit_follow_mode(
     now,
-    seen,
-    error_angle,
     ff_wz,
     gyro_z,
-    fresh_motion,
     explicit_orbit,
     explicit_push,
     explicit_spin,
@@ -509,7 +505,14 @@ def update_orbit_follow_mode(
         orbit_follow_exit_since_ms = 0
         return False
 
-    if orbit_follow_exit_since_ms == 0:
+    if (
+        ff_wz > Follow_Orbit_Mode_FfWz_Off
+        or ff_wz < -Follow_Orbit_Mode_FfWz_Off
+        or gyro_z > 12
+        or gyro_z < -12
+    ):
+        orbit_follow_exit_since_ms = 0
+    elif orbit_follow_exit_since_ms == 0:
         orbit_follow_exit_since_ms = now
     elif utime.ticks_diff(now, orbit_follow_exit_since_ms) >= Follow_Orbit_Mode_Exit_Ms:
         orbit_follow_active = False
@@ -1072,11 +1075,8 @@ def update_follow_targets(gyro_z):
     filtered_wz = update_filtered_ff_wz(spin_ff_wz if spin_mode_active else ff_wz, fresh_motion)
     orbit_mode_active = update_orbit_follow_mode(
         now,
-        seen,
-        cam_error_angle,
         ff_wz,
         gyro_z,
-        fresh_motion,
         explicit_orbit,
         explicit_push,
         spin_mode_active,
@@ -1230,7 +1230,7 @@ def update_follow_targets(gyro_z):
     if seen and angle_pose_mode_active:
         xy_scale = angle_xy_lock_scale(
             cam_error_angle,
-            orbit_mode_active,
+            orbit_mode_active and not push_follow_active,
             spin_mode_active,
         )
         if push_follow_active:
@@ -1254,13 +1254,13 @@ def update_follow_targets(gyro_z):
             ff_vy,
             Follow_Push_Feedforward_Lateral_Gain,
             Follow_Push_Feedforward_Lateral_Limit,
-            0.65 if -6 <= cam_error_y <= 6 else 0.0,
+            clamp(1.0 - abs(cam_error_y) / 6.0, 0.0, 1.0),
         )
         turn_rate_cmd = add_feedforward_assist(
             turn_rate_cmd,
             follow_ff_wz,
             Follow_Normal_Wz_Feedforward_Gain,
-            Follow_Normal_Wz_Feedforward_Limit,
+            8,
         )
 
     vx_limit = Follow_Forward_Limit

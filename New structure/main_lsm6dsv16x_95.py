@@ -128,7 +128,6 @@ Nav_Push_Orbit_Slow_Yaw = 80.0
 Nav_Push_Orbit_Fast_Vy = 6.0
 Nav_Push_Orbit_Slow_Vy = 2.4
 Nav_Push_Orbit_Fast_Rate = 165.0
-Nav_Push_Orbit_Slow_Rate = 115.0
 Nav_Push_Orbit_Gyro_Limit = 32.0
 Nav_Push_Orbit_Radius_Base = 2.0   #orbit 基础半径系数，实际轨迹半径=该系数 * 车轮轴距；如果轨迹过大或过小可以调整该值
 Nav_Push_Orbit_Radius_Gain = 0.010
@@ -378,12 +377,11 @@ def get_push_orbit_motion(yaw_err_abs):
         return 0.0, 0.0
     if yaw_err_abs > Nav_Push_Orbit_Slow_Yaw:
         vy_base = Nav_Push_Orbit_Fast_Vy
-        turn_rate_mag = Nav_Push_Orbit_Fast_Rate
     else:
         span = Nav_Push_Orbit_Slow_Yaw - Nav_Push_Orient_Ok_Yaw
         ratio = (yaw_err_abs - Nav_Push_Orient_Ok_Yaw) / span
         vy_base = Nav_Push_Orbit_Slow_Vy + (Nav_Push_Orbit_Fast_Vy - Nav_Push_Orbit_Slow_Vy) * ratio
-        turn_rate_mag = Nav_Push_Orbit_Slow_Rate + (Nav_Push_Orbit_Fast_Rate - Nav_Push_Orbit_Slow_Rate) * ratio
+    turn_rate_mag = Nav_Push_Orbit_Fast_Rate * vy_base / Nav_Push_Orbit_Fast_Vy
     return vy_base * push_orbit_radius_ratio, turn_rate_mag
 
 

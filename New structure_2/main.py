@@ -500,16 +500,7 @@ def update_orbit_follow_mode(
         orbit_follow_exit_since_ms = 0
         return True
 
-    enter = (
-        seen
-        and fresh_motion
-        and (
-            explicit_orbit
-            or ff_wz >= Follow_Orbit_Mode_FfWz_On
-            or ff_wz <= -Follow_Orbit_Mode_FfWz_On
-        )
-    )
-    if enter:
+    if explicit_orbit:
         orbit_follow_active = True
         orbit_follow_exit_since_ms = 0
         return True
@@ -518,32 +509,10 @@ def update_orbit_follow_mode(
         orbit_follow_exit_since_ms = 0
         return False
 
-    stable = (
-        (not seen)
-        or (
-            (
-                (not fresh_motion)
-                or (-Follow_Orbit_Mode_FfWz_Off <= ff_wz <= Follow_Orbit_Mode_FfWz_Off)
-            )
-            and (
-                -Follow_Normal_Pose_Angle_Deadband
-                <= error_angle
-                <= Follow_Normal_Pose_Angle_Deadband
-            )
-        )
-    )
-    if stable:
-        if orbit_follow_exit_since_ms == 0:
-            orbit_follow_exit_since_ms = now
-        elif (
-            utime.ticks_diff(now, orbit_follow_exit_since_ms) >= Follow_Orbit_Mode_Exit_Ms
-            and -Follow_Orbit_Brake_Gyro_Threshold
-            < gyro_z
-            < Follow_Orbit_Brake_Gyro_Threshold
-        ):
-            orbit_follow_active = False
-            orbit_follow_exit_since_ms = 0
-    else:
+    if orbit_follow_exit_since_ms == 0:
+        orbit_follow_exit_since_ms = now
+    elif utime.ticks_diff(now, orbit_follow_exit_since_ms) >= Follow_Orbit_Mode_Exit_Ms:
+        orbit_follow_active = False
         orbit_follow_exit_since_ms = 0
     return orbit_follow_active
 
@@ -748,7 +717,7 @@ def solve_follow_pose_twist(
                 Follow_Spin_Feedforward_Lateral_Gain,
                 Follow_Spin_Feedforward_Lateral_Limit,
             )
-            wz = add_feedforward_assist(
+            wz = add_feedforward_direct(
                 wz,
                 ff_wz,
                 Follow_Spin_Wz_Feedforward_Gain,
@@ -1116,6 +1085,13 @@ def update_follow_targets(gyro_z):
         follow_ff_wz = filtered_wz
     elif spin_mode_active:
         follow_ff_wz = spin_ff_wz
+        if cam_error_angle * follow_ff_wz > 0.0:
+            follow_ff_wz *= clamp(
+                (Follow_Spin_Latch_Release_Angle - abs(cam_error_angle))
+                / Follow_Spin_Latch_Release_Angle,
+                0.0,
+                1.0,
+            )
     else:
         follow_ff_wz = clamp(
             filtered_wz,

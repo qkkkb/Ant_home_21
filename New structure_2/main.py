@@ -626,6 +626,8 @@ def calc_follow_angle(error_angle, orbit_mode=False, spin_mode=False):
             elif -Follow_Orbit_Pose_Angle_Min_Turn < out < 0.0:
                 out = -Follow_Orbit_Pose_Angle_Min_Turn
         return out
+    if spin_mode:
+        error_angle = -error_angle
     return clamp(
         error_angle * Follow_Pose_Angle_Gain,
         -Follow_Pose_Angle_Limit,

@@ -562,17 +562,24 @@ def calc_red_brick_error(rb):
     return int(bev_x) - BEV_CENTER_X, BEV_TARGET_Y - int(bev_y)
 
 
+def clear_red_brick_state():
+    global red_brick_code, red_brick_error_x, red_brick_error_y
+    global red_brick_confirm_count, red_brick_last_code
+
+    red_brick_code = RED_BRICK_NONE
+    red_brick_error_x = 0
+    red_brick_error_y = 0
+    red_brick_confirm_count = 0
+    red_brick_last_code = RED_BRICK_NONE
+
+
 def update_red_brick_state(red_blobs, target):
     global red_brick_code, red_brick_error_x, red_brick_error_y
     global red_brick_confirm_count, red_brick_last_code
 
     raw_code, rb = calc_red_brick_code(red_blobs, target)
     if raw_code == RED_BRICK_NONE:
-        red_brick_code = RED_BRICK_NONE
-        red_brick_error_x = 0
-        red_brick_error_y = 0
-        red_brick_confirm_count = 0
-        red_brick_last_code = RED_BRICK_NONE
+        clear_red_brick_state()
         return
 
     if raw_code == red_brick_last_code:
@@ -591,11 +598,13 @@ def update_red_brick_state(red_blobs, target):
         red_brick_error_y = 0
 
 
-def find_nearest_target(img):
+def find_nearest_target(img, use_redbrick_filter = True):
     img_w = img.width()
     img_h = img.height()
     best = None
-    red_blobs = collect_red_blobs(img)
+    red_blobs = None
+    if use_redbrick_filter:
+        red_blobs = collect_red_blobs(img)
 
     for obj in tf.detect(net, img):
         x1, y1, x2, y2, label, score = obj
@@ -611,13 +620,16 @@ def find_nearest_target(img):
             continue
 
         target = (x1, y1, x2, y2, label, score)
-        if model_is_suspected_brick(target, red_blobs):
+        if use_redbrick_filter and model_is_suspected_brick(target, red_blobs):
             continue
 
         if (best is None) or (y2 > best[3]) or ((y2 == best[3]) and (score > best[5])):
             best = target
 
-    update_red_brick_state(red_blobs, best)
+    if use_redbrick_filter:
+        update_red_brick_state(red_blobs, best)
+    else:
+        clear_red_brick_state()
     return best
 
 
@@ -883,7 +895,7 @@ while True:
             send_no_target()
     elif detect_mode == "CLASSIFY":
         if not classify_sent:
-            target = find_nearest_target(img)
+            target = find_nearest_target(img, False)
             if target is None:
                 print_state_log("CLASSIFY", "NO_TARGET", coarse_frame_count, freeze_count, verbose = True)
             else:
@@ -943,7 +955,7 @@ while True:
                 coarse_frame_in_interval = 0
 
         if need_detect:
-            target = find_nearest_target(img)
+            target = find_nearest_target(img, True)
             if target is not None:
                 x1, y1, x2, y2, label, score = target
                 mid_x = (x1 + x2) // 2
@@ -992,7 +1004,7 @@ while True:
             print_state_log(mode_name, "SEARCH", coarse_frame_count,
                             coarse_frame_in_interval, verbose=True)
     else:
-        target = find_nearest_target(img)
+        target = find_nearest_target(img, False)
 
         if target is None:
             if SEND_NEUTRAL_WHEN_EMPTY:

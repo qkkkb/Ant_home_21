@@ -93,8 +93,8 @@ Follow_Orbit_Forward_Gain = 1.00
 Follow_Orbit_Lateral_Gain = 0.92
 Follow_Forward_Error_Sign = 1.0
 Follow_Lateral_Error_Sign = -1.0
-Follow_Forward_Limit = 33.0
-Follow_Lateral_Limit = 25.0
+Follow_Forward_Limit = 38.0
+Follow_Lateral_Limit = 30.0
 Follow_Forward_Deadband = 2
 Follow_Lateral_Deadband = 2
 Follow_Orbit_Forward_Deadband = 2
@@ -107,12 +107,13 @@ Follow_Distance_Close_Gain = 0.70
 Follow_Distance_Close_Limit = 22.0
 Follow_Feedforward_Forward_Gain = 1.18
 Follow_Feedforward_Lateral_Gain = 1.18
-Follow_Feedforward_Forward_Limit = 30.0
+Follow_Feedforward_Forward_Limit = 35.0
 Follow_Feedforward_Lateral_Limit = 31.0
-Follow_Push_Feedforward_Forward_Gain = 1.30
-Follow_Push_Feedforward_Lateral_Gain = 1.32
-Follow_Push_Feedforward_Forward_Limit = 24.0
-Follow_Push_Feedforward_Lateral_Limit = 25.0
+Follow_Push_Feedforward_Forward_Gain = 1.42
+Follow_Push_Feedforward_Lateral_Gain = 1.55
+Follow_Push_Feedforward_Forward_Limit = 30.0
+Follow_Push_Feedforward_Lateral_Limit = 32.0
+Follow_Push_Feedforward_Conflict_Scale = 0.65
 Follow_Normal_Visual_Forward_Scale = 0.72
 Follow_Normal_Visual_Lateral_Scale = 1.00
 Follow_Static_Visual_Scale = 0.60
@@ -161,7 +162,7 @@ Follow_Angle_XY_Min_Scale = 0.38
 Follow_Spin_XY_Min_Scale = 0.94
 Follow_Orbit_XY_Max_Scale = 0.68
 Follow_Spin_XY_Max_Scale = 1.00
-Follow_Pose_Wheel_Target_Limit = 39.0
+Follow_Pose_Wheel_Target_Limit = 45.0
 Follow_Command_Ramp_Vx = 2.0
 Follow_Command_Ramp_Vy = 3.0
 Follow_Orbit_Command_Ramp_Vx = 20.0
@@ -1242,17 +1243,19 @@ def update_follow_targets(gyro_z):
             vy = (vy - body_vy) + body_vy * xy_scale
 
     if push_follow_active and seen:
-        vx = add_feedforward_assist(
+        vx = add_feedforward_direct(
             vx,
             ff_vx,
             Follow_Push_Feedforward_Forward_Gain,
             Follow_Push_Feedforward_Forward_Limit,
+            Follow_Push_Feedforward_Conflict_Scale,
         )
-        vy = add_feedforward_assist(
+        vy = add_feedforward_direct(
             vy,
             ff_vy,
             Follow_Push_Feedforward_Lateral_Gain,
             Follow_Push_Feedforward_Lateral_Limit,
+            Follow_Push_Feedforward_Conflict_Scale,
         )
         turn_rate_cmd = add_feedforward_assist(
             turn_rate_cmd,

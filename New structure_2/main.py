@@ -1241,7 +1241,6 @@ def update_follow_targets(gyro_z):
             vy *= xy_scale
         else:
             vx = (vx - body_vx) + body_vx * xy_scale
-            vy = (vy - body_vy) + body_vy * xy_scale
 
     if push_follow_active and seen:
         vx = add_feedforward_assist(
@@ -1250,11 +1249,12 @@ def update_follow_targets(gyro_z):
             Follow_Push_Feedforward_Forward_Gain,
             Follow_Push_Feedforward_Forward_Limit,
         )
-        vy = add_feedforward_assist(
+        vy = add_feedforward_direct(
             vy,
             ff_vy,
             Follow_Push_Feedforward_Lateral_Gain,
             Follow_Push_Feedforward_Lateral_Limit,
+            0.65 if -6 <= cam_error_y <= 6 else 0.0,
         )
         turn_rate_cmd = add_feedforward_assist(
             turn_rate_cmd,

@@ -699,7 +699,9 @@ def solve_follow_pose_twist(
         body_vx *= Follow_Normal_Visual_Forward_Scale
         body_vy *= Follow_Normal_Visual_Lateral_Scale
     if use_ff and not spin_mode and ff_vx == 0.0 and ff_vy == 0.0:
-        if -8.0 < body_vx < 8.0:
+        if (not orbit_mode) and (cam_vy >= 6.0 or cam_vy <= -6.0):
+            body_vx = 0.0
+        elif -8.0 < body_vx < 8.0:
             body_vx *= 1.5
         if -8.0 < body_vy < 8.0:
             body_vy *= 1.5
@@ -746,7 +748,7 @@ def solve_follow_pose_twist(
                 Follow_Spin_Feedforward_Lateral_Gain,
                 Follow_Spin_Feedforward_Lateral_Limit,
             )
-            wz = add_feedforward_direct(
+            wz = add_feedforward_assist(
                 wz,
                 ff_wz,
                 Follow_Spin_Wz_Feedforward_Gain,
@@ -771,12 +773,11 @@ def solve_follow_pose_twist(
                 Follow_Feedforward_Forward_Limit,
                 ff_scale,
             )
-            vy = add_feedforward_direct(
+            vy = add_feedforward_assist(
                 vy,
                 target_ff_vy,
                 Follow_Feedforward_Lateral_Gain,
                 Follow_Feedforward_Lateral_Limit,
-                ff_scale,
             )
             wz = add_feedforward_assist(
                 wz,
@@ -1098,7 +1099,6 @@ def update_follow_targets(gyro_z):
         explicit_spin
         and (not explicit_orbit)
         and (not explicit_push)
-        and abs(spin_ff_wz) >= Follow_Spin_Latch_Min_Wz
     )
     filtered_wz = update_filtered_ff_wz(spin_ff_wz if spin_mode_active else ff_wz, fresh_motion)
     orbit_mode_active = update_orbit_follow_mode(

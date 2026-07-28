@@ -1687,7 +1687,12 @@ def wheel_target_idle(target):
 
 
 def speed_ctrl_follow(pid, actual_speed, target_speed):
-    pid.ki = 12.0 if not last_follow_mode_key else 8.0
+    if last_follow_mode_key:
+        pid.ki = 8.0
+    elif master_flags and (cam_target_vy >= 8.0 or cam_target_vy <= -8.0):
+        pid.ki = 16.0
+    else:
+        pid.ki = 12.0
     if wheel_target_idle(target_speed):
         if not _orbit:
             speed_reset(pid)

@@ -87,8 +87,8 @@ LINE_BALL_SLANT_MIN_ELONGATION = 0.68
 LINE_BALL_SLANT_MIN_BOTTOM = (WORK_H * 78 + 99) // 100
 LINE_BALL_EDGE_MARGIN = 2
 LINE_CENTER_MASK_W = int(WORK_W * 0.42)
-LINE_CONFIRM_FRAMES = 2
-LINE_BALL_CONFIRM_FRAMES = 2
+LINE_CONFIRM_FRAMES = 1
+LINE_BALL_CONFIRM_FRAMES = 1
 
 # ================= Red brick filtering =================
 # Production path: no draw, no log. These thresholds are copied from the

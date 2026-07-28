@@ -177,7 +177,6 @@ Follow_Orbit_Mode_FfWz_Off = 10.0
 Follow_Orbit_Mode_Exit_Ms = 60
 Follow_Orbit_Mode_FfWz_Filter = 0.22
 Follow_Normal_Wz_Feedforward_Limit = 15.0
-Follow_Spin_Mode_FfWz_On = 32.0
 Follow_Spin_Latch_Min_Wz = 26.0
 Follow_Spin_Command_Hold_Ms = 900
 Follow_Spin_Latch_Release_Angle = 3
@@ -637,9 +636,9 @@ def solve_follow_pose_twist(
     ff_vy,
     ff_wz,
     use_ff,
-    orbit_mode=False,
-    spin_mode=False,
-    push_mode=False,
+    orbit_mode,
+    spin_mode,
+    push_mode,
 ):
     vision_wz = calc_follow_angle(error_angle, orbit_mode, spin_mode)
     active_error = (
@@ -652,7 +651,7 @@ def solve_follow_pose_twist(
         or error_angle <= -active_error
     )
     # Local pose features around the calibrated nonparallel formation.
-    cam_vx = error_x if push_mode else error_x + error_angle
+    cam_vx = error_x * 0.55 if push_mode else error_x + error_angle
     cam_vy = error_y
     if cam_vx > 0.0:
         cam_vy -= cam_vx * 5 // 13
@@ -667,8 +666,6 @@ def solve_follow_pose_twist(
     else:
         position_priority = False
     body_vx = -calc_follow_forward(cam_vx, position_priority)
-    if push_mode:
-        body_vx *= 0.55
     body_vy = calc_follow_lateral(cam_vy, position_priority)
     if (not orbit_mode) and (not spin_mode):
         body_vx *= Follow_Normal_Visual_Forward_Scale

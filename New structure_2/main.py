@@ -177,6 +177,7 @@ Follow_Orbit_Mode_FfWz_Off = 10.0
 Follow_Orbit_Mode_Exit_Ms = 60
 Follow_Orbit_Mode_FfWz_Filter = 0.22
 Follow_Normal_Wz_Feedforward_Limit = 15.0
+Push_X_Scale = 0.55
 Follow_Spin_Latch_Min_Wz = 26.0
 Follow_Spin_Command_Hold_Ms = 900
 Follow_Spin_Latch_Release_Angle = 3
@@ -636,9 +637,9 @@ def solve_follow_pose_twist(
     ff_vy,
     ff_wz,
     use_ff,
-    orbit_mode,
-    spin_mode,
-    push_mode,
+    orbit_mode=False,
+    spin_mode=False,
+    push_mode=False,
 ):
     vision_wz = calc_follow_angle(error_angle, orbit_mode, spin_mode)
     active_error = (
@@ -646,7 +647,10 @@ def solve_follow_pose_twist(
         if (orbit_mode or spin_mode)
         else Follow_Normal_Pose_Angle_Active_Error
     )
-    angle_active = abs(error_angle) >= active_error
+    angle_active = (
+        error_angle >= active_error
+        or error_angle <= -active_error
+    )
     # Local pose features around the calibrated nonparallel formation.
     cam_vx = error_x if push_mode else error_x + error_angle
     cam_vy = error_y
@@ -655,20 +659,20 @@ def solve_follow_pose_twist(
     if orbit_mode or spin_mode:
         position_priority = (
             (angle_active and (not spin_mode))
-            or abs(cam_vy) >= Follow_Orbit_Position_X_Error
-            or abs(cam_vx) >= Follow_Orbit_Position_Y_Error
+            or cam_vy >= Follow_Orbit_Position_X_Error
+            or cam_vy <= -Follow_Orbit_Position_X_Error
+            or cam_vx >= Follow_Orbit_Position_Y_Error
+            or cam_vx <= -Follow_Orbit_Position_Y_Error
         )
     else:
         position_priority = False
-    body_vx = -calc_follow_forward(cam_vx, position_priority) * (
-        1.0 - 0.45 * push_mode
-    )
+    body_vx = -calc_follow_forward(cam_vx, position_priority)
     body_vy = calc_follow_lateral(cam_vy, position_priority)
     if (not orbit_mode) and (not spin_mode):
         body_vx *= Follow_Normal_Visual_Forward_Scale
         body_vy *= Follow_Normal_Visual_Lateral_Scale
     if use_ff and not spin_mode and ff_vx == 0.0 and ff_vy == 0.0:
-        if (not orbit_mode) and abs(cam_vy) >= 6.0:
+        if (not orbit_mode) and (cam_vy >= 6.0 or cam_vy <= -6.0):
             body_vx = 0.0
         elif -8.0 < body_vx < 8.0:
             body_vx *= 1.5
@@ -1232,7 +1236,7 @@ def update_follow_targets(gyro_z):
             spin_mode_active,
         )
         if push_follow_active:
-            vx = (vx - body_vx) + body_vx * xy_scale
+            vx = (vx - body_vx) + body_vx * Push_X_Scale
             vy = (vy - body_vy) + body_vy * xy_scale
         elif mode_key != 0:
             vx *= xy_scale

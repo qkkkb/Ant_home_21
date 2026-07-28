@@ -91,8 +91,6 @@ Follow_Forward_Gain = 0.46
 Follow_Lateral_Gain = 0.92
 Follow_Orbit_Forward_Gain = 1.00
 Follow_Orbit_Lateral_Gain = 0.92
-Follow_Forward_Error_Sign = 1.0
-Follow_Lateral_Error_Sign = -1.0
 Follow_Forward_Limit = 38.0
 Follow_Lateral_Limit = 30.0
 Follow_Forward_Deadband = 2
@@ -114,7 +112,6 @@ Follow_Push_Feedforward_Lateral_Gain = 1.55
 Follow_Push_Feedforward_Forward_Limit = 30.0
 Follow_Push_Feedforward_Lateral_Limit = 32.0
 Follow_Normal_Visual_Forward_Scale = 0.72
-Follow_Normal_Visual_Lateral_Scale = 1.00
 Follow_Static_Visual_Scale = 0.60
 Follow_Close_Guard_Full_Error = 8.0
 Follow_Close_Feedforward_Min_Scale = 0.25
@@ -534,15 +531,10 @@ def calc_follow_forward(error_y, position_priority=False):
             out += (
                 error_y - Follow_Distance_Far_Boost_Error
             ) * Follow_Distance_Far_Boost_Gain
-        out *= Follow_Forward_Error_Sign
-        if Follow_Forward_Error_Sign >= 0:
-            return clamp(out, 0.0, Follow_Forward_Limit)
-        return clamp(out, -Follow_Forward_Limit, 0.0)
+        return clamp(out, 0.0, Follow_Forward_Limit)
 
-    out = error_y * Follow_Distance_Close_Gain * Follow_Forward_Error_Sign
-    if Follow_Forward_Error_Sign >= 0:
-        return clamp(out, -Follow_Distance_Close_Limit, 0.0)
-    return clamp(out, 0.0, Follow_Distance_Close_Limit)
+    out = error_y * Follow_Distance_Close_Gain
+    return clamp(out, -Follow_Distance_Close_Limit, 0.0)
 
 
 def calc_follow_lateral(error_x, position_priority=False):
@@ -553,7 +545,7 @@ def calc_follow_lateral(error_x, position_priority=False):
     if error_x == 0.0:
         return 0.0
     gain = Follow_Orbit_Lateral_Gain if position_priority else Follow_Lateral_Gain
-    out = -error_x * gain * Follow_Lateral_Error_Sign
+    out = error_x * gain
     return clamp(out, -Follow_Lateral_Limit, Follow_Lateral_Limit)
 
 
@@ -662,7 +654,6 @@ def solve_follow_pose_twist(
     body_vy = calc_follow_lateral(cam_vy, position_priority)
     if (not orbit_mode) and (not spin_mode):
         body_vx *= Follow_Normal_Visual_Forward_Scale
-        body_vy *= Follow_Normal_Visual_Lateral_Scale
     if use_ff and not spin_mode and ff_vx == 0.0 and ff_vy == 0.0:
         if (not orbit_mode) and (cam_vy >= 6.0 or cam_vy <= -6.0):
             body_vx = 0.0
@@ -1250,11 +1241,11 @@ def update_follow_targets(gyro_z):
             (mode_key == 0 or push_follow_active)
             and (cam_error_y >= 8 or cam_error_y <= -8)
         ):
+            vx -= body_vx
             if push_follow_active:
-                vx -= body_vx * 0.65
                 body_vx *= 0.35
+                vx += body_vx
             else:
-                vx -= body_vx
                 body_vx = 0.0
         if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
             vx -= body_vx * (1.0 - Follow_Static_Visual_Scale)
@@ -1318,18 +1309,10 @@ def update_follow_targets(gyro_z):
             ff_vy,
             Follow_Push_Feedforward_Lateral_Gain,
             Follow_Push_Feedforward_Lateral_Limit,
-            clamp(1.0 - abs(cam_error_y) / 6.0, 0.0, 1.0),
+            1.0
+            if abs(gyro_z) >= 40
+            else clamp(1.0 - abs(cam_error_y) / 6.0, 0.0, 1.0),
         )
-        if (
-            (gyro_z >= 40 or gyro_z <= -40)
-            and (ff_vy >= 4.0 or ff_vy <= -4.0)
-            and vy * ff_vy < 0.0
-        ):
-            vy = clamp(
-                ff_vy * Follow_Push_Feedforward_Lateral_Gain,
-                -Follow_Push_Feedforward_Lateral_Limit,
-                Follow_Push_Feedforward_Lateral_Limit,
-            )
         turn_rate_cmd = add_feedforward_assist(
             turn_rate_cmd,
             follow_ff_wz,

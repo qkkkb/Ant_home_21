@@ -159,7 +159,7 @@ Follow_Angle_XY_Mode_On_Error = 10
 Follow_Angle_XY_Mode_Full_Error = 42
 Follow_Angle_XY_Min_Scale = 0.38
 Follow_Spin_XY_Min_Scale = 0.94
-Follow_Orbit_XY_Max_Scale = 0.68
+Follow_Orbit_XY_Max_Scale = 0.78
 Follow_Spin_XY_Max_Scale = 1.00
 Follow_Pose_Wheel_Target_Limit = 45.0
 Follow_Command_Ramp_Vx = 2.0
@@ -508,8 +508,8 @@ def update_orbit_follow_mode(
     if (
         ff_wz > Follow_Orbit_Mode_FfWz_Off
         or ff_wz < -Follow_Orbit_Mode_FfWz_Off
-        or gyro_z > 25
-        or gyro_z < -25
+        or gyro_z > 30
+        or gyro_z < -30
     ):
         orbit_follow_exit_since_ms = 0
     elif orbit_follow_exit_since_ms == 0:
@@ -1595,10 +1595,9 @@ def set_three_pwm_follow(u_fl, u_fr, u_b, t_fl, t_fr, t_b, stall_boost):
     last_pwm_fl = s_fl
     last_pwm_fr = s_fr
     last_pwm_b = s_b
-    if not last_follow_mode_key or _orbit:
-        pid_fl.output = s_fl
-        pid_fr.output = s_fr
-        pid_b.output = s_b
+    pid_fl.output = s_fl
+    pid_fr.output = s_fr
+    pid_b.output = s_b
     return s_fl, s_fr, s_b
 
 

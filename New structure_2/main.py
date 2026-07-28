@@ -667,6 +667,8 @@ def solve_follow_pose_twist(
     else:
         position_priority = False
     body_vx = -calc_follow_forward(cam_vx, position_priority)
+    if push_mode:
+        body_vx *= 0.55
     body_vy = calc_follow_lateral(cam_vy, position_priority)
     if (not orbit_mode) and (not spin_mode):
         body_vx *= Follow_Normal_Visual_Forward_Scale

@@ -33,10 +33,10 @@ GYRO_SIGN = 1.0
 GYRO_OFFSET_Z = 0.0
 GYRO_SCALE = -1.0
 GYRO_DEADBAND_DPS = 0.8  # 陀螺仪死区阈值
-GYRO_KP = 0.22
-GYRO_KI = 0.004
+GYRO_KP = 0.12
+GYRO_KI = 0.008
 GYRO_OUTPUT_LIMIT = 5.0
-Nav_Track_Gyro_Limit = 6.0
+Nav_Track_Gyro_Limit = 12.0
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True   #是否在启动时自动进行陀螺仪标定
 GYRO_CALIBRATE_SAMPLES = 1000
 GYRO_CALIBRATE_DELAY_MS = 2
@@ -159,8 +159,6 @@ Nav_Ball_Field_Vx_Scale = 0.8660254
 Nav_Ball_Field_Vy_Scale = 0.5
 Nav_Push_Execute_Forward_Speed = 20.0    #执行阶段前进速度
 Nav_Push_Execute_Gyro_Limit = 16.0
-Nav_Ball_Push_Gyro_Kp = 0.12
-Nav_Ball_Push_Gyro_Ki = 0.008
 Nav_Ball_Push_Gyro_Limit = 22.0
 Nav_Push_Line_Lost_Ms = 150
 Nav_Push_Line_Extra_Ms = 100
@@ -1804,9 +1802,6 @@ def calc_speed_closed_loop():
     if nav_state in (NAV_STATE_SEARCH_SPIN, NAV_STATE_PUSH_TURN, NAV_STATE_RETURN_TURN):
         gyro_pid.gyro_kp = Nav_Push_Turn_Gyro_Kp
         gyro_pid.gyro_ki = Nav_Push_Turn_Gyro_Ki
-    elif nav_state == NAV_STATE_PUSH and push_dir_code == Push_Dir_Up:
-        gyro_pid.gyro_kp = Nav_Ball_Push_Gyro_Kp
-        gyro_pid.gyro_ki = Nav_Ball_Push_Gyro_Ki
     else:
         gyro_pid.gyro_kp = GYRO_KP
         gyro_pid.gyro_ki = GYRO_KI

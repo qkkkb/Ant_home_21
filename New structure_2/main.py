@@ -630,6 +630,8 @@ def solve_follow_pose_twist(
     push_mode,
 ):
     vision_wz = calc_follow_angle(error_angle, orbit_mode, spin_mode)
+    if push_mode:
+        vision_wz *= 0.65
     active_error = (
         Follow_Pose_Angle_Active_Error
         if (orbit_mode or spin_mode)
@@ -1248,8 +1250,12 @@ def update_follow_targets(gyro_z):
             (mode_key == 0 or push_follow_active)
             and (cam_error_y >= 8 or cam_error_y <= -8)
         ):
-            vx -= body_vx
-            body_vx = 0.0
+            if push_follow_active:
+                vx -= body_vx * 0.65
+                body_vx *= 0.35
+            else:
+                vx -= body_vx
+                body_vx = 0.0
         if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
             vx -= body_vx * (1.0 - Follow_Static_Visual_Scale)
             vy -= body_vy * (1.0 - Follow_Static_Visual_Scale)
@@ -1314,6 +1320,16 @@ def update_follow_targets(gyro_z):
             Follow_Push_Feedforward_Lateral_Limit,
             clamp(1.0 - abs(cam_error_y) / 6.0, 0.0, 1.0),
         )
+        if (
+            (gyro_z >= 40 or gyro_z <= -40)
+            and (ff_vy >= 4.0 or ff_vy <= -4.0)
+            and vy * ff_vy < 0.0
+        ):
+            vy = clamp(
+                ff_vy * Follow_Push_Feedforward_Lateral_Gain,
+                -Follow_Push_Feedforward_Lateral_Limit,
+                Follow_Push_Feedforward_Lateral_Limit,
+            )
         turn_rate_cmd = add_feedforward_assist(
             turn_rate_cmd,
             follow_ff_wz,

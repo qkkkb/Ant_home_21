@@ -56,7 +56,7 @@ GYRO_PRIORITY_MIN_CMD = 6.5
 GYRO_PRIORITY_OVERSPEED_RATIO = 2.25
 GYRO_PRIORITY_BRAKE_KP = 0.16
 GYRO_PRIORITY_BRAKE_LIMIT = 8.0
-GYRO_SPIN_PRIORITY_OUTPUT_BASE_LIMIT = 18.0
+GYRO_SPIN_PRIORITY_OUTPUT_BASE_LIMIT = 10.0
 GYRO_SPIN_PRIORITY_OUTPUT_TARGET_GAIN = 0.45
 GYRO_SPIN_PRIORITY_OUTPUT_MAX_LIMIT = 58.0
 GYRO_SPIN_PRIORITY_OVERSPEED_RATIO = 1.25
@@ -639,7 +639,6 @@ def solve_follow_pose_twist(
     use_ff,
     orbit_mode=False,
     spin_mode=False,
-    push_mode=False,
 ):
     vision_wz = calc_follow_angle(error_angle, orbit_mode, spin_mode)
     active_error = (
@@ -652,7 +651,7 @@ def solve_follow_pose_twist(
         or error_angle <= -active_error
     )
     # Local pose features around the calibrated nonparallel formation.
-    cam_vx = error_x if push_mode else error_x + error_angle
+    cam_vx = error_x + error_angle
     cam_vy = error_y
     if cam_vx > 0.0:
         cam_vy -= cam_vx * 5 // 13
@@ -1192,7 +1191,6 @@ def update_follow_targets(gyro_z):
             use_motion_feedforward,
             orbit_mode_active,
             spin_mode_active,
-            push_follow_active,
         )
         if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
             vx -= body_vx * (1.0 - Follow_Static_Visual_Scale)

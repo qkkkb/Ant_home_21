@@ -177,7 +177,7 @@ Follow_Orbit_Mode_FfWz_Off = 10.0
 Follow_Orbit_Mode_Exit_Ms = 60
 Follow_Orbit_Mode_FfWz_Filter = 0.22
 Follow_Normal_Wz_Feedforward_Limit = 15.0
-Push_X_Scale = 0.55
+Follow_Spin_Mode_FfWz_On = 32.0
 Follow_Spin_Latch_Min_Wz = 26.0
 Follow_Spin_Command_Hold_Ms = 900
 Follow_Spin_Latch_Release_Angle = 3
@@ -1236,7 +1236,7 @@ def update_follow_targets(gyro_z):
             spin_mode_active,
         )
         if push_follow_active:
-            vx = (vx - body_vx) + body_vx * Push_X_Scale
+            vx = (vx - body_vx) + body_vx * xy_scale
             vy = (vy - body_vy) + body_vy * xy_scale
         elif mode_key != 0:
             vx *= xy_scale

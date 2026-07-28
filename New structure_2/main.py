@@ -174,7 +174,7 @@ Follow_Pose_Gyro_Output_Ramp = 2.0
 Follow_Normal_Target_Lost_Hold_Ms = 1000
 Follow_Target_Lost_Hold_Ms = 250
 Follow_Orbit_Mode_FfWz_Off = 10.0
-Follow_Orbit_Mode_Exit_Ms = 60
+Follow_Orbit_Mode_Exit_Ms = 200
 Follow_Orbit_Mode_FfWz_Filter = 0.22
 Follow_Normal_Wz_Feedforward_Limit = 15.0
 Follow_Spin_Latch_Min_Wz = 26.0
@@ -492,8 +492,15 @@ def update_orbit_follow_mode(
     if (
         ff_wz > Follow_Orbit_Mode_FfWz_Off
         or ff_wz < -Follow_Orbit_Mode_FfWz_Off
-        or gyro_z > 30
-        or gyro_z < -30
+        or gyro_z > 8
+        or gyro_z < -8
+        or not cam_target_seen()
+        or cam_error_angle > 8
+        or cam_error_angle < -8
+        or cam_error_y > 8
+        or cam_error_y < -8
+        or cam_error_x + cam_error_angle > 10
+        or cam_error_x + cam_error_angle < -10
     ):
         orbit_follow_exit_since_ms = 0
     elif orbit_follow_exit_since_ms == 0:
@@ -648,7 +655,7 @@ def solve_follow_pose_twist(
     else:
         position_priority = False
     body_vx = -calc_follow_forward(cam_vx, position_priority)
-    if push_mode:
+    if push_mode and -8.0 < cam_vx < 8.0:
         body_vx *= 0.55
     body_vy = calc_follow_lateral(cam_vy, position_priority)
     if (not orbit_mode) and (not spin_mode):

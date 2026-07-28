@@ -1244,6 +1244,12 @@ def update_follow_targets(gyro_z):
             spin_mode_active,
             push_follow_active,
         )
+        if (
+            (mode_key == 0 or push_follow_active)
+            and (cam_error_y >= 8 or cam_error_y <= -8)
+        ):
+            vx -= body_vx
+            body_vx = 0.0
         if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
             vx -= body_vx * (1.0 - Follow_Static_Visual_Scale)
             vy -= body_vy * (1.0 - Follow_Static_Visual_Scale)
@@ -1687,7 +1693,10 @@ def wheel_target_idle(target):
 
 
 def speed_ctrl_follow(pid, actual_speed, target_speed):
-    if last_follow_mode_key:
+    if last_follow_mode_key and not (
+        (master_flags & MASTER_MOTION_FLAG_PUSH)
+        and (cam_target_vy >= 8.0 or cam_target_vy <= -8.0)
+    ):
         pid.ki = 8.0
     elif master_flags and (cam_target_vy >= 8.0 or cam_target_vy <= -8.0):
         pid.ki = 16.0

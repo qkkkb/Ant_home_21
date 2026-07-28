@@ -1902,6 +1902,8 @@ def calc_speed_closed_loop():
         )
         debug_event_mask = 0
 
+gc.collect()
+
 key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
 key_start = Pin(cfg.BTN_START_PIN, Pin.IN, Pin.PULL_UP)
 led_straight = Pin(cfg.LED_STRAIGHT_PIN, Pin.OUT, value=0)
@@ -1935,11 +1937,6 @@ if ENABLE_IMU:
         tick_period_ms=TICK_PERIOD_MS,
     )
 
-pit1 = ticker(1)
-pit1.capture_list(enc_fl, enc_fr, enc_b)
-pit1.callback(time_pit_handler)
-pit1.start(TICK_PERIOD_MS)
-
 move_cmd = MoveBase()
 pid_fl = SpeedPID()
 pid_fr = SpeedPID()
@@ -1957,6 +1954,12 @@ if ENABLE_GYRO_LOOP:
     gyro_pid.gyro_kp = GYRO_KP
     gyro_pid.gyro_ki = GYRO_KI
     gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
+
+pit1 = ticker(1)
+pit1.capture_list(enc_fl, enc_fr, enc_b)
+pit1.callback(time_pit_handler)
+gc.collect()
+pit1.start(TICK_PERIOD_MS)
 
 try:
     while True:

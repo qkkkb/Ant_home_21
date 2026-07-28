@@ -45,7 +45,9 @@ GYRO_CALIBRATE_DELAY_MS = 2
 # 退出与回收配置
 GC_DIV = 50
 DEBUG_LOG_PERIOD_MS = 100
+DEBUG_LOG_BUF_SIZE = 144
 debug_wireless = None
+debug_log_buf = None
 
 Cam_Error_Offset = 120
 Cam_Error_Scale = 2
@@ -1632,13 +1634,45 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
     last_pwm_fr = s_fr
     last_pwm_b = s_b
 
+
+def debug_put_int(buf, pos, value):
+    value = int(value)
+    if value < 0:
+        buf[pos] = 45
+        pos += 1
+        value = -value
+
+    start = pos
+    if value == 0:
+        buf[pos] = 48
+        pos += 1
+    else:
+        while value:
+            buf[pos] = 48 + value % 10
+            value //= 10
+            pos += 1
+        end = pos - 1
+        while start < end:
+            tmp = buf[start]
+            buf[start] = buf[end]
+            buf[end] = tmp
+            start += 1
+            end -= 1
+
+    buf[pos] = 32
+    return pos + 1
+
+
 # ====================== 初始化 LED 显示 ======================
 update_nav_led_display()
 gc.collect()
 try:
     debug_wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
+    debug_log_buf = bytearray(DEBUG_LOG_BUF_SIZE)
 except Exception:
     debug_wireless = None
+    debug_log_buf = None
+gc.collect()
 log("[INIT] boot, vision loop waiting")
 log("[INFO] C9=start C8=exit")
 
@@ -1851,34 +1885,39 @@ def calc_speed_closed_loop():
     now_log = utime.ticks_ms()
     if (
         debug_wireless is not None
+        and debug_log_buf is not None
         and utime.ticks_diff(now_log, debug_log_last_ms) >= DEBUG_LOG_PERIOD_MS
     ):
         debug_log_last_ms = now_log
         try:
-            debug_wireless.send_str(
-                "G %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\r\n"
-                % (
-                    nav_state_code(nav_state),
-                    int(yaw_ref_deg),
-                    int(yaw_deg),
-                    int(yaw_err_deg),
-                    int(gyro_z),
-                    int(turn_rate_cmd),
-                    int(vz_cmd),
-                    int(cam_target_vx),
-                    int(cam_target_vy),
-                    int(push_orbit_target_delta - push_orbit_progress_deg),
-                    e_fl,
-                    e_fr,
-                    e_b,
-                    int(t_fl),
-                    int(t_fr),
-                    int(t_b),
-                    last_pwm_fl,
-                    last_pwm_fr,
-                    last_pwm_b,
-                )
+            buf = debug_log_buf
+            buf[0] = 71
+            buf[1] = 32
+            pos = 2
+            pos = debug_put_int(buf, pos, nav_state_code(nav_state))
+            pos = debug_put_int(buf, pos, yaw_ref_deg)
+            pos = debug_put_int(buf, pos, yaw_deg)
+            pos = debug_put_int(buf, pos, yaw_err_deg)
+            pos = debug_put_int(buf, pos, gyro_z)
+            pos = debug_put_int(buf, pos, turn_rate_cmd)
+            pos = debug_put_int(buf, pos, vz_cmd)
+            pos = debug_put_int(
+                buf,
+                pos,
+                push_orbit_target_delta - push_orbit_progress_deg,
             )
+            pos = debug_put_int(buf, pos, e_fl)
+            pos = debug_put_int(buf, pos, e_fr)
+            pos = debug_put_int(buf, pos, e_b)
+            pos = debug_put_int(buf, pos, t_fl)
+            pos = debug_put_int(buf, pos, t_fr)
+            pos = debug_put_int(buf, pos, t_b)
+            pos = debug_put_int(buf, pos, last_pwm_fl)
+            pos = debug_put_int(buf, pos, last_pwm_fr)
+            pos = debug_put_int(buf, pos, last_pwm_b)
+            buf[pos - 1] = 13
+            buf[pos] = 10
+            debug_wireless.send_bytearray(buf, pos + 1)
         except Exception:
             pass
 

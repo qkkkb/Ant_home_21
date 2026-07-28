@@ -245,10 +245,6 @@ last_hard_stop = False
 last_stall_count = 0
 last_stall_boost = False
 follow_output_limit = FOLLOW_RUN_PWM_LIMIT
-# Bits 0-2: wheel target idle; 3-5: reserved; 6: mode reset;
-# 7: explicit camera loss; 8: camera timeout edge; 9: push-settle orbit FF gate;
-# 10-12: final PWM saturation; 13: pose limiter; 14: gyro limit.
-debug_event_mask = 0
 
 
 def clamp(value, low, high):
@@ -375,21 +371,10 @@ def gyro_limit_for_turn(turn_rate_cmd, priority=False, spin_priority=False):
 
 def update_cam_target(err_x, err_y, err_angle=0):
     global cam_error_x, cam_error_y, cam_error_angle, cam_last_rx_ms
-    global debug_event_mask
 
     err_x = int(err_x)
     err_y = int(err_y)
     err_angle = int(err_angle)
-    if cam_error_x * err_x < 0 or cam_error_y * err_y < 0:
-        debug_event_mask |= 65536
-    if cam_error_angle * err_angle < 0:
-        debug_event_mask |= 131072
-    if (
-        abs(err_x - cam_error_x) >= 12
-        or abs(err_y - cam_error_y) >= 12
-        or abs(err_angle - cam_error_angle) >= 12
-    ):
-        debug_event_mask |= 262144
     cam_error_x = err_x
     cam_error_y = err_y
     cam_error_angle = err_angle
@@ -615,11 +600,8 @@ def add_feedforward_assist(base, feedforward, gain, limit):
 
 
 def add_feedforward_direct(base, feedforward, gain, limit, conflict_scale=1.0):
-    global debug_event_mask
-
     assist = clamp(feedforward * gain, -limit, limit)
     if base * assist < -0.001 and conflict_scale < 1.0:
-        debug_event_mask |= 32768
         if (
             not master_edge_until_ms
             or last_follow_mode_key != 0
@@ -791,18 +773,14 @@ def max_wheel_abs(wheel_fr, wheel_fl, wheel_b):
 
 
 def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_turn=False):
-    global debug_event_mask
-
     if Follow_Pose_Wheel_Target_Limit <= 0.0:
         return vx, vy, vz
 
     if preserve_turn:
         limit = Follow_Pose_Wheel_Target_Limit
         if vz > limit:
-            debug_event_mask |= 8192
             vz = limit
         elif vz < -limit:
-            debug_event_mask |= 8192
             vz = -limit
         wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
         wheel_max = wheel_fr
@@ -825,7 +803,6 @@ def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_
         if scale < 0.0:
             scale = 0.0
         if scale < 1.0:
-            debug_event_mask |= 8192
             vx *= scale
             vy *= scale
         return vx, vy, vz
@@ -834,7 +811,6 @@ def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_
         wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, vz)
         target_max = max_wheel_abs(wheel_fr, wheel_fl, wheel_b)
         if target_max > Follow_Pose_Wheel_Target_Limit:
-            debug_event_mask |= 8192
             scale = Follow_Pose_Wheel_Target_Limit / target_max
             vx *= scale
             vy *= scale
@@ -844,15 +820,12 @@ def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_
     wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
     pos_max = max_wheel_abs(wheel_fr, wheel_fl, wheel_b)
     if pos_max > Follow_Pose_Wheel_Target_Limit:
-        debug_event_mask |= 8192
         pos_scale = Follow_Pose_Wheel_Target_Limit / pos_max
         vx *= pos_scale
         vy *= pos_scale
         wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
 
     if -0.001 < vz < 0.001:
-        if vz != 0.0:
-            debug_event_mask |= 8192
         return vx, vy, 0.0
 
     if vz > 0.0:
@@ -866,7 +839,6 @@ def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_
         if remain < 0.0:
             remain = 0.0
         if vz > remain:
-            debug_event_mask |= 8192
             vz = remain
     else:
         remain = Follow_Pose_Wheel_Target_Limit + wheel_fr
@@ -879,7 +851,6 @@ def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_
         if remain < 0.0:
             remain = 0.0
         if -vz > remain:
-            debug_event_mask |= 8192
             vz = -remain
 
     return vx, vy, vz
@@ -939,7 +910,6 @@ def poll_art_uart():
     global cam_parse_state, cam_parse_b1, cam_parse_b2
     global cam_has_target
     global cam_last_rx_ms, target_lost_since_ms
-    global debug_event_mask
 
     pending = cam_uart.any()
     if not pending:
@@ -965,7 +935,6 @@ def poll_art_uart():
         elif cam_parse_state == 2:
             cam_parse_b2 = b
             if cam_parse_b1 == No_Target_Marker and b == No_Target_Marker:
-                debug_event_mask |= 128
                 cam_has_target = False
                 cam_last_rx_ms = utime.ticks_ms()
                 cam_parse_state = 0
@@ -1029,6 +998,83 @@ def debug_send(text):
         pass
 
 
+def debug_send_idle(log_id):
+    debug_send(
+        "I %d %d %d %d %d %d %d"
+        % (
+            log_id,
+            1 if cam_target_seen() else 0,
+            1 if master_motion_fresh() else 0,
+            master_flags,
+            cam_error_x,
+            cam_error_y,
+            cam_error_angle,
+        )
+    )
+
+
+def debug_send_state(log_id, vz_cmd, gyro_z):
+    debug_send(
+        "S %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
+        % (
+            log_id,
+            master_flags,
+            1 if last_follow_seen else 0,
+            1 if last_hard_stop else 0,
+            1 if last_stall_boost else 0,
+            1 if last_angle_priority_active else 0,
+            1 if master_edge_until_ms else 0,
+            cam_error_x,
+            cam_error_y,
+            cam_error_angle,
+            int(cam_target_vx),
+            int(cam_target_vy),
+            int(vz_cmd),
+            int(gyro_z),
+        )
+    )
+
+
+def debug_send_wheel(log_id, u_fl, u_fr, u_b):
+    debug_send(
+        "W %d %d %d %d %d %d %d %d %d %d %d %d %d"
+        % (
+            log_id,
+            pid_fl.enc_sum,
+            pid_fr.enc_sum,
+            pid_b.enc_sum,
+            int(move_cmd.speed_fl * 4),
+            int(move_cmd.speed_fr * 4),
+            int(move_cmd.speed_b * 4),
+            last_pwm_fl,
+            last_pwm_fr,
+            last_pwm_b,
+            int(u_fl),
+            int(u_fr),
+            int(u_b),
+        )
+    )
+
+
+def debug_send_flow(log_id, yaw_deg, master_age_ms, cam_age_ms):
+    debug_send(
+        "F %d %d %d %d %d %d %d %d %d %d %d"
+        % (
+            log_id,
+            int(yaw_deg),
+            int(last_visual_vx),
+            int(last_visual_vy),
+            int(last_ff_vx),
+            int(last_ff_vy),
+            int(last_ff_wz),
+            int(last_turn_rate_cmd),
+            last_follow_mode_key,
+            master_age_ms,
+            cam_age_ms,
+        )
+    )
+
+
 def update_follow_targets(gyro_z):
     global cam_target_vx, cam_target_vy, target_lost_since_ms
     global last_turn_rate_cmd
@@ -1042,12 +1088,9 @@ def update_follow_targets(gyro_z):
     global last_angle_priority_active
     global last_follow_mode_key, _orbit
     global master_edge_until_ms
-    global debug_event_mask
 
     now = utime.ticks_ms()
     seen = cam_target_seen()
-    if last_follow_seen and not seen:
-        debug_event_mask |= 256
     fresh_motion = master_motion_fresh()
     if fresh_motion:
         ff_vx = master_vx * 0.5 + master_vy * 0.8660254
@@ -1102,7 +1145,6 @@ def update_follow_targets(gyro_z):
     mode_key = 3 if spin_mode_active else (1 if orbit_mode_active else 0)
     _orbit = mode_key == 1
     if last_follow_mode_key != mode_key:
-        debug_event_mask |= 64
         if last_follow_mode_key > 0 and mode_key == 0:
             reset_speed_outputs()
             follow_ff_wz = 0.0
@@ -1330,8 +1372,6 @@ def update_follow_targets(gyro_z):
             )
         )
     )
-    if normal_brake_active:
-        debug_event_mask |= 4194304
     if -0.001 < turn_rate_cmd < 0.001:
         turn_rate_cmd = 0.0
         if orbit_brake_active or normal_brake_active:
@@ -1421,10 +1461,8 @@ def update_follow_targets(gyro_z):
         ):
             normal_brake_reserve *= 2.0
         if vz_cmd > normal_brake_reserve:
-            debug_event_mask |= 8192
             vz_cmd = normal_brake_reserve
         elif vz_cmd < -normal_brake_reserve:
-            debug_event_mask |= 8192
             vz_cmd = -normal_brake_reserve
     cam_target_vx, cam_target_vy, vz_cmd = limit_pose_twist_for_wheels(
         cam_target_vx,
@@ -1638,17 +1676,12 @@ def wheel_target_idle(target):
     return -WHEEL_TARGET_IDLE_EPS <= target <= WHEEL_TARGET_IDLE_EPS
 
 
-def speed_ctrl_follow(pid, actual_speed, target_speed, idle_event, reverse_event):
-    global debug_event_mask
-
+def speed_ctrl_follow(pid, actual_speed, target_speed):
     pid.ki = 12.0 if not last_follow_mode_key else 8.0
     if wheel_target_idle(target_speed):
-        debug_event_mask |= idle_event
         if not _orbit:
             speed_reset(pid)
             return 0.0
-    if pid.tar_spd_last * target_speed < 0.0:
-        debug_event_mask |= reverse_event
     output = speed_ctrl(pid, actual_speed, target_speed)
     if not last_follow_mode_key or _orbit:
         output = speed_follow_guard(
@@ -1700,13 +1733,11 @@ def calibrate_gyro_before_launch():
 
 def start_follow():
     global car_started, start_time
-    global debug_event_mask
 
     if car_started:
         return
     calibrate_gyro_before_launch()
     clear_cam_target_state()
-    debug_event_mask = 0
     car_started = True
     start_time = utime.ticks_ms()
     cam_uart.write(ART_MODE_TRACK_CMD)
@@ -1743,7 +1774,6 @@ def calc_speed_closed_loop():
     global last_pwm_fl, last_pwm_fr, last_pwm_b
     global last_hard_stop
     global last_stall_count, last_stall_boost
-    global debug_event_mask
 
     if not car_started:
         reset_speed_outputs()
@@ -1751,27 +1781,7 @@ def calc_speed_closed_loop():
         last_hard_stop = True
         now_log = utime.ticks_ms()
         if debug_due(now_log):
-            log_id = now_log & 0x7FFF
-            debug_send(
-                "S %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
-                % (
-                    log_id,
-                    0,
-                    1 if cam_target_seen() else 0,
-                    1 if master_motion_fresh() else 0,
-                    master_flags,
-                    1,
-                    0,
-                    0,
-                    0,
-                    cam_error_x,
-                    cam_error_y,
-                    cam_error_angle,
-                    0,
-                    0,
-                    0,
-                )
-            )
+            debug_send_idle(now_log & 0x7FFF)
         return None
 
     if ENABLE_IMU:
@@ -1812,20 +1822,13 @@ def calc_speed_closed_loop():
             last_stall_count = 0
         last_stall_boost = last_stall_count >= 3
 
-        u_fl = speed_ctrl_follow(pid_fl, e_fl, t_fl, 1, 524288)
-        u_fr = speed_ctrl_follow(pid_fr, e_fr, t_fr, 2, 1048576)
-        u_b = speed_ctrl_follow(pid_b, e_b, t_b, 4, 2097152)
+        u_fl = speed_ctrl_follow(pid_fl, e_fl, t_fl)
+        u_fr = speed_ctrl_follow(pid_fr, e_fr, t_fr)
+        u_b = speed_ctrl_follow(pid_b, e_b, t_b)
 
         s_fl, s_fr, s_b = set_three_pwm_follow(
             u_fl, u_fr, u_b, t_fl, t_fr, t_b, last_stall_boost
         )
-
-    if s_fl >= FOLLOW_RUN_PWM_LIMIT or s_fl <= -FOLLOW_RUN_PWM_LIMIT:
-        debug_event_mask |= 1024
-    if s_fr >= FOLLOW_RUN_PWM_LIMIT or s_fr <= -FOLLOW_RUN_PWM_LIMIT:
-        debug_event_mask |= 2048
-    if s_b >= FOLLOW_RUN_PWM_LIMIT or s_b <= -FOLLOW_RUN_PWM_LIMIT:
-        debug_event_mask |= 4096
 
     now_log = utime.ticks_ms()
     if debug_due(now_log):
@@ -1840,66 +1843,9 @@ def calc_speed_closed_loop():
             if cam_last_rx_ms
             else -1
         )
-        debug_send(
-            "S %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
-            % (
-                log_id,
-                1,
-                1 if last_follow_seen else 0,
-                1 if master_motion_fresh() else 0,
-                master_flags,
-                1 if last_hard_stop else 0,
-                1 if last_stall_boost else 0,
-                1 if last_angle_priority_active else 0,
-                1 if master_edge_until_ms else 0,
-                cam_error_x,
-                cam_error_y,
-                cam_error_angle,
-                int(cam_target_vx),
-                int(cam_target_vy),
-                int(vz_cmd),
-            )
-        )
-        debug_send(
-            "E %d %d %d %d %d %d %d"
-            % (
-                log_id,
-                pid_fl.enc_sum,
-                pid_fr.enc_sum,
-                pid_b.enc_sum,
-                int(t_fl * 4),
-                int(t_fr * 4),
-                int(t_b * 4),
-            )
-        )
-        debug_send(
-            "P %d %d %d %d %d %d %d"
-            % (log_id, s_fl, s_fr, s_b, int(u_fl), int(u_fr), int(u_b))
-        )
-        debug_send(
-            "G %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
-            % (
-                log_id,
-                int(gyro_z),
-                int(yaw_deg),
-                int(last_visual_vx),
-                int(last_visual_vy),
-                int(last_ff_vx),
-                int(last_ff_vy),
-                int(last_ff_wz),
-                int(last_turn_rate_cmd),
-                int(cam_target_vx - last_visual_vx),
-                int(cam_target_vy - last_visual_vy),
-                int(pid_fl.delta_ud),
-                int(pid_fr.delta_ud),
-                int(pid_b.delta_ud),
-                last_follow_mode_key,
-                master_age_ms,
-                cam_age_ms,
-                debug_event_mask,
-            )
-        )
-        debug_event_mask = 0
+        debug_send_state(log_id, vz_cmd, gyro_z)
+        debug_send_wheel(log_id, u_fl, u_fr, u_b)
+        debug_send_flow(log_id, yaw_deg, master_age_ms, cam_age_ms)
 
 key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
 key_start = Pin(cfg.BTN_START_PIN, Pin.IN, Pin.PULL_UP)

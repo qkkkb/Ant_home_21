@@ -1,5 +1,6 @@
 from machine import Pin, UART
 import gc
+gc.collect()
 import utime
 from smartcar import ticker, encoder
 from seekfree import WIRELESS_UART
@@ -1901,8 +1902,6 @@ def calc_speed_closed_loop():
             )
         )
         debug_event_mask = 0
-
-gc.collect()
 
 key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
 key_start = Pin(cfg.BTN_START_PIN, Pin.IN, Pin.PULL_UP)

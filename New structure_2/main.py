@@ -1,6 +1,5 @@
 from machine import Pin, UART
 import gc
-gc.collect()
 import utime
 from smartcar import ticker, encoder
 from seekfree import WIRELESS_UART
@@ -647,32 +646,29 @@ def solve_follow_pose_twist(
         if (orbit_mode or spin_mode)
         else Follow_Normal_Pose_Angle_Active_Error
     )
-    angle_active = (
-        error_angle >= active_error
-        or error_angle <= -active_error
-    )
+    angle_active = abs(error_angle) >= active_error
     # Local pose features around the calibrated nonparallel formation.
-    cam_vx = error_x * 0.55 if push_mode else error_x + error_angle
+    cam_vx = error_x if push_mode else error_x + error_angle
     cam_vy = error_y
     if cam_vx > 0.0:
         cam_vy -= cam_vx * 5 // 13
     if orbit_mode or spin_mode:
         position_priority = (
             (angle_active and (not spin_mode))
-            or cam_vy >= Follow_Orbit_Position_X_Error
-            or cam_vy <= -Follow_Orbit_Position_X_Error
-            or cam_vx >= Follow_Orbit_Position_Y_Error
-            or cam_vx <= -Follow_Orbit_Position_Y_Error
+            or abs(cam_vy) >= Follow_Orbit_Position_X_Error
+            or abs(cam_vx) >= Follow_Orbit_Position_Y_Error
         )
     else:
         position_priority = False
-    body_vx = -calc_follow_forward(cam_vx, position_priority)
+    body_vx = -calc_follow_forward(cam_vx, position_priority) * (
+        1.0 - 0.45 * push_mode
+    )
     body_vy = calc_follow_lateral(cam_vy, position_priority)
     if (not orbit_mode) and (not spin_mode):
         body_vx *= Follow_Normal_Visual_Forward_Scale
         body_vy *= Follow_Normal_Visual_Lateral_Scale
     if use_ff and not spin_mode and ff_vx == 0.0 and ff_vy == 0.0:
-        if (not orbit_mode) and (cam_vy >= 6.0 or cam_vy <= -6.0):
+        if (not orbit_mode) and abs(cam_vy) >= 6.0:
             body_vx = 0.0
         elif -8.0 < body_vx < 8.0:
             body_vx *= 1.5
@@ -1936,6 +1932,11 @@ if ENABLE_IMU:
         tick_period_ms=TICK_PERIOD_MS,
     )
 
+pit1 = ticker(1)
+pit1.capture_list(enc_fl, enc_fr, enc_b)
+pit1.callback(time_pit_handler)
+pit1.start(TICK_PERIOD_MS)
+
 move_cmd = MoveBase()
 pid_fl = SpeedPID()
 pid_fr = SpeedPID()
@@ -1953,12 +1954,6 @@ if ENABLE_GYRO_LOOP:
     gyro_pid.gyro_kp = GYRO_KP
     gyro_pid.gyro_ki = GYRO_KI
     gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
-
-pit1 = ticker(1)
-pit1.capture_list(enc_fl, enc_fr, enc_b)
-pit1.callback(time_pit_handler)
-gc.collect()
-pit1.start(TICK_PERIOD_MS)
 
 try:
     while True:

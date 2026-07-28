@@ -2,13 +2,13 @@ from machine import Pin, UART
 import gc
 import utime
 from smartcar import ticker, encoder
+from seekfree import WIRELESS_UART
 from lsm6dsv16x_gyro_runtime import LSM6DSV16XYawRuntime
 from models import AnglePID, MoveBase, SpeedPID
 from move_base import calc_wheel_spd
 import pid as _pid_mod
 import config as cfg
 from hardware import Motor
-import coop_master
 
 # 设置 PID 最大 PWM 值
 _pid_mod.PWM_MAX = cfg.PWM_MAX
@@ -44,6 +44,8 @@ GYRO_CALIBRATE_DELAY_MS = 2
 
 # 退出与回收配置
 GC_DIV = 50
+DEBUG_LOG_PERIOD_MS = 100
+debug_wireless = None
 
 Cam_Error_Offset = 120
 Cam_Error_Scale = 2
@@ -1632,7 +1634,11 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
 
 # ====================== 初始化 LED 显示 ======================
 update_nav_led_display()
-coop_master.init()
+gc.collect()
+try:
+    debug_wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
+except Exception:
+    debug_wireless = None
 log("[INIT] boot, vision loop waiting")
 log("[INFO] C9=start C8=exit")
 
@@ -1687,6 +1693,7 @@ loop_count = 0
 last_vz_cmd = 0.0
 last_turn_rate_cmd = 0.0
 yaw_ref_deg = 0.0
+debug_log_last_ms = start_time
 
 
 # ====================== 速度闭环主函数（含发车判断） ======================
@@ -1694,6 +1701,7 @@ def calc_speed_closed_loop():
     global last_vz_cmd, last_turn_rate_cmd
     global last_pwm_fl, last_pwm_fr, last_pwm_b
     global cam_target_vx, cam_target_vy
+    global debug_log_last_ms
 
     # 未发车：直接输出 0，占空比清零
     if not car_started:
@@ -1707,7 +1715,6 @@ def calc_speed_closed_loop():
     e_fl = enc_fl.get()
     e_fr = enc_fr.get()
     e_b = enc_b.get()
-    coop_master.update_state(e_fl, e_fr, e_b, gyro_z)
     low_speed = abs(e_fl) <= Nav_Low_Speed_Th and abs(e_fr) <= Nav_Low_Speed_Th and abs(e_b) <= Nav_Low_Speed_Th
     update_nav_state_and_targets(yaw_deg, low_speed, gyro_z)
 
@@ -1841,6 +1848,40 @@ def calc_speed_closed_loop():
     # PWM 平滑输出
     set_three_pwm_smooth(u_fl, u_fr, u_b)
 
+    now_log = utime.ticks_ms()
+    if (
+        debug_wireless is not None
+        and utime.ticks_diff(now_log, debug_log_last_ms) >= DEBUG_LOG_PERIOD_MS
+    ):
+        debug_log_last_ms = now_log
+        try:
+            debug_wireless.send_str(
+                "G %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\r\n"
+                % (
+                    nav_state_code(nav_state),
+                    int(yaw_ref_deg),
+                    int(yaw_deg),
+                    int(yaw_err_deg),
+                    int(gyro_z),
+                    int(turn_rate_cmd),
+                    int(vz_cmd),
+                    int(cam_target_vx),
+                    int(cam_target_vy),
+                    int(push_orbit_target_delta - push_orbit_progress_deg),
+                    e_fl,
+                    e_fr,
+                    e_b,
+                    int(t_fl),
+                    int(t_fr),
+                    int(t_b),
+                    last_pwm_fl,
+                    last_pwm_fr,
+                    last_pwm_b,
+                )
+            )
+        except Exception:
+            pass
+
     return None
 
 log("speed loop start")
@@ -1875,16 +1916,6 @@ try:
         if pit_flag:
             pit_flag = False
             calc_speed_closed_loop()
-        coop_master.send_if_due(
-            now,
-            car_started,
-            nav_state_code(nav_state),
-            cam_target_seen(),
-            imu_runtime.read_yaw(),
-            cam_target_vx,
-            cam_target_vy,
-            last_turn_rate_cmd,
-        )
 
         if utime.ticks_diff(now, last_status_ms) >= 1000:
             led.toggle()

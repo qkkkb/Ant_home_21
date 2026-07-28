@@ -159,16 +159,19 @@ Nav_Ball_Field_Vx_Scale = 0.8660254
 Nav_Ball_Field_Vy_Scale = 0.5
 Nav_Push_Execute_Forward_Speed = 20.0    #执行阶段前进速度
 Nav_Push_Execute_Gyro_Limit = 16.0
+Nav_Ball_Push_Gyro_Kp = 0.12
+Nav_Ball_Push_Gyro_Ki = 0.008
+Nav_Ball_Push_Gyro_Limit = 22.0
 Nav_Push_Line_Lost_Ms = 150
 Nav_Push_Line_Extra_Ms = 100
 Nav_Push_Back_Speed = 20.0
 Nav_Push_Back_Ms = 2500
 Nav_Push_Turn_Slow_Yaw = 95.0
-Nav_Push_Turn_Fast_Rate = 120.0
-Nav_Push_Turn_Slow_Rate = 52.0
-Nav_Push_Turn_Gyro_Limit = 10.0
-Nav_Push_Turn_Gyro_Kp = 0.17
-Nav_Push_Turn_Gyro_Ki = 0.002
+Nav_Push_Turn_Fast_Rate = 145.0
+Nav_Push_Turn_Slow_Rate = 65.0
+Nav_Push_Turn_Gyro_Limit = 18.0
+Nav_Push_Turn_Gyro_Kp = 0.11
+Nav_Push_Turn_Gyro_Ki = 0.005
 Nav_Push_Turn_Ok_Yaw = 6.0
 Nav_Push_Turn_Recover_Yaw = 12.0
 Nav_Push_Turn_Ok_Ms = 150
@@ -1801,6 +1804,9 @@ def calc_speed_closed_loop():
     if nav_state in (NAV_STATE_SEARCH_SPIN, NAV_STATE_PUSH_TURN, NAV_STATE_RETURN_TURN):
         gyro_pid.gyro_kp = Nav_Push_Turn_Gyro_Kp
         gyro_pid.gyro_ki = Nav_Push_Turn_Gyro_Ki
+    elif nav_state == NAV_STATE_PUSH and push_dir_code == Push_Dir_Up:
+        gyro_pid.gyro_kp = Nav_Ball_Push_Gyro_Kp
+        gyro_pid.gyro_ki = Nav_Ball_Push_Gyro_Ki
     else:
         gyro_pid.gyro_kp = GYRO_KP
         gyro_pid.gyro_ki = GYRO_KI
@@ -1808,7 +1814,10 @@ def calc_speed_closed_loop():
     if nav_state == NAV_STATE_PUSH_ORIENT:
         gyro_pid.gyro_output_limit = Nav_Push_Orbit_Gyro_Limit
     elif nav_state == NAV_STATE_PUSH:
-        gyro_pid.gyro_output_limit = Nav_Push_Execute_Gyro_Limit
+        if push_dir_code == Push_Dir_Up:
+            gyro_pid.gyro_output_limit = Nav_Ball_Push_Gyro_Limit
+        else:
+            gyro_pid.gyro_output_limit = Nav_Push_Execute_Gyro_Limit
     elif nav_state in (NAV_STATE_SEARCH_SPIN, NAV_STATE_PUSH_TURN, NAV_STATE_RETURN_TURN):
         gyro_pid.gyro_output_limit = Nav_Push_Turn_Gyro_Limit
     elif nav_state in (NAV_STATE_SEARCH_TURN, NAV_STATE_COARSE, NAV_STATE_FINE, NAV_STATE_PUSH_CLASSIFY, NAV_STATE_PUSH_PREPARE):

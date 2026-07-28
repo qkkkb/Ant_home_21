@@ -2,13 +2,13 @@ from machine import Pin, UART
 import gc
 import utime
 from smartcar import ticker, encoder
-from seekfree import WIRELESS_UART
 from lsm6dsv16x_gyro_runtime import LSM6DSV16XYawRuntime
 from models import AnglePID, MoveBase, SpeedPID
 from move_base import calc_wheel_spd
 import pid as _pid_mod
 import config as cfg
 from hardware import Motor
+import tune_log
 
 # 设置 PID 最大 PWM 值
 _pid_mod.PWM_MAX = cfg.PWM_MAX
@@ -44,10 +44,6 @@ GYRO_CALIBRATE_DELAY_MS = 2
 
 # 退出与回收配置
 GC_DIV = 50
-DEBUG_LOG_PERIOD_MS = 100
-DEBUG_LOG_BUF_SIZE = 144
-debug_wireless = None
-debug_log_buf = None
 
 Cam_Error_Offset = 120
 Cam_Error_Scale = 2
@@ -1635,43 +1631,10 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
     last_pwm_b = s_b
 
 
-def debug_put_int(buf, pos, value):
-    value = int(value)
-    if value < 0:
-        buf[pos] = 45
-        pos += 1
-        value = -value
-
-    start = pos
-    if value == 0:
-        buf[pos] = 48
-        pos += 1
-    else:
-        while value:
-            buf[pos] = 48 + value % 10
-            value //= 10
-            pos += 1
-        end = pos - 1
-        while start < end:
-            tmp = buf[start]
-            buf[start] = buf[end]
-            buf[end] = tmp
-            start += 1
-            end -= 1
-
-    buf[pos] = 32
-    return pos + 1
-
-
 # ====================== 初始化 LED 显示 ======================
 update_nav_led_display()
 gc.collect()
-try:
-    debug_wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
-    debug_log_buf = bytearray(DEBUG_LOG_BUF_SIZE)
-except Exception:
-    debug_wireless = None
-    debug_log_buf = None
+tune_log.init(cfg.COOP_WIRELESS_BAUD)
 gc.collect()
 log("[INIT] boot, vision loop waiting")
 log("[INFO] C9=start C8=exit")
@@ -1727,7 +1690,6 @@ loop_count = 0
 last_vz_cmd = 0.0
 last_turn_rate_cmd = 0.0
 yaw_ref_deg = 0.0
-debug_log_last_ms = start_time
 
 
 # ====================== 速度闭环主函数（含发车判断） ======================
@@ -1735,7 +1697,6 @@ def calc_speed_closed_loop():
     global last_vz_cmd, last_turn_rate_cmd
     global last_pwm_fl, last_pwm_fr, last_pwm_b
     global cam_target_vx, cam_target_vy
-    global debug_log_last_ms
 
     # 未发车：直接输出 0，占空比清零
     if not car_started:
@@ -1882,44 +1843,7 @@ def calc_speed_closed_loop():
     # PWM 平滑输出
     set_three_pwm_smooth(u_fl, u_fr, u_b)
 
-    now_log = utime.ticks_ms()
-    if (
-        debug_wireless is not None
-        and debug_log_buf is not None
-        and utime.ticks_diff(now_log, debug_log_last_ms) >= DEBUG_LOG_PERIOD_MS
-    ):
-        debug_log_last_ms = now_log
-        try:
-            buf = debug_log_buf
-            buf[0] = 71
-            buf[1] = 32
-            pos = 2
-            pos = debug_put_int(buf, pos, nav_state_code(nav_state))
-            pos = debug_put_int(buf, pos, yaw_ref_deg)
-            pos = debug_put_int(buf, pos, yaw_deg)
-            pos = debug_put_int(buf, pos, yaw_err_deg)
-            pos = debug_put_int(buf, pos, gyro_z)
-            pos = debug_put_int(buf, pos, turn_rate_cmd)
-            pos = debug_put_int(buf, pos, vz_cmd)
-            pos = debug_put_int(
-                buf,
-                pos,
-                push_orbit_target_delta - push_orbit_progress_deg,
-            )
-            pos = debug_put_int(buf, pos, e_fl)
-            pos = debug_put_int(buf, pos, e_fr)
-            pos = debug_put_int(buf, pos, e_b)
-            pos = debug_put_int(buf, pos, t_fl)
-            pos = debug_put_int(buf, pos, t_fr)
-            pos = debug_put_int(buf, pos, t_b)
-            pos = debug_put_int(buf, pos, last_pwm_fl)
-            pos = debug_put_int(buf, pos, last_pwm_fr)
-            pos = debug_put_int(buf, pos, last_pwm_b)
-            buf[pos - 1] = 13
-            buf[pos] = 10
-            debug_wireless.send_bytearray(buf, pos + 1)
-        except Exception:
-            pass
+    tune_log.send(utime.ticks_ms(), nav_state_code(nav_state), yaw_ref_deg, yaw_deg, yaw_err_deg, gyro_z, turn_rate_cmd, vz_cmd, push_orbit_target_delta - push_orbit_progress_deg, last_pwm_fl, last_pwm_fr, last_pwm_b)
 
     return None
 

@@ -163,11 +163,6 @@ Follow_Command_Ramp_Vx = 2.0
 Follow_Command_Ramp_Vy = 3.0
 Follow_Orbit_Command_Ramp_Vx = 20.0
 Follow_Orbit_Command_Ramp_Vy = 14.0
-Follow_Command_Ramp_Wz = 11.0
-Follow_Orbit_Command_Ramp_Wz = 18.0
-Follow_Spin_Command_Ramp_Wz = 36.0
-Follow_Spin_Gyro_Output_Ramp = 6.0
-Follow_Pose_Gyro_Output_Ramp = 2.0
 Follow_Normal_Target_Lost_Hold_Ms = 1000
 Follow_Target_Lost_Hold_Ms = 250
 Follow_Orbit_Mode_FfWz_Off = 10.0
@@ -235,6 +230,7 @@ orbit_follow_exit_since_ms = 0
 filtered_ff_wz = 0.0
 spin_latched_wz = 0.0
 spin_latch_until_ms = 0
+push_yaw_target = None
 last_follow_mode_key = -1
 master_edge_until_ms = 0
 last_hard_stop = False
@@ -385,6 +381,7 @@ def clear_cam_target_state():
     global last_angle_priority_active
     global orbit_follow_active, orbit_follow_exit_since_ms, filtered_ff_wz
     global spin_latched_wz, spin_latch_until_ms
+    global push_yaw_target
     global last_follow_mode_key
     global master_edge_until_ms
 
@@ -401,6 +398,7 @@ def clear_cam_target_state():
     filtered_ff_wz = 0.0
     spin_latched_wz = 0.0
     spin_latch_until_ms = 0
+    push_yaw_target = None
     last_follow_mode_key = -1
     master_edge_until_ms = 0
     cam_has_target = False
@@ -624,9 +622,11 @@ def solve_follow_pose_twist(
     spin_mode,
     push_mode,
 ):
-    vision_wz = calc_follow_angle(error_angle, orbit_mode, spin_mode)
-    if push_mode:
-        vision_wz *= 0.65
+    vision_wz = (
+        0.0
+        if push_mode
+        else calc_follow_angle(error_angle, orbit_mode, spin_mode)
+    )
     active_error = (
         Follow_Pose_Angle_Active_Error
         if (orbit_mode or spin_mode)
@@ -1116,6 +1116,7 @@ def update_follow_targets(gyro_z):
     global last_angle_priority_active
     global last_follow_mode_key, _orbit
     global master_edge_until_ms
+    global push_yaw_target
 
     now = utime.ticks_ms()
     seen = cam_target_seen()
@@ -1320,12 +1321,18 @@ def update_follow_targets(gyro_z):
             Follow_Lateral_Limit,
             Follow_Close_Feedforward_Min_Scale,
         )
-        turn_rate_cmd = add_feedforward_assist(
-            turn_rate_cmd,
-            follow_ff_wz,
-            Follow_Normal_Wz_Feedforward_Gain,
-            8,
-        )
+
+    if push_follow_active:
+        if push_yaw_target is None:
+            push_yaw_target = imu_runtime.yaw_deg
+            reset_turn_loop_state()
+        # Short PUSH stages use gyro-integrated relative yaw as the heading anchor.
+        turn_rate_cmd = (
+            imu_runtime.yaw_deg - push_yaw_target + 180.0
+        ) % 360.0 - 180.0
+        turn_rate_cmd = calc_follow_angle(turn_rate_cmd)
+    else:
+        push_yaw_target = None
 
     if mode_key == 0 and seen and master_edge_until_ms and not ff_vx and not ff_vy:
         vx = last_cmd_vx
@@ -1406,11 +1413,11 @@ def update_follow_targets(gyro_z):
             reset_turn_loop_state()
     else:
         if spin_mode_active:
-            output_ramp = Follow_Spin_Command_Ramp_Wz
+            output_ramp = 36.0
         elif priority_turn_mode:
-            output_ramp = Follow_Orbit_Command_Ramp_Wz
+            output_ramp = 18.0
         else:
-            output_ramp = Follow_Command_Ramp_Wz
+            output_ramp = 11.0
         turn_rate_cmd = ramp_value(turn_rate_cmd, last_cmd_wz, output_ramp)
         last_cmd_wz = turn_rate_cmd
     if (
@@ -1439,9 +1446,13 @@ def update_follow_targets(gyro_z):
                     spin_mode_active,
                 )
                 output_ramp = (
-                    Follow_Spin_Gyro_Output_Ramp
-                    if spin_mode_active
-                    else (0.6 if mode_key == 0 else Follow_Pose_Gyro_Output_Ramp)
+                    GYRO_PRIORITY_OUTPUT_MAX_LIMIT
+                    if push_follow_active
+                    else (
+                        6.0
+                        if spin_mode_active
+                        else (0.6 if mode_key == 0 else 2.0)
+                    )
                 )
                 vz_cmd = ramp_value(vz_cmd, last_ap_vz_cmd, output_ramp)
                 last_ap_vz_cmd = vz_cmd
@@ -1470,11 +1481,7 @@ def update_follow_targets(gyro_z):
         last_ap_vz_cmd = 0.0
         vz_cmd = turn_rate_cmd
 
-    if mode_key == 0 or (
-        push_follow_active
-        and abs(cam_error_angle) < Follow_Angle_XY_Mode_On_Error
-        and abs(follow_ff_wz) < Follow_Angle_XY_Mode_On_Error
-    ):
+    if mode_key == 0:
         vz_cmd = clamp(
             vz_cmd,
             -GYRO_OUTPUT_BASE_LIMIT,

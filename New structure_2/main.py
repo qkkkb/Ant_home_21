@@ -59,7 +59,7 @@ GYRO_PRIORITY_BRAKE_KP = 0.16
 GYRO_PRIORITY_BRAKE_LIMIT = 8.0
 GYRO_SPIN_PRIORITY_OUTPUT_BASE_LIMIT = 10.0
 GYRO_SPIN_PRIORITY_OUTPUT_TARGET_GAIN = 0.45
-GYRO_SPIN_PRIORITY_OUTPUT_MAX_LIMIT = 58.0
+GYRO_SPIN_PRIORITY_OUTPUT_MAX_LIMIT = 24.0
 GYRO_SPIN_PRIORITY_OVERSPEED_RATIO = 1.25
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True
 GYRO_CALIBRATE_SAMPLES = 1000
@@ -108,7 +108,7 @@ Follow_Feedforward_Forward_Gain = 1.18
 Follow_Feedforward_Lateral_Gain = 1.18
 Follow_Feedforward_Forward_Limit = 35.0
 Follow_Feedforward_Lateral_Limit = 31.0
-Follow_Push_Feedforward_Forward_Gain = 1.42
+Follow_Push_Feedforward_Forward_Gain = 1.25
 Follow_Push_Feedforward_Forward_Limit = 30.0
 Follow_Normal_Visual_Forward_Scale = 0.72
 Follow_Static_Visual_Scale = 0.60
@@ -705,14 +705,14 @@ def solve_follow_pose_twist(
                 vx,
                 1.0,
                 Follow_Forward_Limit,
-                Follow_Close_Feedforward_Min_Scale,
+                0.15,
             )
             vy = add_feedforward_direct(
                 target_ff_vy * 1.05,
                 vy,
                 1.0,
                 Follow_Lateral_Limit,
-                Follow_Close_Feedforward_Min_Scale,
+                0.15,
             )
             wz = add_feedforward_direct(
                 wz,
@@ -1712,7 +1712,7 @@ def speed_ctrl_follow(pid, actual_speed, target_speed):
         (master_flags & MASTER_MOTION_FLAG_PUSH)
         and (cam_target_vy >= 8.0 or cam_target_vy <= -8.0)
     ):
-        pid.ki = 12.0 if last_follow_mode_key == 3 else 8.0
+        pid.ki = 18.0 if last_follow_mode_key == 3 else 8.0
     elif master_flags and (cam_target_vy >= 8.0 or cam_target_vy <= -8.0):
         pid.ki = 18.0
     else:

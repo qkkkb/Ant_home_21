@@ -14,6 +14,7 @@ from coop_protocol import (
     MASTER_MOTION_FLAG_BACK,
     MASTER_MOTION_FLAG_ORBIT,
     MASTER_MOTION_FLAG_PUSH,
+    MASTER_MOTION_FLAG_RETURN,
     MASTER_MOTION_FLAG_SPIN,
     MSG_MASTER_MOTION,
     decode_i16,
@@ -94,6 +95,7 @@ Follow_Orbit_Forward_Gain = 1.00
 Follow_Orbit_Lateral_Gain = 0.92
 Follow_Forward_Limit = 38.0
 Follow_Lateral_Limit = 30.0
+Follow_Return_Lateral_Limit = 35.0
 Follow_Forward_Deadband = 2
 Follow_Lateral_Deadband = 2
 Follow_Orbit_Forward_Deadband = 2
@@ -1293,7 +1295,7 @@ def update_follow_targets(gyro_z):
         if mode_key != 0:
             vx *= xy_scale
             vy *= xy_scale
-        else:
+        elif not (master_flags & MASTER_MOTION_FLAG_RETURN):
             vx = (vx - body_vx) + body_vx * xy_scale
 
     if push_follow_active and seen:
@@ -1338,9 +1340,12 @@ def update_follow_targets(gyro_z):
         vy = last_cmd_vy
 
     vx_limit = Follow_Forward_Limit
-    vy_limit = (
-        29.0 if cam_error_y <= -16 else 27.0
-    ) if push_follow_active else Follow_Lateral_Limit
+    if master_flags & MASTER_MOTION_FLAG_RETURN:
+        vy_limit = Follow_Return_Lateral_Limit
+    elif push_follow_active:
+        vy_limit = 29.0 if cam_error_y <= -16 else 27.0
+    else:
+        vy_limit = Follow_Lateral_Limit
     if fresh_motion:
         vx_limit = follow_limit(vx_limit, ff_vx)
         vy_limit = follow_limit(vy_limit, ff_vy)

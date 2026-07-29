@@ -13,6 +13,7 @@ _FLAG_ORBIT = 0x08
 _FLAG_SPIN = 0x10
 _FLAG_PUSH = 0x20
 _FLAG_BACK = 0x40
+_FLAG_RETURN = 0x80
 _FILTER = 0.35
 _LINEAR_DEADBAND = 0.5
 _WZ_DEADBAND = 0.8
@@ -128,6 +129,8 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             wz = 0.0
         if state_code == 8:
             flags |= _FLAG_BACK
+        if 11 <= state_code <= 14:
+            flags |= _FLAG_RETURN
     if target_seen:
         flags |= _FLAG_TARGET
     _put_u8(0, 0xA5)

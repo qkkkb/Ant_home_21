@@ -746,11 +746,11 @@ def solve_follow_pose_twist(
                 ff_scale,
             )
             vy = add_feedforward_direct(
+                target_ff_vy * Follow_Feedforward_Lateral_Gain,
                 vy,
-                target_ff_vy,
-                Follow_Feedforward_Lateral_Gain,
+                1.0,
                 Follow_Feedforward_Lateral_Limit,
-                0.75,
+                0.60,
             )
             wz = add_feedforward_assist(
                 wz,

@@ -1252,7 +1252,9 @@ def update_follow_targets(gyro_z):
             and (cam_error_y >= 8 or cam_error_y <= -8)
         ):
             vx -= body_vx
-            body_vx *= 0.20 if abs(cam_error_x) < 28 else 0.55
+            body_vx *= 0.20 if (
+                abs(cam_error_x) < 28 or body_vx * ff_vx > 120
+            ) else 0.45
             vx += body_vx
         if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
             vx -= body_vx * (1.0 - Follow_Static_Visual_Scale)

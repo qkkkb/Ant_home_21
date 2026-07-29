@@ -1249,7 +1249,11 @@ def update_follow_targets(gyro_z):
         )
         if (
             mode_key == 0
-            and (cam_error_y >= 8 or cam_error_y <= -8)
+            and (
+                cam_error_y >= 8
+                or cam_error_y <= -8
+                or body_vx * ff_vx > 120
+            )
         ):
             vx -= body_vx
             body_vx *= 0.20 if (
@@ -1728,9 +1732,6 @@ def speed_ctrl_follow(pid, actual_speed, target_speed):
             speed_reset(pid)
             return 0.0
     output = speed_ctrl(pid, actual_speed, target_speed)
-    if not last_follow_mode_key and pid.err * target_speed < -96:
-        pid.output = 0.0
-        return 0.0
     output = speed_follow_guard(
         pid,
         output,

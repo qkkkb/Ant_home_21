@@ -1244,11 +1244,8 @@ def update_follow_targets(gyro_z):
             and (cam_error_y >= 8 or cam_error_y <= -8)
         ):
             vx -= body_vx
-            if push_follow_active:
-                body_vx *= 0.35
-                vx += body_vx
-            else:
-                body_vx = 0.0
+            body_vx *= 0.35 if push_follow_active else 0.20
+            vx += body_vx
         if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
             vx -= body_vx * (1.0 - Follow_Static_Visual_Scale)
             vy -= body_vy * (1.0 - Follow_Static_Visual_Scale)
@@ -1700,7 +1697,7 @@ def speed_ctrl_follow(pid, actual_speed, target_speed):
     ):
         pid.ki = 8.0
     elif master_flags and (cam_target_vy >= 8.0 or cam_target_vy <= -8.0):
-        pid.ki = 16.0
+        pid.ki = 18.0
     else:
         pid.ki = 12.0
     if wheel_target_idle(target_speed):

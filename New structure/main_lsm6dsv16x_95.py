@@ -123,6 +123,7 @@ Nav_Classify_Timeout_Ms = 1500
 Nav_Push_Orient_Ok_Yaw = 5.0    #orbit 目标角度误差小于该值即认为定向完成
 Nav_Push_Orbit_Skip_Yaw = 15.0
 Nav_Push_Orbit_Opposite_Yaw = 165.0
+Nav_Push_Orbit_Opposite_Radius_Add = 0.8
 Nav_Push_Orient_Max_Ms = 15000
 Nav_Push_Orbit_Slow_Yaw = 70.0
 Nav_Push_Orbit_Fast_Vy = 6.4
@@ -824,7 +825,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
     global push_return_yaw_target, push_face_obj_yaw
     global push_orbit_dir, push_orbit_vy_sign, push_orbit_blocked, push_orbit_done
     global push_orbit_reached, push_orbit_progress_deg, push_orbit_target_delta, push_orbit_last_ms
-    global push_orbit_brake_since_ms
+    global push_orbit_brake_since_ms, push_orbit_radius_ratio
     global final_return_mode
 
     now = utime.ticks_ms()
@@ -1153,6 +1154,10 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 )
             orbit_yaw_err = -wrapped_yaw_error(push_yaw_target, push_face_obj_yaw)
             push_orbit_target_delta = abs(orbit_yaw_err)
+            if push_orbit_target_delta >= Nav_Push_Orbit_Opposite_Yaw:
+                push_orbit_radius_ratio += Nav_Push_Orbit_Opposite_Radius_Add
+                if push_orbit_radius_ratio > 3.1:
+                    push_orbit_radius_ratio = 3.1
             if push_orbit_target_delta <= Nav_Push_Orbit_Skip_Yaw:
                 push_orbit_dir = 0
                 push_orbit_vy_sign = 0

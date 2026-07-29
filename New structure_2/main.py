@@ -104,7 +104,7 @@ Follow_Distance_Far_Boost_Error = 6
 Follow_Distance_Far_Boost_Gain = 0.70
 Follow_Distance_Close_Gain = 0.70
 Follow_Distance_Close_Limit = 22.0
-Follow_Feedforward_Forward_Gain = 1.18
+Follow_Feedforward_Forward_Gain = 1.00
 Follow_Feedforward_Lateral_Gain = 1.18
 Follow_Feedforward_Forward_Limit = 35.0
 Follow_Feedforward_Lateral_Limit = 31.0
@@ -1728,6 +1728,9 @@ def speed_ctrl_follow(pid, actual_speed, target_speed):
             speed_reset(pid)
             return 0.0
     output = speed_ctrl(pid, actual_speed, target_speed)
+    if not last_follow_mode_key and pid.err * target_speed < -96:
+        pid.output = 0.0
+        return 0.0
     output = speed_follow_guard(
         pid,
         output,

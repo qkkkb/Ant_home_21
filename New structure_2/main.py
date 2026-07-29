@@ -109,7 +109,7 @@ Follow_Feedforward_Lateral_Gain = 1.18
 Follow_Feedforward_Forward_Limit = 35.0
 Follow_Feedforward_Lateral_Limit = 31.0
 Follow_Push_Feedforward_Forward_Gain = 1.42
-Follow_Push_Feedforward_Lateral_Gain = 1.55
+Follow_Push_Feedforward_Lateral_Gain = 1.45
 Follow_Push_Feedforward_Forward_Limit = 30.0
 Follow_Normal_Visual_Forward_Scale = 0.72
 Follow_Static_Visual_Scale = 0.60
@@ -429,8 +429,11 @@ def update_spin_feedforward_latch(now, fresh_motion, explicit_spin, ff_wz, seen,
         return ff_wz
 
     if spin_latched_wz != 0.0:
-        if seen and (
-            -Follow_Spin_Latch_Release_Angle
+        if (
+            seen
+            and -10 < cam_error_x < 10
+            and -10 < cam_error_y < 10
+            and -Follow_Spin_Latch_Release_Angle
             <= error_angle
             <= Follow_Spin_Latch_Release_Angle
         ):
@@ -1158,13 +1161,6 @@ def update_follow_targets(gyro_z):
         follow_ff_wz = filtered_wz
     elif spin_mode_active:
         follow_ff_wz = spin_ff_wz
-        if cam_error_angle * follow_ff_wz > 0.0:
-            follow_ff_wz *= clamp(
-                (Follow_Spin_Latch_Release_Angle - abs(cam_error_angle))
-                / Follow_Spin_Latch_Release_Angle,
-                0.0,
-                1.0,
-            )
     else:
         follow_ff_wz = clamp(
             filtered_wz,
@@ -1449,7 +1445,7 @@ def update_follow_targets(gyro_z):
                     GYRO_PRIORITY_OUTPUT_MAX_LIMIT
                     if push_follow_active
                     else (
-                        6.0
+                        GYRO_SPIN_PRIORITY_OUTPUT_MAX_LIMIT
                         if spin_mode_active
                         else (0.6 if mode_key == 0 else 2.0)
                     )

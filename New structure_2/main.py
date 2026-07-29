@@ -111,7 +111,6 @@ Follow_Feedforward_Lateral_Limit = 31.0
 Follow_Push_Feedforward_Forward_Gain = 1.42
 Follow_Push_Feedforward_Lateral_Gain = 1.55
 Follow_Push_Feedforward_Forward_Limit = 30.0
-Follow_Push_Feedforward_Lateral_Limit = 32.0
 Follow_Normal_Visual_Forward_Scale = 0.72
 Follow_Static_Visual_Scale = 0.60
 Follow_Close_Guard_Full_Error = 8.0
@@ -789,7 +788,14 @@ def max_wheel_abs(wheel_fr, wheel_fl, wheel_b):
     return max_abs
 
 
-def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_turn=False):
+def limit_pose_twist_for_wheels(
+    vx,
+    vy,
+    vz,
+    preserve_pose_ratio,
+    preserve_turn,
+    preserve_vy,
+):
     if Follow_Pose_Wheel_Target_Limit <= 0.0:
         return vx, vy, vz
 
@@ -833,6 +839,11 @@ def limit_pose_twist_for_wheels(vx, vy, vz, preserve_pose_ratio=False, preserve_
             vy *= scale
             vz *= scale
         return vx, vy, vz
+
+    if preserve_vy:
+        # Keep |0.866 * vx| + |0.5 * vy| within a 40-unit work limit.
+        pos_max = 46.188 - abs(vy) * 0.57735
+        vx = clamp(vx, -pos_max, pos_max)
 
     wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
     pos_max = max_wheel_abs(wheel_fr, wheel_fl, wheel_b)
@@ -1303,13 +1314,11 @@ def update_follow_targets(gyro_z):
             Follow_Push_Feedforward_Forward_Limit,
         )
         vy = add_feedforward_direct(
+            ff_vy * Follow_Push_Feedforward_Lateral_Gain,
             vy,
-            ff_vy,
-            Follow_Push_Feedforward_Lateral_Gain,
-            Follow_Push_Feedforward_Lateral_Limit,
-            Follow_Close_Feedforward_Min_Scale
-            if abs(gyro_z) >= 40
-            else clamp(1.0 - abs(cam_error_y) / Follow_Orbit_Feedforward_Full_Error, 0.0, 1.0),
+            1.0,
+            Follow_Lateral_Limit,
+            Follow_Close_Feedforward_Min_Scale,
         )
         turn_rate_cmd = add_feedforward_assist(
             turn_rate_cmd,
@@ -1501,6 +1510,7 @@ def update_follow_targets(gyro_z):
         )
         and mode_key == 0
         and (vz_cmd >= 0.001 or vz_cmd <= -0.001),
+        push_follow_active,
     )
     last_cmd_vx = cam_target_vx
     last_cmd_vy = cam_target_vy

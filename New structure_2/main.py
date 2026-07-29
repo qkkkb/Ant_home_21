@@ -741,9 +741,7 @@ def solve_follow_pose_twist(
             vx = add_feedforward_direct(
                 vx,
                 target_ff_vx,
-                (0.45 if abs(error_x) < 28 else 0.55)
-                if ff_vy <= -8.0
-                else Follow_Feedforward_Forward_Gain,
+                Follow_Feedforward_Forward_Gain,
                 Follow_Feedforward_Forward_Limit,
                 ff_scale,
             )
@@ -1261,11 +1259,7 @@ def update_follow_targets(gyro_z):
             vx -= body_vx
             body_vx *= 0.20 if (
                 abs(cam_error_x) < 28 or body_vx * ff_vx > 120
-            ) else (
-                0.70
-                if not ff_vx and not ff_vy
-                else 0.45
-            )
+            ) else 0.45
             vx += body_vx
         if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
             vx -= body_vx * (1.0 - Follow_Static_Visual_Scale)

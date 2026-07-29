@@ -661,9 +661,7 @@ def solve_follow_pose_twist(
     if (not orbit_mode) and (not spin_mode):
         body_vx *= Follow_Normal_Visual_Forward_Scale
     if use_ff and not spin_mode and ff_vx == 0.0 and ff_vy == 0.0:
-        if (not orbit_mode) and (cam_vy >= 6.0 or cam_vy <= -6.0):
-            body_vx = 0.0
-        elif -8.0 < body_vx < 8.0:
+        if -8.0 < body_vx < 8.0:
             body_vx *= 1.5
         if -8.0 < body_vy < 8.0:
             body_vy *= 1.5

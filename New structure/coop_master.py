@@ -98,6 +98,7 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             state_code == 2
             or state_code == 3
             or state_code == 6
+            or state_code == 8
             or state_code == 10
             or state_code == 11
             or state_code == 12

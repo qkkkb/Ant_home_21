@@ -676,12 +676,14 @@ def solve_follow_pose_twist(
                 target_ff_vx,
                 Follow_Orbit_Feedforward_Forward_Gain,
                 Follow_Orbit_Feedforward_Forward_Limit,
+                Follow_Close_Feedforward_Min_Scale,
             )
             vy = add_feedforward_direct(
                 vy,
                 target_ff_vy,
                 Follow_Orbit_Feedforward_Lateral_Gain,
                 Follow_Orbit_Feedforward_Lateral_Limit,
+                Follow_Close_Feedforward_Min_Scale,
             )
             wz = add_feedforward_direct(
                 wz,

@@ -726,16 +726,7 @@ def solve_follow_pose_twist(
                 target_ff_vy *= 0.42
                 ff_scale = 0.0
             else:
-                ff_scale = (
-                    Follow_Close_Feedforward_Min_Scale
-                    + (1.0 - Follow_Close_Feedforward_Min_Scale)
-                    * clamp(
-                        (Follow_Close_Guard_Full_Error - cam_vx)
-                        / Follow_Close_Guard_Full_Error,
-                        0.0,
-                        1.0,
-                    )
-                )
+                ff_scale = 1.0
             vx = add_feedforward_direct(
                 vx,
                 target_ff_vx,

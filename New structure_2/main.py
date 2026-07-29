@@ -1337,6 +1337,7 @@ def update_follow_targets(gyro_z):
         not mode_key
         and not (master_flags & MASTER_MOTION_FLAG_BACK)
         and (abs(ff_vy) >= 8 or abs(cam_error_y) >= 5)
+        and abs(cam_error_x) < 35
     ):
         vx = clamp(vx, -22.0, 22.0)
         if body_vy * ff_vy < 0.0:

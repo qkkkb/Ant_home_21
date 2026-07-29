@@ -425,6 +425,8 @@ def update_spin_feedforward_latch(now, fresh_motion, explicit_spin, ff_wz, seen,
         ff_wz >= Follow_Spin_Latch_Min_Wz
         or ff_wz <= -Follow_Spin_Latch_Min_Wz
     ):
+        if last_follow_mode_key == 0:
+            reset_speed_outputs(True)
         spin_latched_wz = ff_wz
         spin_latch_until_ms = utime.ticks_add(now, Follow_Spin_Command_Hold_Ms)
         return ff_wz
@@ -654,6 +656,12 @@ def solve_follow_pose_twist(
     if push_mode and -8.0 < cam_vx < 8.0:
         body_vx *= 0.55
     body_vy = calc_follow_lateral(cam_vy, position_priority)
+    if (
+        push_mode
+        and -40 < error_x < 40
+        and (error_y >= 8 or error_y <= -8)
+    ):
+        body_vx *= 0.35
     if (not orbit_mode) and (not spin_mode):
         body_vx *= Follow_Normal_Visual_Forward_Scale
     if use_ff and not spin_mode and ff_vx == 0.0 and ff_vy == 0.0:
@@ -723,9 +731,12 @@ def solve_follow_pose_twist(
                 0.0,
                 1.0,
             )
-            ff_scale = Follow_Close_Feedforward_Min_Scale + (
-                1.0 - Follow_Close_Feedforward_Min_Scale
-            ) * ff_scale
+            ff_scale = (
+                0.0
+                if master_flags & MASTER_MOTION_FLAG_BACK
+                else Follow_Close_Feedforward_Min_Scale
+                + (1.0 - Follow_Close_Feedforward_Min_Scale) * ff_scale
+            )
             vx = add_feedforward_direct(
                 vx,
                 target_ff_vx,
@@ -1155,8 +1166,6 @@ def update_follow_targets(gyro_z):
         if last_follow_mode_key > 0 and mode_key == 0:
             reset_speed_outputs()
             follow_ff_wz = 0.0
-        elif last_follow_mode_key == 0 and mode_key == 3:
-            reset_speed_outputs(True)
         elif last_follow_mode_key < 0:
             speed_reset(pid_fl)
             speed_reset(pid_fr)
@@ -1245,21 +1254,12 @@ def update_follow_targets(gyro_z):
             push_follow_active,
         )
         if (
-            (mode_key == 0 or push_follow_active)
+            mode_key == 0
             and (cam_error_y >= 8 or cam_error_y <= -8)
-            and (
-                (not push_follow_active)
-                or (-40 < cam_error_x < 40)
-            )
         ):
             vx -= body_vx
-            body_vx *= 0.35 if push_follow_active else 0.20
+            body_vx *= 0.20
             vx += body_vx
-        if (
-            master_flags & MASTER_MOTION_FLAG_BACK
-            and body_vx * ff_vx < -0.001
-        ):
-            vx = body_vx
         if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
             vx -= body_vx * (1.0 - Follow_Static_Visual_Scale)
             vy -= body_vy * (1.0 - Follow_Static_Visual_Scale)

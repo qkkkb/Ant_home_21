@@ -104,7 +104,7 @@ Follow_Distance_Far_Boost_Error = 6
 Follow_Distance_Far_Boost_Gain = 0.70
 Follow_Distance_Close_Gain = 0.70
 Follow_Distance_Close_Limit = 22.0
-Follow_Feedforward_Forward_Gain = 1.18
+Follow_Feedforward_Forward_Gain = 1.10
 Follow_Feedforward_Lateral_Gain = 1.18
 Follow_Feedforward_Forward_Limit = 35.0
 Follow_Feedforward_Lateral_Limit = 31.0
@@ -1313,7 +1313,7 @@ def update_follow_targets(gyro_z):
             0.75,
         )
         vy = add_feedforward_direct(
-            ff_vy * 1.35,
+            ff_vy * 1.30,
             vy,
             1.0,
             Follow_Lateral_Limit,
@@ -1328,7 +1328,7 @@ def update_follow_targets(gyro_z):
         turn_rate_cmd = (
             imu_runtime.yaw_deg - push_yaw_target + 180.0
         ) % 360.0 - 180.0
-        turn_rate_cmd = calc_follow_angle(turn_rate_cmd)
+        turn_rate_cmd = calc_follow_angle(turn_rate_cmd * 1.50)
     else:
         push_yaw_target = None
 

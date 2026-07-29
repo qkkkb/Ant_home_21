@@ -1333,6 +1333,13 @@ def update_follow_targets(gyro_z):
     else:
         push_yaw_target = None
 
+    if (
+        mode_key == 0
+        and not (master_flags & MASTER_MOTION_FLAG_BACK)
+        and (abs(ff_vy) >= 8 or abs(cam_error_y) >= 5)
+    ):
+        vx = clamp(vx, -16.0, 16.0)
+
     if mode_key == 0 and seen and master_edge_until_ms and not ff_vx and not ff_vy:
         vx = last_cmd_vx
         vy = last_cmd_vy

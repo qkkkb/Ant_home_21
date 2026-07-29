@@ -105,9 +105,9 @@ Follow_Distance_Far_Boost_Gain = 0.70
 Follow_Distance_Close_Gain = 0.70
 Follow_Distance_Close_Limit = 22.0
 Follow_Feedforward_Forward_Gain = 0.90
-Follow_Feedforward_Lateral_Gain = 2.30
+Follow_Feedforward_Lateral_Gain = 2.80
 Follow_Feedforward_Forward_Limit = 35.0
-Follow_Feedforward_Lateral_Limit = 35.0
+Follow_Feedforward_Lateral_Limit = 42.0
 Follow_Push_Feedforward_Forward_Gain = 1.25
 Follow_Push_Feedforward_Forward_Limit = 30.0
 Follow_Normal_Visual_Forward_Scale = 0.72
@@ -725,7 +725,7 @@ def solve_follow_pose_twist(
             target_ff_vy = ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
             if master_flags & MASTER_MOTION_FLAG_BACK:
                 target_ff_vx *= 0.80
-                target_ff_vy *= 0.51
+                target_ff_vy *= 0.42
                 ff_scale = 0.0
             else:
                 ff_scale = (

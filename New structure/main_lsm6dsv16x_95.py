@@ -1341,9 +1341,12 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             cam_target_vy = (
                 Nav_Push_Execute_Forward_Speed * Nav_Ball_Field_Vy_Scale
             )
-        else:
-            cam_target_vx = Nav_Push_Execute_Forward_Speed
-            cam_target_vy = 0.0
+            yaw_ref_deg = push_yaw_target
+            if utime.ticks_diff(now, nav_transition_ms) >= 1000:
+                nav_set_state(NAV_STATE_PUSH_BACK)
+            return
+        cam_target_vx = Nav_Push_Execute_Forward_Speed
+        cam_target_vy = 0.0
         yaw_ref_deg = push_yaw_target
         if line_crossed:
             push_line_seen_once = True
@@ -1362,15 +1365,13 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
     if nav_state == NAV_STATE_PUSH_BACK:
         nav_ready_for_push = False
         if push_dir_code == Push_Dir_Up:
-            cam_target_vx = (
-                -Nav_Push_Back_Speed * Nav_Ball_Field_Vx_Scale
-            )
-            cam_target_vy = (
-                -Nav_Push_Back_Speed * Nav_Ball_Field_Vy_Scale
-            )
-        else:
-            cam_target_vx = -Nav_Push_Back_Speed
+            cam_target_vx = 0.0
             cam_target_vy = 0.0
+            yaw_ref_deg = push_yaw_target
+            nav_set_state(NAV_STATE_PUSH_TURN, "push_back_done")
+            return
+        cam_target_vx = -Nav_Push_Back_Speed
+        cam_target_vy = 0.0
         yaw_ref_deg = push_yaw_target
         if final_return_mode == 2 and line_crossed:
             nav_set_state(NAV_STATE_RETURN_BACK)

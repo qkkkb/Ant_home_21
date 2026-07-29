@@ -745,11 +745,12 @@ def solve_follow_pose_twist(
                 Follow_Feedforward_Forward_Limit,
                 ff_scale,
             )
-            vy = add_feedforward_assist(
+            vy = add_feedforward_direct(
                 vy,
                 target_ff_vy,
                 Follow_Feedforward_Lateral_Gain,
                 Follow_Feedforward_Lateral_Limit,
+                0.60,
             )
             wz = add_feedforward_assist(
                 wz,
@@ -1295,16 +1296,13 @@ def update_follow_targets(gyro_z):
             reset_turn_loop_state()
         last_angle_priority_active = False
 
-    if seen and angle_pose_mode_active:
+    if seen and angle_pose_mode_active and not push_follow_active:
         xy_scale = angle_xy_lock_scale(
             cam_error_angle,
-            orbit_mode_active and not push_follow_active,
+            orbit_mode_active,
             spin_mode_active,
         )
-        if push_follow_active:
-            vx = (vx - body_vx) + body_vx * xy_scale
-            vy = (vy - body_vy) + body_vy * xy_scale
-        elif mode_key != 0:
+        if mode_key != 0:
             vx *= xy_scale
             vy *= xy_scale
         else:

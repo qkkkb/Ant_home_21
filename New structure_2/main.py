@@ -1334,7 +1334,9 @@ def update_follow_targets(gyro_z):
         vy = last_cmd_vy
 
     vx_limit = Follow_Forward_Limit
-    vy_limit = 27.0 if push_follow_active else Follow_Lateral_Limit
+    vy_limit = (
+        29.0 if cam_error_y <= -16 else 27.0
+    ) if push_follow_active else Follow_Lateral_Limit
     if fresh_motion:
         vx_limit = follow_limit(vx_limit, ff_vx)
         vy_limit = follow_limit(vy_limit, ff_vy)

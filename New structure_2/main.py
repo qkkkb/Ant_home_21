@@ -1176,6 +1176,8 @@ def update_follow_targets(gyro_z):
         elif last_follow_mode_key < 0:
             reset_speed_outputs(True)
             reset_turn_loop_state()
+        elif push_follow_active:
+            speed_reset(pid_b)
     follow_output_limit = FOLLOW_RUN_PWM_LIMIT
     if (
         mode_key == 0
@@ -1646,6 +1648,8 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
         return smooth_value(cmd, smooth_value(cmd, last_pwm))
     if master_edge_until_ms and last_follow_mode_key == 0:
         return smooth_value(cmd, smooth_value(cmd, last_pwm))
+    if last_follow_mode_key == 3:
+        return smooth_value(cmd, smooth_value(cmd, last_pwm))
     return smooth_value(cmd, last_pwm)
 
 
@@ -1722,15 +1726,14 @@ def speed_ctrl_follow(pid, actual_speed, target_speed):
             speed_reset(pid)
             return 0.0
     output = speed_ctrl(pid, actual_speed, target_speed)
-    if not last_follow_mode_key or _orbit:
-        output = speed_follow_guard(
-            pid,
-            output,
-            actual_speed,
-            target_speed,
-            WHEEL_TARGET_STOP_EPS,
-            not master_edge_until_ms,
-        )
+    output = speed_follow_guard(
+        pid,
+        output,
+        actual_speed,
+        target_speed,
+        WHEEL_TARGET_STOP_EPS,
+        not master_edge_until_ms,
+    )
     return output
 
 

@@ -158,7 +158,7 @@ Follow_Command_Ramp_Vy = 3.0
 Follow_Orbit_Command_Ramp_Vx = 20.0
 Follow_Orbit_Command_Ramp_Vy = 14.0
 Follow_Normal_Target_Lost_Hold_Ms = 1000
-Follow_Target_Lost_Hold_Ms = 250
+Follow_Target_Lost_Hold_Ms = 450
 Follow_Orbit_Mode_FfWz_Off = 10.0
 Follow_Orbit_Mode_Exit_Ms = 200
 Follow_Orbit_Mode_FfWz_Filter = 0.22
@@ -745,11 +745,12 @@ def solve_follow_pose_twist(
                 Follow_Feedforward_Forward_Limit,
                 ff_scale,
             )
-            vy = add_feedforward_assist(
+            vy = add_feedforward_direct(
                 vy,
                 target_ff_vy,
                 Follow_Feedforward_Lateral_Gain,
                 Follow_Feedforward_Lateral_Limit,
+                0.0 if master_flags & MASTER_MOTION_FLAG_BACK else 1.0,
             )
             wz = add_feedforward_assist(
                 wz,

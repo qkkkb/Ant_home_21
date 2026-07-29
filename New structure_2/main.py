@@ -11,6 +11,7 @@ import config as cfg
 from hardware import Motor
 from coop_protocol import (
     CoopFrameParser,
+    MASTER_MOTION_FLAG_BACK,
     MASTER_MOTION_FLAG_ORBIT,
     MASTER_MOTION_FLAG_PUSH,
     MASTER_MOTION_FLAG_SPIN,
@@ -465,10 +466,11 @@ def update_orbit_follow_mode(
     explicit_orbit,
     explicit_push,
     explicit_spin,
+    explicit_back,
 ):
     global orbit_follow_active, orbit_follow_exit_since_ms
 
-    if explicit_spin:
+    if explicit_spin or explicit_back:
         orbit_follow_active = False
         orbit_follow_exit_since_ms = 0
         return False
@@ -1127,6 +1129,7 @@ def update_follow_targets(gyro_z):
         explicit_orbit,
         explicit_push,
         spin_mode_active,
+        fresh_motion and (master_flags & MASTER_MOTION_FLAG_BACK),
     )
     if orbit_mode_active:
         follow_ff_wz = filtered_wz

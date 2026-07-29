@@ -105,7 +105,7 @@ Follow_Distance_Far_Boost_Gain = 0.70
 Follow_Distance_Close_Gain = 0.70
 Follow_Distance_Close_Limit = 22.0
 Follow_Feedforward_Forward_Gain = 1.00
-Follow_Feedforward_Lateral_Gain = 1.45
+Follow_Feedforward_Lateral_Gain = 1.60
 Follow_Feedforward_Forward_Limit = 35.0
 Follow_Feedforward_Lateral_Limit = 31.0
 Follow_Push_Feedforward_Forward_Gain = 1.25
@@ -750,7 +750,7 @@ def solve_follow_pose_twist(
                 target_ff_vy,
                 Follow_Feedforward_Lateral_Gain,
                 Follow_Feedforward_Lateral_Limit,
-                0.60,
+                0.75,
             )
             wz = add_feedforward_assist(
                 wz,
@@ -1309,11 +1309,12 @@ def update_follow_targets(gyro_z):
             vx = (vx - body_vx) + body_vx * xy_scale
 
     if push_follow_active and seen:
-        vx = add_feedforward_assist(
+        vx = add_feedforward_direct(
             vx,
             ff_vx,
             Follow_Push_Feedforward_Forward_Gain,
             Follow_Push_Feedforward_Forward_Limit,
+            0.75,
         )
         vy = add_feedforward_direct(
             ff_vy * 1.35,

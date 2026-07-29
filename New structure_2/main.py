@@ -45,7 +45,7 @@ GYRO_KI = 0.0005
 GYRO_PRIORITY_KP = 0.46
 GYRO_PRIORITY_KI = 0.0
 GYRO_OUTPUT_LIMIT = 14.0
-GYRO_OUTPUT_BASE_LIMIT = 4.5
+GYRO_OUTPUT_BASE_LIMIT = 6.5
 GYRO_OUTPUT_TARGET_GAIN = 2.2
 GYRO_OUTPUT_MAX_LIMIT = 22.0
 GYRO_PRIORITY_OUTPUT_BASE_LIMIT = 6.5
@@ -168,7 +168,7 @@ Follow_Spin_Command_Hold_Ms = 900
 Follow_Spin_Latch_Release_Angle = 3
 Follow_Orbit_Brake_Gyro_Threshold = 4.0
 Follow_Orbit_Brake_Output_Limit = 8.0
-Follow_Normal_Brake_Wheel_Reserve = 1.5
+Follow_Normal_Brake_Wheel_Reserve = 3.25
 Master_Motion_Timeout_Ms = 250
 Follow_Master_Edge_Delta = 4.0
 Follow_Master_Edge_Hold_Ms = 120
@@ -1171,7 +1171,7 @@ def update_follow_targets(gyro_z):
     mode_key = 3 if spin_mode_active else (1 if orbit_mode_active else 0)
     _orbit = mode_key == 1
     if last_follow_mode_key != mode_key:
-        if last_follow_mode_key > 0 and mode_key == 0:
+        if last_follow_mode_key > 0 and not mode_key:
             reset_speed_outputs()
             follow_ff_wz = 0.0
         elif last_follow_mode_key < 0:
@@ -1195,7 +1195,7 @@ def update_follow_targets(gyro_z):
         (mode_key != 0 and (not push_follow_active))
         or (not seen)
         or (not fresh_motion)
-        or (last_follow_mode_key != mode_key and mode_key == 0)
+        or (last_follow_mode_key != mode_key and not mode_key)
     ):
         master_edge_until_ms = 0
     elif (
@@ -1249,7 +1249,7 @@ def update_follow_targets(gyro_z):
             push_follow_active,
         )
         if (
-            mode_key == 0
+            not mode_key
             and (
                 abs(cam_error_y) >= 8
                 or (abs(cam_error_x) < 28 and body_vx * ff_vx > 120)
@@ -1275,13 +1275,13 @@ def update_follow_targets(gyro_z):
                 target_lost_since_ms,
             ) <= (
                 Follow_Normal_Target_Lost_Hold_Ms
-                if mode_key == 0
+                if not mode_key
                 else Follow_Target_Lost_Hold_Ms
             )
         if use_motion_feedforward:
             xy_scale = (
                 Follow_Normal_Hold_Feedforward_Gain
-                if mode_key == 0 or push_follow_active
+                if not mode_key or push_follow_active
                 else Follow_Hold_Feedforward_Gain
             )
             vx = ff_vx * xy_scale
@@ -1339,8 +1339,10 @@ def update_follow_targets(gyro_z):
         and (abs(ff_vy) >= 8 or abs(cam_error_y) >= 5)
     ):
         vx = clamp(vx, -16.0, 16.0)
+        if body_vy * ff_vy < 0.0:
+            vy -= body_vy * 0.55
 
-    if mode_key == 0 and seen and master_edge_until_ms and not ff_vx and not ff_vy:
+    if not mode_key and seen and master_edge_until_ms and not ff_vx and not ff_vy:
         vx = last_cmd_vx
         vy = last_cmd_vy
 
@@ -1353,7 +1355,7 @@ def update_follow_targets(gyro_z):
         vy_limit = follow_limit(vy_limit, ff_vy)
     vx = clamp(vx, -vx_limit, vx_limit)
     vy = clamp(vy, -vy_limit, vy_limit)
-    if master_edge_until_ms and mode_key == 0:
+    if master_edge_until_ms and not mode_key:
         vx_ramp = 14.0
         vy_ramp = 20.0
     elif position_priority_active:
@@ -1398,8 +1400,8 @@ def update_follow_targets(gyro_z):
         and follow_output_limit < FOLLOW_RUN_PWM_LIMIT
     )
     normal_brake_active = (
-        mode_key == 0
-        and abs(gyro_z) >= (10.0 if normal_brake_active else 40.0)
+        not mode_key
+        and abs(gyro_z) >= (10.0 if normal_brake_active else 20.0)
         and (
             (
                 fresh_motion
@@ -1407,7 +1409,7 @@ def update_follow_targets(gyro_z):
                 and -0.001 < turn_rate_cmd < 0.001
             )
             or (
-                abs(gyro_z) >= 40.0
+                abs(gyro_z) >= 20.0
                 and not (-0.001 < turn_rate_cmd < 0.001)
                 and (
                     (master_flags and turn_rate_cmd * gyro_z < 0.0)
@@ -1462,7 +1464,7 @@ def update_follow_targets(gyro_z):
                     else (
                         GYRO_SPIN_PRIORITY_OUTPUT_MAX_LIMIT
                         if spin_mode_active
-                        else (0.6 if mode_key == 0 else 2.0)
+                        else (0.6 if not mode_key else 2.0)
                     )
                 )
                 vz_cmd = ramp_value(vz_cmd, last_ap_vz_cmd, output_ramp)
@@ -1492,7 +1494,7 @@ def update_follow_targets(gyro_z):
         last_ap_vz_cmd = 0.0
         vz_cmd = turn_rate_cmd
 
-    if mode_key == 0:
+    if not mode_key:
         vz_cmd = clamp(
             vz_cmd,
             -GYRO_OUTPUT_BASE_LIMIT,
@@ -1500,7 +1502,7 @@ def update_follow_targets(gyro_z):
         )
     if normal_brake_active and (not priority_turn_mode):
         normal_brake_reserve = Follow_Normal_Brake_Wheel_Reserve
-        if master_flags and abs(gyro_z) >= 40.0 and (
+        if master_flags and abs(gyro_z) >= 20.0 and (
             abs(gyro_z) > abs(turn_rate_cmd) * GYRO_PRIORITY_OVERSPEED_RATIO
         ):
             normal_brake_reserve *= 2.0
@@ -1518,7 +1520,7 @@ def update_follow_targets(gyro_z):
             priority_turn_mode
             or (normal_brake_active and (not master_edge_until_ms))
             or (
-                mode_key == 0
+                not mode_key
                 and fresh_motion
                 and (
                     master_vy >= Follow_Master_Edge_Delta
@@ -1526,7 +1528,7 @@ def update_follow_targets(gyro_z):
                 )
             )
         )
-        and mode_key == 0
+        and not mode_key
         and (vz_cmd >= 0.001 or vz_cmd <= -0.001),
         push_follow_active,
     )

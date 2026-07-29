@@ -59,7 +59,7 @@ GYRO_PRIORITY_BRAKE_KP = 0.16
 GYRO_PRIORITY_BRAKE_LIMIT = 8.0
 GYRO_SPIN_PRIORITY_OUTPUT_BASE_LIMIT = 10.0
 GYRO_SPIN_PRIORITY_OUTPUT_TARGET_GAIN = 0.45
-GYRO_SPIN_PRIORITY_OUTPUT_MAX_LIMIT = 24.0
+GYRO_SPIN_PRIORITY_OUTPUT_MAX_LIMIT = 20.0
 GYRO_SPIN_PRIORITY_OVERSPEED_RATIO = 1.25
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True
 GYRO_CALIBRATE_SAMPLES = 1000
@@ -164,7 +164,7 @@ Follow_Orbit_Mode_Exit_Ms = 200
 Follow_Orbit_Mode_FfWz_Filter = 0.22
 Follow_Normal_Wz_Feedforward_Limit = 15.0
 Follow_Spin_Latch_Min_Wz = 26.0
-Follow_Spin_Command_Hold_Ms = 1100
+Follow_Spin_Command_Hold_Ms = 900
 Follow_Spin_Latch_Release_Angle = 3
 Follow_Orbit_Brake_Gyro_Threshold = 4.0
 Follow_Orbit_Brake_Output_Limit = 8.0
@@ -725,7 +725,7 @@ def solve_follow_pose_twist(
             target_ff_vy = ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
             if master_flags & MASTER_MOTION_FLAG_BACK:
                 target_ff_vx *= 0.80
-                target_ff_vy *= 0.80
+                target_ff_vy *= 0.65
                 ff_scale = 0.0
             else:
                 ff_scale = (
@@ -1310,7 +1310,7 @@ def update_follow_targets(gyro_z):
             ff_vx,
             Follow_Push_Feedforward_Forward_Gain,
             Follow_Push_Feedforward_Forward_Limit,
-            0.68,
+            0.66,
         )
         vy = add_feedforward_direct(
             ff_vy * 1.30,

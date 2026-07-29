@@ -141,8 +141,6 @@ Follow_Orbit_Pose_Angle_Min_Turn = 30.0
 Follow_Normal_Pose_Angle_Deadband = 8
 Follow_Normal_Pose_Angle_Active_Error = 18
 Follow_Spin_Target_Point_Wz_To_Vy = -0.08
-Follow_Spin_Feedforward_Forward_Gain = 0.95
-Follow_Spin_Feedforward_Forward_Limit = 12.0
 Follow_Spin_Wz_Feedforward_Gain = 0.85
 Follow_Spin_Wz_Feedforward_Limit = 100.0
 Follow_Spin_Turn_Rate_Limit = 128.0
@@ -702,17 +700,19 @@ def solve_follow_pose_twist(
         elif spin_mode:
             target_ff_vx = ff_vx + ff_wz * 0.08
             target_ff_vy = ff_vy + ff_wz * Follow_Spin_Target_Point_Wz_To_Vy
-            vx = add_feedforward_assist(
-                vx,
+            vx = add_feedforward_direct(
                 target_ff_vx,
-                Follow_Spin_Feedforward_Forward_Gain,
-                Follow_Spin_Feedforward_Forward_Limit,
+                vx,
+                1.0,
+                Follow_Forward_Limit,
+                Follow_Close_Feedforward_Min_Scale,
             )
             vy = add_feedforward_direct(
+                target_ff_vy * 1.05,
                 vy,
-                target_ff_vy,
-                1.05,
-                20.0,
+                1.0,
+                Follow_Lateral_Limit,
+                Follow_Close_Feedforward_Min_Scale,
             )
             wz = add_feedforward_direct(
                 wz,
@@ -843,8 +843,8 @@ def limit_pose_twist_for_wheels(
         return vx, vy, vz
 
     if preserve_vy:
-        # Keep translation near 37 units so PUSH yaw retains wheel headroom.
-        pos_max = 43.0 - abs(vy) * 0.57735
+        # Release a little X headroom only when PUSH has drifted inward.
+        pos_max = (45.0 if cam_error_x <= -40 else 43.0) - abs(vy) * 0.57735
         vx = clamp(vx, -pos_max, pos_max)
 
     wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)

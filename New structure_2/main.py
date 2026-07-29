@@ -147,8 +147,8 @@ Follow_Spin_Feedforward_Forward_Gain = 0.95
 Follow_Spin_Feedforward_Lateral_Gain = 1.05
 Follow_Spin_Feedforward_Forward_Limit = 12.0
 Follow_Spin_Feedforward_Lateral_Limit = 20.0
-Follow_Spin_Wz_Feedforward_Gain = 0.70
-Follow_Spin_Wz_Feedforward_Limit = 84.0
+Follow_Spin_Wz_Feedforward_Gain = 0.85
+Follow_Spin_Wz_Feedforward_Limit = 100.0
 Follow_Spin_Turn_Rate_Limit = 128.0
 Follow_Pose_Angle_Deadband = 4
 Follow_Pose_Angle_Active_Error = 6
@@ -170,7 +170,7 @@ Follow_Orbit_Mode_Exit_Ms = 200
 Follow_Orbit_Mode_FfWz_Filter = 0.22
 Follow_Normal_Wz_Feedforward_Limit = 15.0
 Follow_Spin_Latch_Min_Wz = 26.0
-Follow_Spin_Command_Hold_Ms = 900
+Follow_Spin_Command_Hold_Ms = 1100
 Follow_Spin_Latch_Release_Angle = 3
 Follow_Orbit_Brake_Gyro_Threshold = 4.0
 Follow_Orbit_Brake_Output_Limit = 8.0
@@ -663,7 +663,7 @@ def solve_follow_pose_twist(
         and -40 < error_x < 40
         and (error_y >= 8 or error_y <= -8)
     ):
-        body_vx *= 0.35
+        body_vx *= 0.45
     if (not orbit_mode) and (not spin_mode):
         body_vx *= Follow_Normal_Visual_Forward_Scale
     if use_ff and not spin_mode and ff_vx == 0.0 and ff_vy == 0.0:

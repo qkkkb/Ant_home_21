@@ -1326,6 +1326,7 @@ def update_follow_targets(gyro_z):
 
     if (
         not mode_key
+        and not angle_pose_mode_active
         and not (master_flags & MASTER_MOTION_FLAG_BACK)
         and (abs(ff_vy) >= 8 or abs(cam_error_y) >= 5)
     ):

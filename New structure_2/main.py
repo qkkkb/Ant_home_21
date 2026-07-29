@@ -745,6 +745,12 @@ def solve_follow_pose_twist(
                 Follow_Feedforward_Forward_Limit,
                 ff_scale,
             )
+            if (
+                not (master_flags & MASTER_MOTION_FLAG_BACK)
+                and body_vy * target_ff_vy < 0.0
+            ):
+                body_vy *= 0.45
+                vy = body_vy
             vy = add_feedforward_direct(
                 vy,
                 target_ff_vy,

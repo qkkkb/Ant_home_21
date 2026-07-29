@@ -1249,7 +1249,10 @@ def update_follow_targets(gyro_z):
         )
         if (
             mode_key == 0
-            and (cam_error_y >= 8 or cam_error_y <= -8)
+            and (
+                abs(cam_error_y) >= 8
+                or (abs(cam_error_x) < 28 and body_vx * ff_vx > 120)
+            )
         ):
             vx -= body_vx
             body_vx *= 0.20 if abs(cam_error_x) < 28 else 0.55

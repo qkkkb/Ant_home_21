@@ -123,8 +123,8 @@ Follow_Orbit_Wz_Feedforward_Limit = 128.0
 Follow_Orbit_Turn_Rate_Limit = 128.0
 Follow_Target_Point_Wz_To_Vx = -0.18
 Follow_Target_Point_Wz_To_Vy = -0.45
-Follow_Orbit_Target_Point_Wz_To_Vx = -0.22
-Follow_Orbit_Target_Point_Wz_To_Vy = -0.36
+Follow_Orbit_Target_Point_Wz_To_Vx = -0.17
+Follow_Orbit_Target_Point_Wz_To_Vy = -0.28
 Follow_Orbit_Feedforward_Forward_Gain = 1.30
 Follow_Orbit_Feedforward_Lateral_Gain = 0.76
 Follow_Orbit_Feedforward_Forward_Limit = 22.0
@@ -580,7 +580,7 @@ def calc_follow_angle(error_angle, orbit_mode=False, spin_mode=False):
                 out = -Follow_Orbit_Pose_Angle_Min_Turn
         return out
     if spin_mode:
-        error_angle *= 0.35
+        error_angle *= 0.35 if last_ff_wz else 0.60
     return clamp(
         error_angle * Follow_Pose_Angle_Gain,
         -Follow_Pose_Angle_Limit,

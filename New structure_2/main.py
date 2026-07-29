@@ -1256,7 +1256,9 @@ def update_follow_targets(gyro_z):
             )
         ):
             vx -= body_vx
-            body_vx *= 0.20 if abs(cam_error_x) < 28 else 0.55
+            body_vx *= 0.20 if abs(cam_error_x) < 28 else (
+                0.55 if abs(cam_error_x) < 70 else 1.0
+            )
             vx += body_vx
         if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
             vx -= body_vx * (1.0 - Follow_Static_Visual_Scale)
@@ -1337,9 +1339,7 @@ def update_follow_targets(gyro_z):
         not mode_key
         and not (master_flags & MASTER_MOTION_FLAG_BACK)
         and (abs(ff_vy) >= 8 or abs(cam_error_y) >= 5)
-        and abs(cam_error_x) < 35
     ):
-        vx = clamp(vx, -22.0, 22.0)
         if body_vy * ff_vy < 0.0:
             vy -= body_vy * 0.55
 

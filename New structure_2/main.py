@@ -657,7 +657,7 @@ def solve_follow_pose_twist(
         and error_x < 40
         and (error_x <= -40 or abs(error_y) >= 8)
     ):
-        body_vx *= 0.65 if error_x <= -40 else 0.55
+        body_vx *= 0.65
     if (not orbit_mode) and (not spin_mode):
         body_vx *= Follow_Normal_Visual_Forward_Scale
     if use_ff and not spin_mode and ff_vx == 0.0 and ff_vy == 0.0:

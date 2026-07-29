@@ -1311,7 +1311,7 @@ def update_follow_targets(gyro_z):
             ff_vy,
             Follow_Push_Feedforward_Lateral_Gain,
             Follow_Push_Feedforward_Lateral_Limit,
-            1.0
+            Follow_Close_Feedforward_Min_Scale
             if abs(gyro_z) >= 40
             else clamp(1.0 - abs(cam_error_y) / 6.0, 0.0, 1.0),
         )

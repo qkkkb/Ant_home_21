@@ -654,10 +654,10 @@ def solve_follow_pose_twist(
     body_vy = calc_follow_lateral(cam_vy, position_priority)
     if (
         push_mode
-        and -40 < error_x < 40
-        and (error_y >= 8 or error_y <= -8)
+        and error_x < 40
+        and (error_x <= -40 or abs(error_y) >= 8)
     ):
-        body_vx *= 0.45
+        body_vx *= 0.65 if error_x <= -40 else 0.45
     if (not orbit_mode) and (not spin_mode):
         body_vx *= Follow_Normal_Visual_Forward_Scale
     if use_ff and not spin_mode and ff_vx == 0.0 and ff_vy == 0.0:
@@ -843,8 +843,8 @@ def limit_pose_twist_for_wheels(
         return vx, vy, vz
 
     if preserve_vy:
-        # Release a little X headroom only when PUSH has drifted inward.
-        pos_max = (45.0 if cam_error_x <= -40 else 43.0) - abs(vy) * 0.57735
+        # Keep translation near 37 units so PUSH yaw retains wheel headroom.
+        pos_max = 43.0 - abs(vy) * 0.57735
         vx = clamp(vx, -pos_max, pos_max)
 
     wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
@@ -1712,7 +1712,7 @@ def speed_ctrl_follow(pid, actual_speed, target_speed):
         (master_flags & MASTER_MOTION_FLAG_PUSH)
         and (cam_target_vy >= 8.0 or cam_target_vy <= -8.0)
     ):
-        pid.ki = 8.0
+        pid.ki = 12.0 if last_follow_mode_key == 3 else 8.0
     elif master_flags and (cam_target_vy >= 8.0 or cam_target_vy <= -8.0):
         pid.ki = 18.0
     else:

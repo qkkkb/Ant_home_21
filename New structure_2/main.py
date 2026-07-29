@@ -700,7 +700,7 @@ def solve_follow_pose_twist(
                 Follow_Orbit_Wz_Feedforward_Limit,
             )
         elif spin_mode:
-            target_ff_vx = ff_vx + ff_wz * 0.05
+            target_ff_vx = ff_vx + ff_wz * 0.08
             target_ff_vy = ff_vy + ff_wz * Follow_Spin_Target_Point_Wz_To_Vy
             vx = add_feedforward_assist(
                 vx,
@@ -843,8 +843,8 @@ def limit_pose_twist_for_wheels(
         return vx, vy, vz
 
     if preserve_vy:
-        # Keep |0.866 * vx| + |0.5 * vy| within a 40-unit work limit.
-        pos_max = 46.188 - abs(vy) * 0.57735
+        # Keep translation near 37 units so PUSH yaw retains wheel headroom.
+        pos_max = 43.0 - abs(vy) * 0.57735
         vx = clamp(vx, -pos_max, pos_max)
 
     wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
@@ -1250,7 +1250,7 @@ def update_follow_targets(gyro_z):
             and (cam_error_y >= 8 or cam_error_y <= -8)
         ):
             vx -= body_vx
-            body_vx *= 0.20
+            body_vx *= 0.20 if abs(cam_error_x) < 28 else 0.55
             vx += body_vx
         if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
             vx -= body_vx * (1.0 - Follow_Static_Visual_Scale)

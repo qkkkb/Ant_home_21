@@ -109,7 +109,6 @@ Follow_Feedforward_Lateral_Gain = 1.18
 Follow_Feedforward_Forward_Limit = 35.0
 Follow_Feedforward_Lateral_Limit = 31.0
 Follow_Push_Feedforward_Forward_Gain = 1.42
-Follow_Push_Feedforward_Lateral_Gain = 1.45
 Follow_Push_Feedforward_Forward_Limit = 30.0
 Follow_Normal_Visual_Forward_Scale = 0.72
 Follow_Static_Visual_Scale = 0.60
@@ -141,7 +140,6 @@ Follow_Orbit_Pose_Angle_Min_Error = 14
 Follow_Orbit_Pose_Angle_Min_Turn = 30.0
 Follow_Normal_Pose_Angle_Deadband = 8
 Follow_Normal_Pose_Angle_Active_Error = 18
-Follow_Spin_Target_Point_Wz_To_Vx = 0.08
 Follow_Spin_Target_Point_Wz_To_Vy = -0.08
 Follow_Spin_Feedforward_Forward_Gain = 0.95
 Follow_Spin_Feedforward_Forward_Limit = 12.0
@@ -702,7 +700,7 @@ def solve_follow_pose_twist(
                 Follow_Orbit_Wz_Feedforward_Limit,
             )
         elif spin_mode:
-            target_ff_vx = ff_vx + ff_wz * Follow_Spin_Target_Point_Wz_To_Vx
+            target_ff_vx = ff_vx + ff_wz * 0.05
             target_ff_vy = ff_vy + ff_wz * Follow_Spin_Target_Point_Wz_To_Vy
             vx = add_feedforward_assist(
                 vx,
@@ -1312,10 +1310,10 @@ def update_follow_targets(gyro_z):
             Follow_Push_Feedforward_Forward_Limit,
         )
         vy = add_feedforward_direct(
-            ff_vy * Follow_Push_Feedforward_Lateral_Gain,
+            ff_vy * 1.35,
             vy,
             1.0,
-            29.0,
+            Follow_Lateral_Limit,
             Follow_Close_Feedforward_Min_Scale,
         )
 
@@ -1336,7 +1334,7 @@ def update_follow_targets(gyro_z):
         vy = last_cmd_vy
 
     vx_limit = Follow_Forward_Limit
-    vy_limit = Follow_Lateral_Limit
+    vy_limit = 27.0 if push_follow_active else Follow_Lateral_Limit
     if fresh_motion:
         vx_limit = follow_limit(vx_limit, ff_vx)
         vy_limit = follow_limit(vy_limit, ff_vy)

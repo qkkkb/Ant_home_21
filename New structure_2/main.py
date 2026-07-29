@@ -1345,7 +1345,10 @@ def update_follow_targets(gyro_z):
         vy_limit = follow_limit(vy_limit, ff_vy)
     vx = clamp(vx, -vx_limit, vx_limit)
     vy = clamp(vy, -vy_limit, vy_limit)
-    if master_edge_until_ms or position_priority_active:
+    if master_edge_until_ms and mode_key == 0:
+        vx_ramp = 14.0
+        vy_ramp = 20.0
+    elif position_priority_active:
         vx_ramp = Follow_Orbit_Command_Ramp_Vx
         vy_ramp = Follow_Orbit_Command_Ramp_Vy
     else:

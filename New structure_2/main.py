@@ -1217,7 +1217,16 @@ def update_follow_targets(gyro_z):
     prev_angle_priority_active = last_angle_priority_active
 
     if seen:
-        target_lost_since_ms = 0
+        if push_follow_active and target_lost_since_ms:
+            if not last_follow_seen:
+                target_lost_since_ms = utime.ticks_add(
+                    now,
+                    Follow_Master_Edge_Hold_Ms,
+                )
+            elif utime.ticks_diff(target_lost_since_ms, now) <= 0:
+                target_lost_since_ms = 0
+        else:
+            target_lost_since_ms = 0
         use_motion_feedforward = fresh_motion and (not push_follow_active)
         (
             vx,
@@ -1285,6 +1294,14 @@ def update_follow_targets(gyro_z):
         if prev_angle_priority_active:
             reset_turn_loop_state()
         last_angle_priority_active = False
+
+    if (
+        push_follow_active
+        and target_lost_since_ms
+        and body_vx < -22.0
+    ):
+        vx = -22.0
+        body_vx = vx
 
     if seen and angle_pose_mode_active and not push_follow_active:
         xy_scale = angle_xy_lock_scale(

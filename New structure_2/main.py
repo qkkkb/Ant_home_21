@@ -1167,23 +1167,8 @@ def update_follow_targets(gyro_z):
             reset_speed_outputs()
             follow_ff_wz = 0.0
         elif last_follow_mode_key < 0:
-            speed_reset(pid_fl)
-            speed_reset(pid_fr)
-            speed_reset(pid_b)
-            last_pwm_fl = 0
-            last_pwm_fr = 0
-            last_pwm_b = 0
-            last_stall_count = 0
-            last_stall_boost = False
-            last_cmd_vx = 0.0
-            last_cmd_vy = 0.0
-            last_cmd_wz = 0.0
-            last_ap_vz_cmd = 0.0
-            last_angle_priority_active = False
-            if ENABLE_GYRO_LOOP and gyro_pid is not None:
-                gyro_pid.output = 0.0
-                gyro_pid.err = 0.0
-                gyro_pid.err_last = 0.0
+            reset_speed_outputs(True)
+            reset_turn_loop_state()
     follow_output_limit = FOLLOW_RUN_PWM_LIMIT
     if (
         mode_key == 0

@@ -144,9 +144,7 @@ Follow_Normal_Pose_Angle_Active_Error = 18
 Follow_Spin_Target_Point_Wz_To_Vx = 0.08
 Follow_Spin_Target_Point_Wz_To_Vy = -0.08
 Follow_Spin_Feedforward_Forward_Gain = 0.95
-Follow_Spin_Feedforward_Lateral_Gain = 1.05
 Follow_Spin_Feedforward_Forward_Limit = 12.0
-Follow_Spin_Feedforward_Lateral_Limit = 20.0
 Follow_Spin_Wz_Feedforward_Gain = 0.85
 Follow_Spin_Wz_Feedforward_Limit = 100.0
 Follow_Spin_Turn_Rate_Limit = 128.0
@@ -712,11 +710,11 @@ def solve_follow_pose_twist(
                 Follow_Spin_Feedforward_Forward_Gain,
                 Follow_Spin_Feedforward_Forward_Limit,
             )
-            vy = add_feedforward_assist(
+            vy = add_feedforward_direct(
                 vy,
                 target_ff_vy,
-                Follow_Spin_Feedforward_Lateral_Gain,
-                Follow_Spin_Feedforward_Lateral_Limit,
+                1.05,
+                20.0,
             )
             wz = add_feedforward_direct(
                 wz,
@@ -727,18 +725,21 @@ def solve_follow_pose_twist(
         else:
             target_ff_vx = ff_vx + ff_wz * Follow_Target_Point_Wz_To_Vx
             target_ff_vy = ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
-            ff_scale = clamp(
-                (Follow_Close_Guard_Full_Error - cam_vx)
-                / Follow_Close_Guard_Full_Error,
-                0.0,
-                1.0,
-            )
-            ff_scale = (
-                0.0
-                if master_flags & MASTER_MOTION_FLAG_BACK
-                else Follow_Close_Feedforward_Min_Scale
-                + (1.0 - Follow_Close_Feedforward_Min_Scale) * ff_scale
-            )
+            if master_flags & MASTER_MOTION_FLAG_BACK:
+                target_ff_vx *= 0.80
+                target_ff_vy *= 0.80
+                ff_scale = 0.0
+            else:
+                ff_scale = (
+                    Follow_Close_Feedforward_Min_Scale
+                    + (1.0 - Follow_Close_Feedforward_Min_Scale)
+                    * clamp(
+                        (Follow_Close_Guard_Full_Error - cam_vx)
+                        / Follow_Close_Guard_Full_Error,
+                        0.0,
+                        1.0,
+                    )
+                )
             vx = add_feedforward_direct(
                 vx,
                 target_ff_vx,
@@ -1314,7 +1315,7 @@ def update_follow_targets(gyro_z):
             ff_vy * Follow_Push_Feedforward_Lateral_Gain,
             vy,
             1.0,
-            Follow_Lateral_Limit,
+            29.0,
             Follow_Close_Feedforward_Min_Scale,
         )
 

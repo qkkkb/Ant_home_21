@@ -1755,7 +1755,7 @@ def calc_speed_closed_loop():
     elif nav_state == NAV_STATE_PUSH_ORIENT:
         orbit_remaining = max(0.0, push_orbit_target_delta - push_orbit_progress_deg)
         if push_orbit_reached:
-            orbit_vy_mag = 0.0
+            orbit_vy_mag = Nav_Push_Orbit_Slow_Vy * push_orbit_radius_ratio
             orbit_turn_mag = 0.0
         else:
             orbit_vy_mag, orbit_turn_mag = get_push_orbit_motion(orbit_remaining)

@@ -105,7 +105,7 @@ Follow_Distance_Far_Boost_Gain = 0.70
 Follow_Distance_Close_Gain = 0.70
 Follow_Distance_Close_Limit = 22.0
 Follow_Feedforward_Forward_Gain = 1.10
-Follow_Feedforward_Lateral_Gain = 1.18
+Follow_Feedforward_Lateral_Gain = 1.25
 Follow_Feedforward_Forward_Limit = 35.0
 Follow_Feedforward_Lateral_Limit = 31.0
 Follow_Push_Feedforward_Forward_Gain = 1.25
@@ -1310,7 +1310,7 @@ def update_follow_targets(gyro_z):
             ff_vx,
             Follow_Push_Feedforward_Forward_Gain,
             Follow_Push_Feedforward_Forward_Limit,
-            0.75,
+            0.68,
         )
         vy = add_feedforward_direct(
             ff_vy * 1.30,

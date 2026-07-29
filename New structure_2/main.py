@@ -105,9 +105,9 @@ Follow_Distance_Far_Boost_Gain = 0.70
 Follow_Distance_Close_Gain = 0.70
 Follow_Distance_Close_Limit = 22.0
 Follow_Feedforward_Forward_Gain = 0.90
-Follow_Feedforward_Lateral_Gain = 1.40
+Follow_Feedforward_Lateral_Gain = 2.30
 Follow_Feedforward_Forward_Limit = 35.0
-Follow_Feedforward_Lateral_Limit = 31.0
+Follow_Feedforward_Lateral_Limit = 35.0
 Follow_Push_Feedforward_Forward_Gain = 1.25
 Follow_Push_Feedforward_Forward_Limit = 30.0
 Follow_Normal_Visual_Forward_Scale = 0.72
@@ -725,7 +725,7 @@ def solve_follow_pose_twist(
             target_ff_vy = ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
             if master_flags & MASTER_MOTION_FLAG_BACK:
                 target_ff_vx *= 0.80
-                target_ff_vy *= 0.65
+                target_ff_vy *= 0.51
                 ff_scale = 0.0
             else:
                 ff_scale = (
@@ -745,12 +745,6 @@ def solve_follow_pose_twist(
                 Follow_Feedforward_Forward_Limit,
                 ff_scale,
             )
-            if (
-                not (master_flags & MASTER_MOTION_FLAG_BACK)
-                and body_vy * target_ff_vy < 0.0
-            ):
-                body_vy *= 0.45
-                vy = body_vy
             vy = add_feedforward_direct(
                 vy,
                 target_ff_vy,
@@ -1187,7 +1181,7 @@ def update_follow_targets(gyro_z):
             speed_reset(pid_b)
     follow_output_limit = FOLLOW_RUN_PWM_LIMIT
     if (
-        mode_key == 0
+        not mode_key
         and -Follow_Master_Edge_Delta < ff_vx < Follow_Master_Edge_Delta
         and -Follow_Master_Edge_Delta < ff_vy < Follow_Master_Edge_Delta
         and -Follow_Master_Edge_Delta < follow_ff_wz < Follow_Master_Edge_Delta
@@ -1340,7 +1334,7 @@ def update_follow_targets(gyro_z):
         push_yaw_target = None
 
     if (
-        mode_key == 0
+        not mode_key
         and not (master_flags & MASTER_MOTION_FLAG_BACK)
         and (abs(ff_vy) >= 8 or abs(cam_error_y) >= 5)
     ):

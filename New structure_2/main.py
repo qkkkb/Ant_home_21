@@ -1155,6 +1155,8 @@ def update_follow_targets(gyro_z):
         if last_follow_mode_key > 0 and mode_key == 0:
             reset_speed_outputs()
             follow_ff_wz = 0.0
+        elif last_follow_mode_key == 0 and mode_key == 3:
+            reset_speed_outputs(True)
         elif last_follow_mode_key < 0:
             speed_reset(pid_fl)
             speed_reset(pid_fr)
@@ -1245,10 +1247,19 @@ def update_follow_targets(gyro_z):
         if (
             (mode_key == 0 or push_follow_active)
             and (cam_error_y >= 8 or cam_error_y <= -8)
+            and (
+                (not push_follow_active)
+                or (-40 < cam_error_x < 40)
+            )
         ):
             vx -= body_vx
             body_vx *= 0.35 if push_follow_active else 0.20
             vx += body_vx
+        if (
+            master_flags & MASTER_MOTION_FLAG_BACK
+            and body_vx * ff_vx < -0.001
+        ):
+            vx = body_vx
         if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
             vx -= body_vx * (1.0 - Follow_Static_Visual_Scale)
             vy -= body_vy * (1.0 - Follow_Static_Visual_Scale)

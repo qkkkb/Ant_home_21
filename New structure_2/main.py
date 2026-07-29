@@ -1319,6 +1319,10 @@ def update_follow_targets(gyro_z):
             8,
         )
 
+    if mode_key == 0 and seen and master_edge_until_ms and not ff_vx and not ff_vy:
+        vx = last_cmd_vx
+        vy = last_cmd_vy
+
     vx_limit = Follow_Forward_Limit
     vy_limit = Follow_Lateral_Limit
     if fresh_motion:

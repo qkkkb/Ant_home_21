@@ -1313,7 +1313,7 @@ def update_follow_targets(gyro_z):
             Follow_Push_Feedforward_Lateral_Limit,
             Follow_Close_Feedforward_Min_Scale
             if abs(gyro_z) >= 40
-            else clamp(1.0 - abs(cam_error_y) / 6.0, 0.0, 1.0),
+            else clamp(1.0 - abs(cam_error_y) / Follow_Orbit_Feedforward_Full_Error, 0.0, 1.0),
         )
         turn_rate_cmd = add_feedforward_assist(
             turn_rate_cmd,

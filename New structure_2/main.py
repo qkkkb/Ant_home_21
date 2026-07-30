@@ -16,6 +16,7 @@ from coop_protocol import (
     MASTER_MOTION_FLAG_PUSH,
     MASTER_MOTION_FLAG_RETURN,
     MASTER_MOTION_FLAG_SPIN,
+    MASTER_MOTION_FLAG_STARTED,
     MSG_MASTER_MOTION,
     decode_i16,
 )
@@ -1834,6 +1835,12 @@ def calc_speed_closed_loop():
     global last_stall_count, last_stall_boost
 
     if not car_started:
+        reset_speed_outputs()
+        set_three_pwm_zero()
+        last_hard_stop = True
+        return None
+
+    if master_motion_fresh() and not (master_flags & MASTER_MOTION_FLAG_STARTED):
         reset_speed_outputs()
         set_three_pwm_zero()
         last_hard_stop = True

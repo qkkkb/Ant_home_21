@@ -91,7 +91,8 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
     vx = 0.0
     vy = 0.0
     wz = 0.0
-    if car_started:
+    hard_stop = state_code == 17 or state_code == 18
+    if car_started and not hard_stop:
         flags = _FLAG_STARTED | _FLAG_CLOSED_LOOP
         vx = _vx
         vy = _vy
@@ -131,7 +132,7 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             flags |= _FLAG_BACK
         if 11 <= state_code <= 14:
             flags |= _FLAG_RETURN
-    if target_seen:
+    if target_seen and not hard_stop:
         flags |= _FLAG_TARGET
     _put_u8(0, 0xA5)
     _put_u8(1, 0x5A)

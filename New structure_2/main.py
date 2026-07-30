@@ -115,7 +115,6 @@ Follow_Push_Feedforward_Forward_Limit = 30.0
 Follow_Normal_Visual_Forward_Scale = 0.72
 Follow_Static_Visual_Scale = 0.60
 Follow_Close_Feedforward_Min_Scale = 0.25
-Follow_Normal_Hold_Feedforward_Gain = 1.15
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Normal_Wz_Feedforward_Gain = 1.00
 Follow_Orbit_Wz_Feedforward_Gain = 1.00
@@ -158,7 +157,6 @@ Follow_Command_Ramp_Vx = 2.0
 Follow_Command_Ramp_Vy = 3.0
 Follow_Orbit_Command_Ramp_Vx = 20.0
 Follow_Orbit_Command_Ramp_Vy = 14.0
-Follow_Normal_Target_Lost_Hold_Ms = 1000
 Follow_Target_Lost_Hold_Ms = 450
 Follow_Orbit_Mode_FfWz_Off = 10.0
 Follow_Orbit_Mode_Exit_Ms = 200
@@ -1240,7 +1238,7 @@ def update_follow_targets(gyro_z):
         ):
             vx -= body_vx
             body_vx *= 0.20 if abs(cam_error_x) < 28 else (
-                0.55 if abs(cam_error_x) < 70 else 1.0
+                0.65 if abs(cam_error_x) < 60 else 1.0
             )
             vx += body_vx
         if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
@@ -1262,7 +1260,7 @@ def update_follow_targets(gyro_z):
                 180
                 if push_follow_active
                 else (
-                    Follow_Normal_Target_Lost_Hold_Ms
+                    300
                     if not mode_key
                     else Follow_Target_Lost_Hold_Ms
                 )
@@ -1272,7 +1270,7 @@ def update_follow_targets(gyro_z):
                 0.65
                 if push_follow_active
                 else (
-                    Follow_Normal_Hold_Feedforward_Gain
+                    0.75
                     if not mode_key
                     else Follow_Hold_Feedforward_Gain
                 )
@@ -1304,7 +1302,9 @@ def update_follow_targets(gyro_z):
             vx *= xy_scale
             vy *= xy_scale
         elif not (master_flags & MASTER_MOTION_FLAG_RETURN):
-            vx = (vx - body_vx) + body_vx * xy_scale
+            vx -= body_vx * (1.0 - xy_scale) * (
+                cam_error_x * cam_error_x < 3600
+            )
 
     if push_follow_active and seen:
         vx = add_feedforward_direct(
@@ -1335,14 +1335,13 @@ def update_follow_targets(gyro_z):
         push_yaw_target = None
 
     if (
-        not mode_key
-        and not angle_pose_mode_active
-        and not (master_flags & MASTER_MOTION_FLAG_BACK)
-        and not (master_flags & MASTER_MOTION_FLAG_RETURN)
+        # 0xC0 combines BACK (0x40) and RETURN (0x80) without another global.
+        not (mode_key | angle_pose_mode_active | (master_flags & 0xC0))
         and (abs(ff_vy) >= 8 or abs(cam_error_y) >= 5)
+        and cam_error_y * cam_error_y < 900
+        and body_vy * ff_vy < 0.0
     ):
-        if body_vy * ff_vy < 0.0:
-            vy -= body_vy * 0.55
+        vy -= body_vy * 0.55
 
     if not mode_key and seen and master_edge_until_ms and not ff_vx and not ff_vy:
         vx = last_cmd_vx

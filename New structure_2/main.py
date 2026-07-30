@@ -1313,7 +1313,7 @@ def update_follow_targets(gyro_z):
             vy,
             1.0,
             Follow_Lateral_Limit,
-            Follow_Close_Feedforward_Min_Scale,
+            0.55,
         )
 
     if push_follow_active:

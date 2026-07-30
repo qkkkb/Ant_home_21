@@ -1187,7 +1187,7 @@ def update_follow_targets(gyro_z):
     last_follow_mode_key = mode_key
     if (
         spin_mode_active
-        and (follow_ff_wz >= 0.001 or follow_ff_wz <= -0.001)
+        and follow_ff_wz
         and last_cmd_wz * follow_ff_wz < 0.0
     ):
         reset_turn_loop_state()
@@ -1446,7 +1446,7 @@ def update_follow_targets(gyro_z):
         angle_priority_active = True
         last_angle_priority_active = True
     if ENABLE_GYRO_LOOP and gyro_pid is not None:
-        if abs(turn_rate_cmd) > 0.001 or orbit_brake_active or normal_brake_active:
+        if turn_rate_cmd or orbit_brake_active or normal_brake_active:
             if priority_turn_mode or normal_brake_active:
                 gyro_pid.gyro_kp = GYRO_PRIORITY_KP
                 gyro_pid.gyro_ki = GYRO_PRIORITY_KI
@@ -1532,14 +1532,8 @@ def update_follow_targets(gyro_z):
             )
         )
         and not mode_key
-        and (vz_cmd >= 0.001 or vz_cmd <= -0.001),
-        push_follow_active
-        or (
-            seen
-            and use_motion_feedforward
-            and not (mode_key | (master_flags & 0xE0))
-            and (abs(ff_vy) >= 8 or abs(cam_error_y) >= 5)
-        ),
+        and vz_cmd,
+        push_follow_active or (0 < master_flags < 8 and not mode_key),
     )
     last_cmd_vx = cam_target_vx
     last_cmd_vy = cam_target_vy

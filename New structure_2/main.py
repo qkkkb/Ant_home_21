@@ -166,8 +166,6 @@ Follow_Spin_Latch_Min_Wz = 26.0
 Follow_Spin_Command_Hold_Ms = 900
 Follow_Spin_Latch_Release_Angle = 3
 Follow_Orbit_Brake_Gyro_Threshold = 4.0
-Follow_Orbit_Brake_Output_Limit = 8.0
-Follow_Normal_Brake_Wheel_Reserve = 3.25
 Master_Motion_Timeout_Ms = 250
 Follow_Master_Edge_Delta = 4.0
 Follow_Master_Edge_Hold_Ms = 120
@@ -1303,7 +1301,7 @@ def update_follow_targets(gyro_z):
             vy *= xy_scale
         elif not (master_flags & MASTER_MOTION_FLAG_RETURN):
             vx -= body_vx * (1.0 - xy_scale) * (
-                cam_error_x * cam_error_x < 3600
+                0.55 + 0.45 * (cam_error_x * cam_error_x < 3600)
             )
 
     if push_follow_active and seen:
@@ -1338,7 +1336,7 @@ def update_follow_targets(gyro_z):
         # 0xC0 combines BACK (0x40) and RETURN (0x80) without another global.
         not (mode_key | angle_pose_mode_active | (master_flags & 0xC0))
         and (abs(ff_vy) >= 8 or abs(cam_error_y) >= 5)
-        and cam_error_y * cam_error_y < 900
+        and cam_error_y * cam_error_y < 1600
         and body_vy * ff_vy < 0.0
     ):
         vy -= body_vy * 0.55
@@ -1480,7 +1478,7 @@ def update_follow_targets(gyro_z):
                 gyro_pid.gyro_kp = GYRO_KP
                 gyro_pid.gyro_ki = GYRO_KI
                 gyro_pid.gyro_output_limit = (
-                    Follow_Orbit_Brake_Output_Limit
+                    8.0
                     if orbit_brake_active
                     else gyro_limit_for_turn(turn_rate_cmd)
                 )
@@ -1505,7 +1503,7 @@ def update_follow_targets(gyro_z):
             GYRO_OUTPUT_BASE_LIMIT,
         )
     if normal_brake_active and (not priority_turn_mode):
-        normal_brake_reserve = Follow_Normal_Brake_Wheel_Reserve
+        normal_brake_reserve = 3.25
         if master_flags and abs(gyro_z) >= 20.0 and (
             abs(gyro_z) > abs(turn_rate_cmd) * GYRO_PRIORITY_OVERSPEED_RATIO
         ):

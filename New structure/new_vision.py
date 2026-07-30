@@ -89,6 +89,9 @@ LINE_BALL_EDGE_MARGIN = 2
 LINE_CENTER_MASK_W = int(WORK_W * 0.42)
 LINE_CONFIRM_FRAMES = 1
 LINE_BALL_CONFIRM_FRAMES = 1
+FIRST_PUSH_YELLOW_MIN_PIXELS = 30
+FIRST_PUSH_YELLOW_MIN_AREA = 30
+FIRST_PUSH_YELLOW_MIN_COVER100 = 15
 
 # ================= Red brick filtering =================
 # Production path: no draw, no log. These thresholds are copied from the
@@ -598,6 +601,29 @@ def update_red_brick_state(red_blobs, target):
         red_brick_error_y = 0
 
 
+def model_is_yellow_interference(img, model):
+    x1 = model[M_X1]
+    y1 = model[M_Y1]
+    w = model[M_X2] - x1
+    h = model[M_Y2] - y1
+    area = w * h
+    if area <= 0:
+        return False
+
+    yellow_pixels = 0
+    for blob in img.find_blobs(
+        YELLOW_LINE_THRESHOLDS,
+        roi = (x1, y1, w, h),
+        pixels_threshold = FIRST_PUSH_YELLOW_MIN_PIXELS,
+        area_threshold = FIRST_PUSH_YELLOW_MIN_AREA,
+        merge = True,
+    ):
+        yellow_pixels += blob.pixels()
+        if yellow_pixels * 100 >= area * FIRST_PUSH_YELLOW_MIN_COVER100:
+            return True
+    return False
+
+
 def find_nearest_target(img, use_redbrick_filter = True):
     img_w = img.width()
     img_h = img.height()
@@ -620,6 +646,15 @@ def find_nearest_target(img, use_redbrick_filter = True):
             continue
 
         target = (x1, y1, x2, y2, label, score)
+        if yellow_model_filter_enabled and model_is_yellow_interference(img, target):
+            if PRINT_VERBOSE:
+                print_state_log(
+                    "FILTER", "YELLOW_REJECT", coarse_frame_count, freeze_count,
+                    score = score, label = label,
+                    mid_x = (x1 + x2) // 2, bottom_y = y2,
+                    verbose = True,
+                )
+            continue
         if use_redbrick_filter and model_is_suspected_brick(target, red_blobs):
             continue
 
@@ -820,6 +855,7 @@ red_brick_error_x = 0
 red_brick_error_y = 0
 red_brick_confirm_count = 0
 red_brick_last_code = RED_BRICK_NONE
+yellow_model_filter_enabled = True
 
 
 def set_detect_mode(new_mode, event, clear_state = True):
@@ -828,6 +864,7 @@ def set_detect_mode(new_mode, event, clear_state = True):
     global line_confirm_count, line_ball_slant_state
     global red_brick_code, red_brick_error_x, red_brick_error_y
     global red_brick_confirm_count, red_brick_last_code
+    global yellow_model_filter_enabled
 
     old_mode = detect_mode
     detect_mode = new_mode
@@ -850,6 +887,7 @@ def set_detect_mode(new_mode, event, clear_state = True):
     if new_mode in ("SEARCH", "COARSE", "CLASSIFY"):
         line_ball_slant_state = 0
     elif new_mode == "LINE":
+        yellow_model_filter_enabled = False
         if line_ball_slant_state == 1:
             line_ball_slant_state = 2
         elif old_mode != "LINE":

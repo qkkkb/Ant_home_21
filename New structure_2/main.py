@@ -1259,15 +1259,23 @@ def update_follow_targets(gyro_z):
                 now,
                 target_lost_since_ms,
             ) <= (
-                Follow_Normal_Target_Lost_Hold_Ms
-                if not mode_key
-                else Follow_Target_Lost_Hold_Ms
+                180
+                if push_follow_active
+                else (
+                    Follow_Normal_Target_Lost_Hold_Ms
+                    if not mode_key
+                    else Follow_Target_Lost_Hold_Ms
+                )
             )
         if use_motion_feedforward:
             xy_scale = (
-                Follow_Normal_Hold_Feedforward_Gain
-                if not mode_key or push_follow_active
-                else Follow_Hold_Feedforward_Gain
+                0.65
+                if push_follow_active
+                else (
+                    Follow_Normal_Hold_Feedforward_Gain
+                    if not mode_key
+                    else Follow_Hold_Feedforward_Gain
+                )
             )
             vx = ff_vx * xy_scale
             vy = ff_vy * xy_scale
@@ -1311,13 +1319,12 @@ def update_follow_targets(gyro_z):
             vy,
             1.0,
             Follow_Lateral_Limit,
-            0.55,
+            0.75,
         )
 
     if push_follow_active:
         if push_yaw_target is None:
             push_yaw_target = imu_runtime.yaw_deg
-            speed_reset(pid_b)
             reset_turn_loop_state()
         # Short PUSH stages use gyro-integrated relative yaw as the heading anchor.
         turn_rate_cmd = (
@@ -1730,7 +1737,7 @@ def speed_ctrl_follow(pid, actual_speed, target_speed):
     ):
         pid.ki = 18.0 if last_follow_mode_key == 3 else 8.0
     elif master_flags and (cam_target_vy >= 8.0 or cam_target_vy <= -8.0):
-        pid.ki = 14 if last_follow_mode_key and pid is pid_b else 18.0
+        pid.ki = (18, 14)[last_follow_mode_key and pid is pid_b]
     else:
         pid.ki = 12.0
     if wheel_target_idle(target_speed):

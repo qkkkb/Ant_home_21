@@ -83,8 +83,10 @@ def speed_follow_guard(pid, output, actual_speed, target_speed, stop_eps, unload
         return -pid.kp * actual_speed
     if (
         unload_wrong
-        and output * target_speed < 0.0
-        and actual_speed * target_speed <= target_speed * target_speed
+        and (
+            (output * target_speed < 0.0)
+            == (actual_speed * target_speed <= target_speed * target_speed)
+        )
     ):
         return 0.0
     return output

@@ -800,6 +800,11 @@ def limit_pose_twist_for_wheels(
     if Follow_Pose_Wheel_Target_Limit <= 0.0:
         return vx, vy, vz
 
+    if preserve_vy:
+        # Keep translation near 37 units so Y and yaw retain wheel headroom.
+        pos_max = 43.0 - abs(vy) * 0.57735
+        vx = clamp(vx, -pos_max, pos_max)
+
     if preserve_turn:
         limit = Follow_Pose_Wheel_Target_Limit
         if vz > limit:
@@ -840,11 +845,6 @@ def limit_pose_twist_for_wheels(
             vy *= scale
             vz *= scale
         return vx, vy, vz
-
-    if preserve_vy:
-        # Keep translation near 37 units so PUSH yaw retains wheel headroom.
-        pos_max = 43.0 - abs(vy) * 0.57735
-        vx = clamp(vx, -pos_max, pos_max)
 
     wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
     pos_max = max_wheel_abs(wheel_fr, wheel_fl, wheel_b)
@@ -1533,7 +1533,13 @@ def update_follow_targets(gyro_z):
         )
         and not mode_key
         and (vz_cmd >= 0.001 or vz_cmd <= -0.001),
-        push_follow_active,
+        push_follow_active
+        or (
+            seen
+            and use_motion_feedforward
+            and not (mode_key | (master_flags & 0xE0))
+            and (abs(ff_vy) >= 8 or abs(cam_error_y) >= 5)
+        ),
     )
     last_cmd_vx = cam_target_vx
     last_cmd_vy = cam_target_vy

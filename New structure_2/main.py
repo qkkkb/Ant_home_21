@@ -1235,7 +1235,8 @@ def update_follow_targets(gyro_z):
         if (
             not mode_key
             and (
-                abs(cam_error_y) >= 8
+                abs(ff_vy) >= 8
+                or abs(cam_error_y) >= 8
                 or (abs(cam_error_x) < 28 and body_vx * ff_vx > 120)
             )
         ):
@@ -1346,7 +1347,7 @@ def update_follow_targets(gyro_z):
     elif push_follow_active:
         vy_limit = 29.0 if cam_error_y <= -16 else 27.0
     else:
-        vy_limit = Follow_Lateral_Limit
+        vy_limit = 32.0
     if fresh_motion:
         vx_limit = follow_limit(vx_limit, ff_vx)
         vy_limit = follow_limit(vy_limit, ff_vy)

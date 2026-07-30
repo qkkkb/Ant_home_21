@@ -69,6 +69,21 @@ NAV_STATE_RETURN_TURN = 13
 NAV_STATE_RETURN_FINAL = 14
 NAV_STATE_RETURN_DONE = 15
 NAV_STATE_SEARCH_SPIN = 16
+_NAV_TRACK_STATES = (
+    NAV_STATE_SEARCH_TURN,
+    NAV_STATE_COARSE,
+    NAV_STATE_FINE,
+    NAV_STATE_PUSH_CLASSIFY,
+    NAV_STATE_PUSH_PREPARE,
+    NAV_STATE_RETURN_LEFT,
+    NAV_STATE_RETURN_BACK,
+    NAV_STATE_RETURN_FINAL,
+)
+_NAV_TURN_STATES = (
+    NAV_STATE_SEARCH_SPIN,
+    NAV_STATE_PUSH_TURN,
+    NAV_STATE_RETURN_TURN,
+)
 ART_MODE_SEARCH_CMD = b"SEARCH\n"
 ART_MODE_COARSE_CMD = b"COARSE\n"
 ART_MODE_FINE_CMD = b"FINE\n"
@@ -1724,7 +1739,7 @@ def calc_speed_closed_loop():
         turn_rate_cmd = turn_ctrl(turn_pid, yaw_err_deg, 0)
 
     # 陀螺仪内环（方向控制）
-    if nav_state in (NAV_STATE_SEARCH_SPIN, NAV_STATE_PUSH_TURN, NAV_STATE_RETURN_TURN):
+    if nav_state in _NAV_TURN_STATES:
         gyro_pid.gyro_kp = Nav_Push_Turn_Gyro_Kp
         gyro_pid.gyro_ki = Nav_Push_Turn_Gyro_Ki
     else:
@@ -1738,15 +1753,9 @@ def calc_speed_closed_loop():
             gyro_pid.gyro_output_limit = Nav_Ball_Push_Gyro_Limit
         else:
             gyro_pid.gyro_output_limit = Nav_Push_Execute_Gyro_Limit
-    elif nav_state in (NAV_STATE_SEARCH_SPIN, NAV_STATE_PUSH_TURN, NAV_STATE_RETURN_TURN):
+    elif nav_state in _NAV_TURN_STATES:
         gyro_pid.gyro_output_limit = Nav_Push_Turn_Gyro_Limit
-    elif (
-        NAV_STATE_SEARCH_TURN <= nav_state <= NAV_STATE_PUSH_CLASSIFY
-        or nav_state == NAV_STATE_PUSH_PREPARE
-        or nav_state == NAV_STATE_RETURN_LEFT
-        or nav_state == NAV_STATE_RETURN_BACK
-        or nav_state == NAV_STATE_RETURN_FINAL
-    ):
+    elif nav_state in _NAV_TRACK_STATES:
         gyro_pid.gyro_output_limit = Nav_Track_Gyro_Limit
     else:
         gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT

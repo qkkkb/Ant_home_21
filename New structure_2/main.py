@@ -1159,8 +1159,6 @@ def update_follow_targets(gyro_z):
         elif last_follow_mode_key < 0:
             reset_speed_outputs(True)
             reset_turn_loop_state()
-        elif push_follow_active:
-            speed_reset(pid_b)
     follow_output_limit = FOLLOW_RUN_PWM_LIMIT
     if (
         not mode_key
@@ -1319,6 +1317,7 @@ def update_follow_targets(gyro_z):
     if push_follow_active:
         if push_yaw_target is None:
             push_yaw_target = imu_runtime.yaw_deg
+            speed_reset(pid_b)
             reset_turn_loop_state()
         # Short PUSH stages use gyro-integrated relative yaw as the heading anchor.
         turn_rate_cmd = (
@@ -1731,7 +1730,7 @@ def speed_ctrl_follow(pid, actual_speed, target_speed):
     ):
         pid.ki = 18.0 if last_follow_mode_key == 3 else 8.0
     elif master_flags and (cam_target_vy >= 8.0 or cam_target_vy <= -8.0):
-        pid.ki = 18.0
+        pid.ki = 14 if last_follow_mode_key and pid is pid_b else 18.0
     else:
         pid.ki = 12.0
     if wheel_target_idle(target_speed):

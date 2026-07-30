@@ -739,12 +739,17 @@ def update_return_home(now, yaw_deg, low_speed, gyro_z):
         nav_ready_for_push = False
         yaw_ref_deg = field_left_yaw
         cam_target_vy = 0.0
-        if abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg)) > Nav_Return_Left_Start_Yaw:
-            cam_target_vx = 0.0
-        else:
+        if (
+            not push_turn_reached_once
+            and abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg)) <= Nav_Return_Left_Start_Yaw
+        ):
+            push_turn_reached_once = True
+        if push_turn_reached_once:
             cam_target_vx = Nav_Return_Left_Speed
             if line_crossed:
                 nav_set_state(NAV_STATE_RETURN_BACK)
+        else:
+            cam_target_vx = 0.0
         if utime.ticks_diff(now, nav_transition_ms) >= Nav_Return_Left_Max_Ms:
             nav_set_state(NAV_STATE_RETURN_DONE)
         return

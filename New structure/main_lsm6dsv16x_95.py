@@ -1740,7 +1740,13 @@ def calc_speed_closed_loop():
             gyro_pid.gyro_output_limit = Nav_Push_Execute_Gyro_Limit
     elif nav_state in (NAV_STATE_SEARCH_SPIN, NAV_STATE_PUSH_TURN, NAV_STATE_RETURN_TURN):
         gyro_pid.gyro_output_limit = Nav_Push_Turn_Gyro_Limit
-    elif nav_state in (NAV_STATE_SEARCH_TURN, NAV_STATE_COARSE, NAV_STATE_FINE, NAV_STATE_PUSH_CLASSIFY, NAV_STATE_PUSH_PREPARE):
+    elif (
+        NAV_STATE_SEARCH_TURN <= nav_state <= NAV_STATE_PUSH_CLASSIFY
+        or nav_state == NAV_STATE_PUSH_PREPARE
+        or nav_state == NAV_STATE_RETURN_LEFT
+        or nav_state == NAV_STATE_RETURN_BACK
+        or nav_state == NAV_STATE_RETURN_FINAL
+    ):
         gyro_pid.gyro_output_limit = Nav_Track_Gyro_Limit
     else:
         gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT

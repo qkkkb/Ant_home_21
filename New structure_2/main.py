@@ -114,7 +114,6 @@ Follow_Push_Feedforward_Forward_Gain = 1.25
 Follow_Push_Feedforward_Forward_Limit = 30.0
 Follow_Normal_Visual_Forward_Scale = 0.72
 Follow_Static_Visual_Scale = 0.60
-Follow_Close_Guard_Full_Error = 8.0
 Follow_Close_Feedforward_Min_Scale = 0.25
 Follow_Normal_Hold_Feedforward_Gain = 1.15
 Follow_Hold_Feedforward_Gain = 1.70
@@ -241,6 +240,17 @@ def clamp(value, low, high):
     if value > high:
         return high
     return value
+
+
+def update_push_reacquire(now, seen):
+    global master_edge_until_ms
+    if (not seen) or last_follow_mode_key != 1:
+        master_edge_until_ms = 0
+    elif not last_follow_seen:
+        master_edge_until_ms = utime.ticks_add(
+            now,
+            Follow_Master_Edge_Hold_Ms,
+        )
 
 
 def ramp_value(target, last, step):
@@ -638,7 +648,7 @@ def solve_follow_pose_twist(
     # Local pose features around the calibrated nonparallel formation.
     cam_vx = error_x if push_mode else error_x + error_angle
     cam_vy = error_y
-    if cam_vx > 0.0:
+    if cam_vx > 0.0 and not push_mode:
         cam_vy -= cam_vx * 5 // 13
     if orbit_mode or spin_mode:
         position_priority = (
@@ -1020,21 +1030,6 @@ def debug_send(text):
         pass
 
 
-def debug_send_idle(log_id):
-    debug_send(
-        "I %d %d %d %d %d %d %d"
-        % (
-            log_id,
-            1 if cam_target_seen() else 0,
-            1 if master_motion_fresh() else 0,
-            master_flags,
-            cam_error_x,
-            cam_error_y,
-            cam_error_angle,
-        )
-    )
-
-
 def debug_send_state(log_id, vz_cmd, gyro_z):
     debug_send(
         "S %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
@@ -1122,9 +1117,9 @@ def update_follow_targets(gyro_z):
         ff_vx = 0.0
         ff_vy = 0.0
     ff_wz = master_wz if fresh_motion else 0.0
-    explicit_orbit = fresh_motion and ((master_flags & MASTER_MOTION_FLAG_ORBIT) != 0)
-    explicit_push = fresh_motion and ((master_flags & MASTER_MOTION_FLAG_PUSH) != 0)
-    explicit_spin = fresh_motion and ((master_flags & MASTER_MOTION_FLAG_SPIN) != 0)
+    explicit_orbit = fresh_motion and (master_flags & MASTER_MOTION_FLAG_ORBIT)
+    explicit_push = fresh_motion and (master_flags & MASTER_MOTION_FLAG_PUSH)
+    explicit_spin = fresh_motion and (master_flags & MASTER_MOTION_FLAG_SPIN)
     spin_ff_wz = update_spin_feedforward_latch(
         now,
         fresh_motion,
@@ -1133,11 +1128,7 @@ def update_follow_targets(gyro_z):
         seen,
         cam_error_angle,
     )
-    spin_mode_active = (
-        explicit_spin
-        and (not explicit_orbit)
-        and (not explicit_push)
-    )
+    spin_mode_active = explicit_spin
     filtered_wz = update_filtered_ff_wz(spin_ff_wz if spin_mode_active else ff_wz, fresh_motion)
     orbit_mode_active = update_orbit_follow_mode(
         now,
@@ -1183,19 +1174,21 @@ def update_follow_targets(gyro_z):
     ):
         follow_output_limit = FOLLOW_STATIC_LOCK_PWM_LIMIT
     if (
-        (mode_key != 0 and (not push_follow_active))
+        (mode_key and (not push_follow_active))
         or (not seen)
         or (not fresh_motion)
         or (last_follow_mode_key != mode_key and not mode_key)
     ):
         master_edge_until_ms = 0
-    elif (
+    elif (not push_follow_active) and (
         abs(ff_vx - last_ff_vx) >= Follow_Master_Edge_Delta
         or abs(ff_vy - last_ff_vy) >= Follow_Master_Edge_Delta
     ):
         master_edge_until_ms = utime.ticks_add(now, Follow_Master_Edge_Hold_Ms)
     elif master_edge_until_ms and utime.ticks_diff(master_edge_until_ms, now) <= 0:
         master_edge_until_ms = 0
+    if push_follow_active:
+        update_push_reacquire(now, seen)
     last_follow_mode_key = mode_key
     if (
         spin_mode_active
@@ -1207,7 +1200,7 @@ def update_follow_targets(gyro_z):
         cam_error_angle,
         orbit_mode_active,
         spin_mode_active,
-    ) if seen else mode_key != 0
+    ) if seen else mode_key
     body_vx = 0.0
     body_vy = 0.0
     turn_rate_cmd = 0.0
@@ -1217,16 +1210,7 @@ def update_follow_targets(gyro_z):
     prev_angle_priority_active = last_angle_priority_active
 
     if seen:
-        if push_follow_active and target_lost_since_ms:
-            if not last_follow_seen:
-                target_lost_since_ms = utime.ticks_add(
-                    now,
-                    Follow_Master_Edge_Hold_Ms,
-                )
-            elif utime.ticks_diff(target_lost_since_ms, now) <= 0:
-                target_lost_since_ms = 0
-        else:
-            target_lost_since_ms = 0
+        target_lost_since_ms = 0
         use_motion_feedforward = fresh_motion and (not push_follow_active)
         (
             vx,
@@ -1265,7 +1249,7 @@ def update_follow_targets(gyro_z):
             vy -= body_vy * (1.0 - Follow_Static_Visual_Scale)
             body_vx *= Follow_Static_Visual_Scale
             body_vy *= Follow_Static_Visual_Scale
-        if mode_key != 0:
+        if mode_key:
             position_priority_active = True
         last_angle_priority_active = angle_priority_active or angle_pose_mode_active
     else:
@@ -1297,7 +1281,7 @@ def update_follow_targets(gyro_z):
 
     if (
         push_follow_active
-        and target_lost_since_ms
+        and master_edge_until_ms
         and body_vx < -22.0
     ):
         vx = -22.0
@@ -1309,7 +1293,7 @@ def update_follow_targets(gyro_z):
             orbit_mode_active,
             spin_mode_active,
         )
-        if mode_key != 0:
+        if mode_key:
             vx *= xy_scale
             vy *= xy_scale
         elif not (master_flags & MASTER_MOTION_FLAG_RETURN):
@@ -1324,7 +1308,7 @@ def update_follow_targets(gyro_z):
             0.66,
         )
         vy = add_feedforward_direct(
-            ff_vy * 1.30,
+            ff_vy * 1.20,
             vy,
             1.0,
             Follow_Lateral_Limit,
@@ -1399,9 +1383,9 @@ def update_follow_targets(gyro_z):
             )
         else:
             turn_rate_cmd = follow_ff_wz * Follow_Normal_Wz_Feedforward_Gain
-    priority_turn_mode = mode_key != 0 or angle_pose_mode_active
+    priority_turn_mode = mode_key or angle_pose_mode_active
     orbit_brake_active = (
-        mode_key != 0
+        mode_key
         and (
             gyro_z >= Follow_Orbit_Brake_Gyro_Threshold
             or gyro_z <= -Follow_Orbit_Brake_Gyro_Threshold
@@ -1848,9 +1832,6 @@ def calc_speed_closed_loop():
         reset_speed_outputs()
         set_three_pwm_zero()
         last_hard_stop = True
-        now_log = utime.ticks_ms()
-        if debug_due(now_log):
-            debug_send_idle(now_log & 0x7FFF)
         return None
 
     if ENABLE_IMU:

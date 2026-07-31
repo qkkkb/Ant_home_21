@@ -74,6 +74,7 @@ WORK_W  = 192
 WORK_H  = 192
 Ema_Alpha = 0.75
 YELLOW_LINE_THRESHOLDS = [(60, 100, -128, 2, 22, 127)]
+YELLOW_LINE_WHITEBEAR_THRESHOLDS = [(60, 100, -128, 2, 35, 127)]
 LINE_ROI_Y = WORK_H // 2
 LINE_MIN_PIXELS = 77
 LINE_MIN_AREA = 77
@@ -89,6 +90,7 @@ LINE_BALL_EDGE_MARGIN = 2
 LINE_CENTER_MASK_W = int(WORK_W * 0.42)
 LINE_CONFIRM_FRAMES = 1
 LINE_BALL_CONFIRM_FRAMES = 1
+LINE_WHITEBEAR_CONFIRM_FRAMES = 2
 FIRST_PUSH_YELLOW_MIN_PIXELS = 30
 FIRST_PUSH_YELLOW_MIN_AREA = 30
 FIRST_PUSH_YELLOW_MIN_COVER100 = 15
@@ -728,7 +730,7 @@ def classify_target(img, target):
     return None, best_label, best_score
 
 
-def detect_yellow_line(img, allow_ball_slant = False):
+def detect_yellow_line(img, allow_ball_slant = False, strict_whitebear = False):
     roi_h = img.height() - LINE_ROI_Y
     if roi_h <= 0:
         return False, None
@@ -738,10 +740,11 @@ def detect_yellow_line(img, allow_ball_slant = False):
         return False, None
 
     best_blob = None
+    thresholds = YELLOW_LINE_WHITEBEAR_THRESHOLDS if strict_whitebear else YELLOW_LINE_THRESHOLDS
     right_x = img.width() - side_w
     for roi_x in (0, right_x):
         for blob in img.find_blobs(
-            YELLOW_LINE_THRESHOLDS,
+            thresholds,
             roi = (roi_x, LINE_ROI_Y, side_w, roi_h),
             pixels_threshold = LINE_MIN_PIXELS,
             area_threshold = LINE_MIN_AREA,
@@ -850,6 +853,7 @@ frame_count = 0
 classify_sent = False
 line_confirm_count = 0
 line_ball_slant_state = 0
+classified_target_label = None
 red_brick_code = RED_BRICK_NONE
 red_brick_error_x = 0
 red_brick_error_y = 0
@@ -862,6 +866,7 @@ def set_detect_mode(new_mode, event, clear_state = True):
     global detect_mode, frozen_error, frozen_overlay, ema_bev_x, ema_bev_y
     global coarse_frame_in_interval, freeze_count, coarse_frame_count, classify_sent
     global line_confirm_count, line_ball_slant_state
+    global classified_target_label
     global red_brick_code, red_brick_error_x, red_brick_error_y
     global red_brick_confirm_count, red_brick_last_code
     global yellow_model_filter_enabled
@@ -886,6 +891,8 @@ def set_detect_mode(new_mode, event, clear_state = True):
         red_brick_last_code = RED_BRICK_NONE
     if new_mode in ("SEARCH", "COARSE", "CLASSIFY"):
         line_ball_slant_state = 0
+        if new_mode == "CLASSIFY":
+            classified_target_label = None
     elif new_mode == "LINE":
         yellow_model_filter_enabled = False
         if line_ball_slant_state == 1:
@@ -949,6 +956,7 @@ while True:
                 else:
                     send_classify_dir(dir_code)
                     line_ball_slant_state = 1 if dir_code == CLASSIFY_DIR_UP else 0
+                    classified_target_label = class_label
                     classify_sent = True
                     print_state_log(
                         "CLASSIFY", classify_dir_name(dir_code), coarse_frame_count, freeze_count,
@@ -956,8 +964,14 @@ while True:
                     )
     elif detect_mode == "LINE":
         allow_ball_slant = line_ball_slant_state == 2
-        required_frames = LINE_BALL_CONFIRM_FRAMES if allow_ball_slant else LINE_CONFIRM_FRAMES
-        line_crossed, line_rect = detect_yellow_line(img, allow_ball_slant)
+        strict_whitebear = classified_target_label == "whitebear"
+        if strict_whitebear:
+            required_frames = LINE_WHITEBEAR_CONFIRM_FRAMES
+        elif allow_ball_slant:
+            required_frames = LINE_BALL_CONFIRM_FRAMES
+        else:
+            required_frames = LINE_CONFIRM_FRAMES
+        line_crossed, line_rect = detect_yellow_line(img, allow_ball_slant, strict_whitebear)
         if line_crossed:
             if line_confirm_count < required_frames:
                 line_confirm_count += 1

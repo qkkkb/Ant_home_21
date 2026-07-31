@@ -169,7 +169,7 @@ Follow_Spin_Latch_Release_Angle = 3
 Follow_Orbit_Brake_Gyro_Threshold = 4.0
 Master_Motion_Timeout_Ms = 250
 Follow_Master_Edge_Delta = 4.0
-Follow_Master_Edge_Hold_Ms = 120
+Follow_Master_Edge_Hold_Ms = 220
 # ====================== Runtime state ======================
 car_started = False
 last_c9_state = 1

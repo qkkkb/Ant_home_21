@@ -88,7 +88,8 @@ def speed_follow_guard(pid, output, actual_speed, target_speed, stop_eps, unload
             == (actual_speed * target_speed <= target_speed * target_speed)
         )
     ):
-        return 0.0
+        pid.output = pid.kp * pid.err
+        return pid.output
     return output
 
 

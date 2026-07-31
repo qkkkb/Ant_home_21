@@ -172,6 +172,7 @@ Nav_Push_Prepare_Ok_Y_Max = 8  #准备阶段横移误差小于该值即认为前
 Nav_Push_Prepare_Ok_Yaw = 6   #准备阶段定向误差小于该值即认为定向准备就绪
 Nav_Push_Prepare_Ok_Ms = 70
 Nav_Ball_Push_Yaw_Offset = 30.0
+Nav_Bear_Push_Execute_Forward_Speed = 17.0
 Nav_Ball_Field_Vx_Scale = 0.8660254
 Nav_Ball_Field_Vy_Scale = 0.5
 Nav_Push_Execute_Forward_Speed = 20.0    #执行阶段前进速度
@@ -1297,7 +1298,11 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             if utime.ticks_diff(now, nav_transition_ms) >= 1000:
                 nav_set_state(NAV_STATE_PUSH_BACK)
             return
-        cam_target_vx = Nav_Push_Execute_Forward_Speed
+        cam_target_vx = (
+            Nav_Bear_Push_Execute_Forward_Speed
+            if push_dir_code == Push_Dir_Right
+            else Nav_Push_Execute_Forward_Speed
+        )
         cam_target_vy = 0.0
         yaw_ref_deg = push_yaw_target
         if line_crossed:

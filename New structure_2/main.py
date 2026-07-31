@@ -1237,7 +1237,9 @@ def update_follow_targets(gyro_z):
         ):
             vx -= body_vx
             body_vx *= 0.20 if abs(cam_error_x) < 28 else (
-                0.65 if abs(cam_error_x) < 60 else 1.0
+                0.65
+                if abs(cam_error_x) < 60 or abs(cam_error_y) >= 16
+                else 1.0
             )
             vx += body_vx
         if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
@@ -1340,7 +1342,7 @@ def update_follow_targets(gyro_z):
             | angle_pose_mode_active
             | (master_flags & (0xC0 if ff_vy > 0.0 else 0x40))
         )
-        and cam_error_y * cam_error_y < 1600
+        and cam_error_y * cam_error_y < 900
         and body_vy * ff_vy < 0.0
     ):
         vy -= body_vy * 0.55

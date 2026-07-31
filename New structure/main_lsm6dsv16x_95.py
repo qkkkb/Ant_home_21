@@ -110,6 +110,7 @@ Nav_Fine_Push_Ok_Y_Max = 24
 Nav_Fine_Push_Ok_Ms = 40
 Nav_Transition_Grace_Ms = 200
 Nav_Low_Speed_Th = 30
+Nav_Normal_Follow_Scale = 0.82
 Nav_Coarse_Forward_Gain = 0.180
 Nav_Coarse_Lateral_Gain = 0.085		#COARSE 横移系数
 Nav_Coarse_Forward_Limit = 22.0
@@ -690,6 +691,10 @@ def apply_nav_targets(vx, vy, vx_limit, vy_limit):
         vy = vy_limit
     elif vy < -vy_limit:
         vy = -vy_limit
+
+    if nav_state == NAV_STATE_COARSE or nav_state == NAV_STATE_FINE:
+        vx *= Nav_Normal_Follow_Scale
+        vy *= Nav_Normal_Follow_Scale
 
     cam_target_vx = vx
     cam_target_vy = vy

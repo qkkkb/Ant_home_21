@@ -169,7 +169,7 @@ Follow_Spin_Latch_Release_Angle = 3
 Follow_Orbit_Brake_Gyro_Threshold = 4.0
 Master_Motion_Timeout_Ms = 250
 Follow_Master_Edge_Delta = 4.0
-Follow_Master_Edge_Hold_Ms = 220
+Follow_Master_Edge_Hold_Ms = 120
 # ====================== Runtime state ======================
 car_started = False
 last_c9_state = 1
@@ -1236,7 +1236,7 @@ def update_follow_targets(gyro_z):
             )
         ):
             vx -= body_vx
-            body_vx *= 0.20 if abs(cam_error_x) < 30 else (
+            body_vx *= 0.20 if abs(cam_error_x) < 28 else (
                 0.65 if abs(cam_error_x) < 60 else 1.0
             )
             vx += body_vx
@@ -1334,10 +1334,10 @@ def update_follow_targets(gyro_z):
         push_yaw_target = None
 
     if (
-        # BACK (0x40) keeps its own reverse-following behavior.
-        not (mode_key | angle_pose_mode_active | (master_flags & 0x40))
-        and (abs(ff_vy) >= 6 or abs(cam_error_y) < 24)
-        and cam_error_y * cam_error_y < 4900
+        # 0xC0 combines BACK (0x40) and RETURN (0x80) without another global.
+        not (mode_key | angle_pose_mode_active | (master_flags & 0xC0))
+        and (abs(ff_vy) >= 8 or abs(cam_error_y) >= 5)
+        and cam_error_y * cam_error_y < 1600
         and body_vy * ff_vy < 0.0
     ):
         vy -= body_vy * 0.55

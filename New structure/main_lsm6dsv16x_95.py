@@ -137,7 +137,7 @@ Nav_Classify_Timeout_Ms = 1500
 
 Nav_Push_Orient_Ok_Yaw = 5.0    #orbit 目标角度误差小于该值即认为定向完成
 Nav_Push_Orbit_Skip_Yaw = 15.0
-Nav_Push_Orbit_Opposite_Yaw = 165.0
+Nav_Push_Orbit_Opposite_Yaw = 115.0
 Nav_Push_Orbit_Opposite_Radius_Add = 0.8
 Nav_Push_Orient_Max_Ms = 15000
 Nav_Push_Orbit_Slow_Yaw = 70.0

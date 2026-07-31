@@ -89,6 +89,7 @@ LINE_BALL_EDGE_MARGIN = 2
 LINE_CENTER_MASK_W = int(WORK_W * 0.42)
 LINE_CONFIRM_FRAMES = 1
 LINE_BALL_CONFIRM_FRAMES = 1
+LINE_WHITEBEAR_CONFIRM_FRAMES = 2
 FIRST_PUSH_YELLOW_MIN_PIXELS = 30
 FIRST_PUSH_YELLOW_MIN_AREA = 30
 FIRST_PUSH_YELLOW_MIN_COVER100 = 15
@@ -850,6 +851,7 @@ frame_count = 0
 classify_sent = False
 line_confirm_count = 0
 line_ball_slant_state = 0
+whitebear_line_confirm_enabled = False
 red_brick_code = RED_BRICK_NONE
 red_brick_error_x = 0
 red_brick_error_y = 0
@@ -862,6 +864,7 @@ def set_detect_mode(new_mode, event, clear_state = True):
     global detect_mode, frozen_error, frozen_overlay, ema_bev_x, ema_bev_y
     global coarse_frame_in_interval, freeze_count, coarse_frame_count, classify_sent
     global line_confirm_count, line_ball_slant_state
+    global whitebear_line_confirm_enabled
     global red_brick_code, red_brick_error_x, red_brick_error_y
     global red_brick_confirm_count, red_brick_last_code
     global yellow_model_filter_enabled
@@ -884,8 +887,12 @@ def set_detect_mode(new_mode, event, clear_state = True):
         red_brick_error_y = 0
         red_brick_confirm_count = 0
         red_brick_last_code = RED_BRICK_NONE
+    if old_mode == "LINE" and new_mode != "LINE":
+        whitebear_line_confirm_enabled = False
     if new_mode in ("SEARCH", "COARSE", "CLASSIFY"):
         line_ball_slant_state = 0
+        if new_mode == "CLASSIFY":
+            whitebear_line_confirm_enabled = False
     elif new_mode == "LINE":
         yellow_model_filter_enabled = False
         if line_ball_slant_state == 1:
@@ -949,6 +956,7 @@ while True:
                 else:
                     send_classify_dir(dir_code)
                     line_ball_slant_state = 1 if dir_code == CLASSIFY_DIR_UP else 0
+                    whitebear_line_confirm_enabled = class_label == "whitebear"
                     classify_sent = True
                     print_state_log(
                         "CLASSIFY", classify_dir_name(dir_code), coarse_frame_count, freeze_count,
@@ -956,7 +964,12 @@ while True:
                     )
     elif detect_mode == "LINE":
         allow_ball_slant = line_ball_slant_state == 2
-        required_frames = LINE_BALL_CONFIRM_FRAMES if allow_ball_slant else LINE_CONFIRM_FRAMES
+        if whitebear_line_confirm_enabled:
+            required_frames = LINE_WHITEBEAR_CONFIRM_FRAMES
+        elif allow_ball_slant:
+            required_frames = LINE_BALL_CONFIRM_FRAMES
+        else:
+            required_frames = LINE_CONFIRM_FRAMES
         line_crossed, line_rect = detect_yellow_line(img, allow_ball_slant)
         if line_crossed:
             if line_confirm_count < required_frames:

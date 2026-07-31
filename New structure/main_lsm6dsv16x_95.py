@@ -147,7 +147,7 @@ Nav_Push_Orbit_Slow_Vy = 6.0
 Nav_Push_Orbit_Fast_Rate = 145.0
 Nav_Push_Orbit_Slow_Rate = 95.0
 Nav_Push_Orbit_Gyro_Limit = 28.0
-Nav_Push_Orbit_Radius_Base = 2.0   #orbit 基础半径系数，实际轨迹半径=该系数 * 车轮轴距；如果轨迹过大或过小可以调整该值
+Nav_Push_Orbit_Radius_Base = 2.4   #orbit 基础半径系数，实际轨迹半径=该系数 * 车轮轴距；如果轨迹过大或过小可以调整该值
 Nav_Push_Orbit_Radius_Gain = 0.010
 Nav_Push_Orbit_Stop_Gyro_Th = 3.0   #orbit 过程中如果陀螺仪读数小于该值则认为已经接近目标角度，可以停止转向加速前进
 Nav_Push_Orbit_Brake_Max_Ms = 1000
@@ -420,8 +420,8 @@ def update_push_orbit_radius(err_y):
     global push_orbit_radius_ratio
 
     push_orbit_radius_ratio = Nav_Push_Orbit_Radius_Base + err_y * Nav_Push_Orbit_Radius_Gain
-    if push_orbit_radius_ratio < 0.8:
-        push_orbit_radius_ratio = 0.8
+    if push_orbit_radius_ratio < Nav_Push_Orbit_Radius_Base:
+        push_orbit_radius_ratio = Nav_Push_Orbit_Radius_Base
     elif push_orbit_radius_ratio > 2.5:
         push_orbit_radius_ratio = 2.5
 

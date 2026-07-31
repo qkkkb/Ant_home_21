@@ -1336,8 +1336,8 @@ def update_follow_targets(gyro_z):
     if (
         # BACK (0x40) keeps its own reverse-following behavior.
         not (mode_key | angle_pose_mode_active | (master_flags & 0x40))
-        and (abs(ff_vy) >= 8 or abs(cam_error_y) >= 5)
-        and cam_error_y * cam_error_y < 6400
+        and (abs(ff_vy) >= 6 or abs(cam_error_y) < 24)
+        and cam_error_y * cam_error_y < 4900
         and body_vy * ff_vy < 0.0
     ):
         vy -= body_vy * 0.55

@@ -107,7 +107,7 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             or state_code == 12
             or state_code == 14
         ):
-            vx = cmd_vx
+            vx = cmd_vx * (0.90 if state_code == 12 else 1.0)
             vy = cmd_vy
             wz = cmd_wz
         elif state_code == 5:

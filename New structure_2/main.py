@@ -1334,8 +1334,8 @@ def update_follow_targets(gyro_z):
         push_yaw_target = None
 
     if (
-        # 0xC0 combines BACK (0x40) and RETURN (0x80) without another global.
-        not (mode_key | angle_pose_mode_active | (master_flags & 0xC0))
+        # BACK (0x40) keeps its own reverse-following behavior.
+        not (mode_key | angle_pose_mode_active | (master_flags & 0x40))
         and (abs(ff_vy) >= 8 or abs(cam_error_y) >= 5)
         and cam_error_y * cam_error_y < 1600
         and body_vy * ff_vy < 0.0

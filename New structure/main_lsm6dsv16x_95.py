@@ -207,6 +207,7 @@ Nav_Return_Back_Ms = 1300
 Nav_Return_Turn_Dir = 1
 Nav_Return_Final_Back_Speed = 14.0
 Nav_Return_Final_Line_Extra_Ms = 60
+Nav_Return_Turn_Ok_Ms = 700
 Nav_Return_Max_Ms = 6000
 
 # ====================== 全局状态变量 ======================
@@ -752,7 +753,7 @@ def update_return_home(now, yaw_deg, low_speed, gyro_z):
         if push_turn_settle and low_speed and abs(gyro_z) <= 8.0:
             if nav_push_turn_ok_since_ms == 0:
                 nav_push_turn_ok_since_ms = now
-            elif utime.ticks_diff(now, nav_push_turn_ok_since_ms) >= Nav_Push_Turn_Ok_Ms:
+            elif utime.ticks_diff(now, nav_push_turn_ok_since_ms) >= Nav_Return_Turn_Ok_Ms:
                 imu_runtime.reset_yaw(field_up_yaw)
                 nav_set_state(NAV_STATE_RETURN_FINAL)
         else:

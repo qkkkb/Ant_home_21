@@ -1278,6 +1278,9 @@ def update_follow_targets(gyro_z):
             )
             vx = ff_vx * xy_scale
             vy = ff_vy * xy_scale
+            if orbit_mode_active and (master_flags & MASTER_MOTION_FLAG_RETURN):
+                vx += follow_ff_wz * Follow_Orbit_Target_Point_Wz_To_Vx * Follow_Orbit_Feedforward_Forward_Gain
+                vy += follow_ff_wz * Follow_Orbit_Target_Point_Wz_To_Vy * Follow_Orbit_Feedforward_Lateral_Gain
         else:
             vx = 0.0
             vy = 0.0

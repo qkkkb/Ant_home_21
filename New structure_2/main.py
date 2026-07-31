@@ -1236,7 +1236,7 @@ def update_follow_targets(gyro_z):
             )
         ):
             vx -= body_vx
-            body_vx *= 0.20 if abs(cam_error_x) < 28 else (
+            body_vx *= 0.20 if abs(cam_error_x) < 30 else (
                 0.65 if abs(cam_error_x) < 60 else 1.0
             )
             vx += body_vx

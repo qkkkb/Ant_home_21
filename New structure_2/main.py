@@ -1809,7 +1809,7 @@ def calc_speed_closed_loop():
             last_hard_stop = True
             return None
         cam_target_vx = 0.0
-        cam_target_vy = -Follow_Return_Lateral_Limit
+        cam_target_vy = Follow_Return_Lateral_Limit
         vz_cmd = 0.0
     else:
         vz_cmd = update_follow_targets(gyro_z)

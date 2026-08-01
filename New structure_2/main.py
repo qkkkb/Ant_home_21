@@ -733,6 +733,8 @@ def solve_follow_pose_twist(
                 ff_scale = 0.0
             else:
                 ff_scale = 1.0
+                if master_flags & MASTER_MOTION_FLAG_RETURN:
+                    target_ff_vx *= 1.15
             vx = add_feedforward_direct(
                 vx,
                 target_ff_vx,
@@ -1232,7 +1234,9 @@ def update_follow_targets(gyro_z):
                     else Follow_Hold_Feedforward_Gain
                 )
             )
-            vx = ff_vx * xy_scale
+            vx = ff_vx * (
+                1.0 if master_flags & MASTER_MOTION_FLAG_RETURN else xy_scale
+            )
             vy = ff_vy * xy_scale
             if orbit_mode_active and (master_flags & MASTER_MOTION_FLAG_RETURN):
                 vx += follow_ff_wz * Follow_Orbit_Target_Point_Wz_To_Vx * Follow_Orbit_Feedforward_Forward_Gain
@@ -1804,8 +1808,8 @@ def calc_speed_closed_loop():
             set_three_pwm_zero()
             last_hard_stop = True
             return None
-        cam_target_vx = Follow_Forward_Limit
-        cam_target_vy = 0.0
+        cam_target_vx = 0.0
+        cam_target_vy = -Follow_Return_Lateral_Limit
         vz_cmd = 0.0
     else:
         vz_cmd = update_follow_targets(gyro_z)

@@ -205,6 +205,7 @@ Nav_Return_Left_Start_Yaw = 10.0
 Nav_Return_Left_Max_Ms = 10000
 Nav_Return_Back_Speed = 16.0
 Nav_Return_Back_Ms = 1300
+Nav_Return_Shift_Hold_Ms = 1000
 Nav_Return_Turn_Dir = 1
 Nav_Return_Final_Back_Speed = 14.0
 Nav_Return_Final_Line_Extra_Ms = 60
@@ -731,9 +732,14 @@ def update_return_home(now, yaw_deg, low_speed, gyro_z):
     if nav_state == NAV_STATE_RETURN_BACK:
         nav_ready_for_push = False
         yaw_ref_deg = field_left_yaw
-        cam_target_vx = -Nav_Return_Back_Speed
+        back_elapsed_ms = utime.ticks_diff(now, nav_transition_ms)
+        cam_target_vx = (
+            0.0
+            if back_elapsed_ms < Nav_Return_Shift_Hold_Ms
+            else -Nav_Return_Back_Speed
+        )
         cam_target_vy = 0.0
-        if utime.ticks_diff(now, nav_transition_ms) >= Nav_Return_Back_Ms:
+        if back_elapsed_ms >= Nav_Return_Shift_Hold_Ms + Nav_Return_Back_Ms:
             nav_set_state(NAV_STATE_RETURN_TURN)
         return
 

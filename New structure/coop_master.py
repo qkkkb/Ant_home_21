@@ -128,7 +128,8 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             vx = 0.0
             vy = 0.0
             wz = 0.0
-        if state_code == 8:
+        # RETURN_BACK starts when the yellow line is crossed.
+        if state_code == 8 or state_code == 12:
             flags |= _FLAG_BACK
         if 11 <= state_code <= 14:
             flags |= _FLAG_RETURN

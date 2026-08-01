@@ -642,7 +642,16 @@ def solve_follow_pose_twist(
     # Local pose features around the calibrated nonparallel formation.
     cam_vx = error_x if push_mode else error_x + error_angle
     cam_vy = error_y
-    if cam_vx > 0.0 and not push_mode:
+    if (
+        cam_vx > 0.0
+        and not push_mode
+        and not (
+            (master_flags & MASTER_MOTION_FLAG_RETURN)
+            and not (master_flags & MASTER_MOTION_FLAG_BACK)
+            and not orbit_mode
+            and not spin_mode
+        )
+    ):
         cam_vy -= cam_vx * 5 // 13
     if orbit_mode or spin_mode:
         position_priority = (
@@ -658,6 +667,13 @@ def solve_follow_pose_twist(
     if push_mode and -8.0 < cam_vx < 8.0:
         body_vx *= 0.55
     body_vy = calc_follow_lateral(cam_vy, position_priority)
+    if (
+        (master_flags & MASTER_MOTION_FLAG_RETURN)
+        and not (master_flags & MASTER_MOTION_FLAG_BACK)
+        and not orbit_mode
+        and not spin_mode
+    ):
+        body_vy = -calc_follow_lateral(error_y, False)
     if (
         push_mode
         and error_x < 40
@@ -745,12 +761,6 @@ def solve_follow_pose_twist(
                 Follow_Feedforward_Forward_Limit,
                 ff_scale,
             )
-            if (
-                (master_flags & MASTER_MOTION_FLAG_RETURN)
-                and not (master_flags & MASTER_MOTION_FLAG_BACK)
-                and error_y * target_ff_vy < 0.0
-            ):
-                vy *= 0.35
             vy = add_feedforward_direct(
                 vy,
                 target_ff_vy,
@@ -1308,6 +1318,8 @@ def update_follow_targets(gyro_z):
         push_yaw_target = None
 
     if (
+        not (master_flags & MASTER_MOTION_FLAG_RETURN)
+        and
         # RETURN reverse and BACK keep their own following behavior.
         not (
             mode_key

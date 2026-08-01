@@ -734,7 +734,10 @@ def solve_follow_pose_twist(
             else:
                 ff_scale = 1.0
                 if master_flags & MASTER_MOTION_FLAG_RETURN:
-                    target_ff_vx *= 1.15
+                    if abs(error_x) >= 48 and body_vx * target_ff_vx < 0.0:
+                        target_ff_vx *= 0.35
+                    else:
+                        target_ff_vx *= 1.15
             vx = add_feedforward_direct(
                 vx,
                 target_ff_vx,

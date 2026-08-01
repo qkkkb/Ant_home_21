@@ -742,6 +742,12 @@ def solve_follow_pose_twist(
                 Follow_Feedforward_Forward_Limit,
                 ff_scale,
             )
+            if (
+                (master_flags & MASTER_MOTION_FLAG_RETURN)
+                and not (master_flags & MASTER_MOTION_FLAG_BACK)
+                and error_y * target_ff_vy < 0.0
+            ):
+                vy *= 0.35
             vy = add_feedforward_direct(
                 vy,
                 target_ff_vy,
@@ -1782,7 +1788,6 @@ def calc_speed_closed_loop():
     global last_hard_stop
     global last_stall_count, last_stall_boost
     global cam_target_vx, cam_target_vy
-    global push_yaw_target
 
     if not car_started:
         reset_speed_outputs()
@@ -1801,34 +1806,7 @@ def calc_speed_closed_loop():
     else:
         gyro_z = 0.0
 
-    if (master_flags & MASTER_MOTION_FLAG_RETURN) and (
-        master_flags & MASTER_MOTION_FLAG_BACK
-    ):
-        if not master_motion_fresh():
-            reset_speed_outputs()
-            set_three_pwm_zero()
-            last_hard_stop = True
-            return None
-        cam_target_vx = ramp_value(0.0, cam_target_vx, Follow_Command_Ramp_Vx)
-        cam_target_vy = ramp_value(
-            Follow_Return_Lateral_Limit,
-            cam_target_vy,
-            Follow_Command_Ramp_Vy,
-        )
-        if push_yaw_target is None:
-            push_yaw_target = imu_runtime.yaw_deg
-        yaw_error = imu_runtime.yaw_deg - push_yaw_target
-        if yaw_error > 180.0:
-            yaw_error -= 360.0
-        elif yaw_error < -180.0:
-            yaw_error += 360.0
-        vz_cmd = clamp(
-            (calc_follow_angle(yaw_error * 1.50) - gyro_z) * GYRO_KP,
-            -GYRO_OUTPUT_BASE_LIMIT,
-            GYRO_OUTPUT_BASE_LIMIT,
-        )
-    else:
-        vz_cmd = update_follow_targets(gyro_z)
+    vz_cmd = update_follow_targets(gyro_z)
     calc_wheel_spd(move_cmd, cam_target_vx, cam_target_vy, vz_cmd)
 
     e_fl = _pid_mod.encoder_window(pid_fl, enc_fl.get())

@@ -195,7 +195,6 @@ master_flags = 0
 master_last_rx_ms = 0
 
 coop_parser = CoopFrameParser()
-coop_rx_led_until_ms = 0
 
 pit_flag = False
 start_time = utime.ticks_ms()
@@ -207,8 +206,6 @@ last_pwm_fr = 0
 last_pwm_b = 0
 last_turn_rate_cmd = 0.0
 last_follow_seen = False
-last_visual_vx = 0.0
-last_visual_vy = 0.0
 last_ff_vx = 0.0
 last_ff_vy = 0.0
 last_ff_wz = 0.0
@@ -999,7 +996,6 @@ def handle_coop_frame(msg_type, seq, payload, payload_len):
     master_wz = decode_i16(payload, 4) / 10.0
     master_flags = payload[8]
     master_last_rx_ms = utime.ticks_ms()
-    coop_flash_rx()
 
 
 def poll_coop_uart():
@@ -1049,50 +1045,10 @@ def debug_send_state(log_id, vz_cmd, gyro_z):
     )
 
 
-def debug_send_wheel(log_id, u_fl, u_fr, u_b):
-    debug_send(
-        "W %d %d %d %d %d %d %d %d %d %d %d %d %d"
-        % (
-            log_id,
-            pid_fl.enc_sum,
-            pid_fr.enc_sum,
-            pid_b.enc_sum,
-            int(move_cmd.speed_fl * 4),
-            int(move_cmd.speed_fr * 4),
-            int(move_cmd.speed_b * 4),
-            last_pwm_fl,
-            last_pwm_fr,
-            last_pwm_b,
-            int(u_fl),
-            int(u_fr),
-            int(u_b),
-        )
-    )
-
-
-def debug_send_flow(log_id, yaw_deg, master_age_ms, cam_age_ms):
-    debug_send(
-        "F %d %d %d %d %d %d %d %d %d %d %d"
-        % (
-            log_id,
-            int(yaw_deg),
-            int(last_visual_vx),
-            int(last_visual_vy),
-            int(last_ff_vx),
-            int(last_ff_vy),
-            int(last_ff_wz),
-            int(last_turn_rate_cmd),
-            last_follow_mode_key,
-            master_age_ms,
-            cam_age_ms,
-        )
-    )
-
-
 def update_follow_targets(gyro_z):
     global cam_target_vx, cam_target_vy, target_lost_since_ms
     global last_turn_rate_cmd
-    global last_follow_seen, last_visual_vx, last_visual_vy
+    global last_follow_seen
     global last_ff_vx, last_ff_vy, last_ff_wz
     global last_cmd_vx, last_cmd_vy, last_cmd_wz
     global last_ap_vz_cmd
@@ -1550,8 +1506,6 @@ def update_follow_targets(gyro_z):
 
     last_turn_rate_cmd = turn_rate_cmd
     last_follow_seen = seen
-    last_visual_vx = body_vx
-    last_visual_vy = body_vy
     last_ff_vx = ff_vx
     last_ff_vy = ff_vy
     last_ff_wz = follow_ff_wz
@@ -1762,24 +1716,6 @@ def speed_ctrl_follow(pid, actual_speed, target_speed):
     return output
 
 
-def update_nav_led_display():
-    straight_value = 1 if cam_target_seen() else 0
-    translate_value = 1 if utime.ticks_diff(utime.ticks_ms(), master_last_rx_ms) <= Master_Motion_Timeout_Ms else 0
-    rotate_value = 1 if car_started else 0
-    now = utime.ticks_ms()
-    rx_active = coop_rx_led_until_ms and utime.ticks_diff(coop_rx_led_until_ms, now) > 0
-    if rx_active:
-        translate_value = 0 if translate_value else 1
-    led_straight.value(straight_value)
-    led_translate.value(translate_value)
-    led_rotate.value(rotate_value)
-
-
-def coop_flash_rx():
-    global coop_rx_led_until_ms
-    coop_rx_led_until_ms = utime.ticks_add(utime.ticks_ms(), 40)
-
-
 def calibrate_gyro_before_launch():
     if (
         AUTO_CALIBRATE_GYRO_ON_LAUNCH
@@ -1857,10 +1793,8 @@ def calc_speed_closed_loop():
 
     if ENABLE_IMU:
         gyro_z = imu_runtime.read_gyro_z()
-        yaw_deg = imu_runtime.read_yaw()
     else:
         gyro_z = 0.0
-        yaw_deg = 0.0
 
     if (master_flags & MASTER_MOTION_FLAG_RETURN) and (
         master_flags & MASTER_MOTION_FLAG_BACK
@@ -1916,25 +1850,10 @@ def calc_speed_closed_loop():
     now_log = utime.ticks_ms()
     if debug_due(now_log):
         log_id = now_log & 0x7FFF
-        master_age_ms = (
-            utime.ticks_diff(now_log, master_last_rx_ms)
-            if master_last_rx_ms
-            else -1
-        )
-        cam_age_ms = (
-            utime.ticks_diff(now_log, cam_last_rx_ms)
-            if cam_last_rx_ms
-            else -1
-        )
         debug_send_state(log_id, vz_cmd, gyro_z)
-        debug_send_wheel(log_id, u_fl, u_fr, u_b)
-        debug_send_flow(log_id, yaw_deg, master_age_ms, cam_age_ms)
 
 key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
 key_start = Pin(cfg.BTN_START_PIN, Pin.IN, Pin.PULL_UP)
-led_straight = Pin(cfg.LED_STRAIGHT_PIN, Pin.OUT, value=0)
-led_translate = Pin(cfg.LED_TRANSLATE_PIN, Pin.OUT, value=0)
-led_rotate = Pin(cfg.LED_ROTATE_PIN, Pin.OUT, value=0)
 
 utime.sleep_ms(100)
 led = Pin(cfg.LED_HB_PIN, Pin.OUT, pull=Pin.PULL_UP_47K, value=True)
@@ -1994,7 +1913,6 @@ try:
         check_c9_start()
         poll_art_uart()
         poll_coop_uart()
-        update_nav_led_display()
 
         if (not car_started) and cam_target_seen():
             start_follow()
@@ -2017,6 +1935,3 @@ finally:
     cam_uart.write(ART_MODE_IDLE_CMD)
     stop_all()
     led.value(True)
-    led_straight.value(0)
-    led_translate.value(0)
-    led_rotate.value(0)

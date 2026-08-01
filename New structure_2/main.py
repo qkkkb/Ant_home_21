@@ -668,13 +668,6 @@ def solve_follow_pose_twist(
         body_vx *= 0.55
     body_vy = calc_follow_lateral(cam_vy, position_priority)
     if (
-        (master_flags & MASTER_MOTION_FLAG_RETURN)
-        and not (master_flags & MASTER_MOTION_FLAG_BACK)
-        and not orbit_mode
-        and not spin_mode
-    ):
-        body_vy = -calc_follow_lateral(error_y, False)
-    if (
         push_mode
         and error_x < 40
         and (error_x <= -40 or abs(error_y) >= 8)
@@ -766,7 +759,14 @@ def solve_follow_pose_twist(
                 target_ff_vy,
                 Follow_Feedforward_Lateral_Gain,
                 Follow_Feedforward_Lateral_Limit,
-                0.0 if master_flags & MASTER_MOTION_FLAG_BACK else 1.0,
+                0.0 if master_flags & MASTER_MOTION_FLAG_BACK else (
+                    0.66
+                    if (
+                        (master_flags & MASTER_MOTION_FLAG_RETURN)
+                        and ff_vy < 0.0
+                    )
+                    else 1.0
+                ),
             )
             wz = add_feedforward_assist(
                 wz,

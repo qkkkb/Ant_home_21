@@ -1089,28 +1089,6 @@ def debug_send_flow(log_id, yaw_deg, master_age_ms, cam_age_ms):
     )
 
 
-def apply_return_shift(now, fresh_motion):
-    global last_follow_mode_key, spin_latch_until_ms
-    global cam_target_vx, cam_target_vy
-    # Mode -2 reuses the spin timer: shift once, then stay locked at zero.
-    if fresh_motion and (master_flags & MASTER_MOTION_FLAG_RETURN) and (
-        master_flags & MASTER_MOTION_FLAG_BACK
-    ) and last_follow_mode_key != -2:
-        reset_speed_outputs()
-        reset_turn_loop_state()
-        spin_latch_until_ms = utime.ticks_add(now, 1000)
-        last_follow_mode_key = -2
-    if last_follow_mode_key != -2:
-        return False
-    cam_target_vx = (
-        Follow_Forward_Limit
-        if utime.ticks_diff(spin_latch_until_ms, now) > 0
-        else 0.0
-    )
-    cam_target_vy = 0.0
-    return True
-
-
 def update_follow_targets(gyro_z):
     global cam_target_vx, cam_target_vy, target_lost_since_ms
     global last_turn_rate_cmd
@@ -1127,10 +1105,8 @@ def update_follow_targets(gyro_z):
     global push_yaw_target
 
     now = utime.ticks_ms()
-    fresh_motion = master_motion_fresh()
-    if apply_return_shift(now, fresh_motion):
-        return 0.0
     seen = cam_target_seen()
+    fresh_motion = master_motion_fresh()
     if fresh_motion:
         ff_vx = master_vx * 0.5 + master_vy * 0.8660254
         ff_vy = master_vy * 0.5 - master_vx * 0.8660254
@@ -1611,15 +1587,14 @@ def reset_speed_outputs(keep_orbit_state=False):
     last_cmd_wz = 0.0
     last_ap_vz_cmd = 0.0
     last_angle_priority_active = False
-    if not keep_orbit_state and last_follow_mode_key != -2:
+    if not keep_orbit_state:
         orbit_follow_active = False
         orbit_follow_exit_since_ms = 0
         filtered_ff_wz = 0.0
         last_follow_mode_key = -1
-    if last_follow_mode_key != -2:
-        spin_latched_wz = 0.0
-        spin_latch_until_ms = 0
-        master_edge_until_ms = 0
+    spin_latched_wz = 0.0
+    spin_latch_until_ms = 0
+    master_edge_until_ms = 0
 
 
 def clamp_duty(value):
@@ -1866,6 +1841,7 @@ def calc_speed_closed_loop():
     global last_pwm_fl, last_pwm_fr, last_pwm_b
     global last_hard_stop
     global last_stall_count, last_stall_boost
+    global cam_target_vx, cam_target_vy
 
     if not car_started:
         reset_speed_outputs()
@@ -1886,7 +1862,19 @@ def calc_speed_closed_loop():
         gyro_z = 0.0
         yaw_deg = 0.0
 
-    vz_cmd = update_follow_targets(gyro_z)
+    if (master_flags & MASTER_MOTION_FLAG_RETURN) and (
+        master_flags & MASTER_MOTION_FLAG_BACK
+    ):
+        if not master_motion_fresh():
+            reset_speed_outputs()
+            set_three_pwm_zero()
+            last_hard_stop = True
+            return None
+        cam_target_vx = Follow_Forward_Limit
+        cam_target_vy = 0.0
+        vz_cmd = 0.0
+    else:
+        vz_cmd = update_follow_targets(gyro_z)
     calc_wheel_spd(move_cmd, cam_target_vx, cam_target_vy, vz_cmd)
 
     e_fl = _pid_mod.encoder_window(pid_fl, enc_fl.get())

@@ -22,6 +22,7 @@ _wireless = None
 _tx_buf = None
 _seq = 0
 _last_tx_ms = 0
+_return_shift_until_ms = 0
 _motion_est = None
 _vx = 0.0
 _vy = 0.0
@@ -82,11 +83,21 @@ def _put_i16(idx, value):
 
 
 def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_vy, cmd_wz):
-    global _last_tx_ms
+    global _last_tx_ms, _return_shift_until_ms
     if _wireless is None:
         return
     if utime.ticks_diff(now, _last_tx_ms) < _TX_PERIOD_MS:
         return
+    if not car_started:
+        _return_shift_until_ms = 0
+    elif state_code == 12 and _return_shift_until_ms == 0:
+        _return_shift_until_ms = utime.ticks_add(now, 1000)
+    if _return_shift_until_ms:
+        state_code = (
+            18
+            if utime.ticks_diff(_return_shift_until_ms, now) > 0
+            else 17
+        )
     flags = 0
     vx = 0.0
     vy = 0.0
@@ -128,10 +139,10 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             vx = 0.0
             vy = 0.0
             wz = 0.0
-        # RETURN_BACK starts when the yellow line is crossed.
-        if state_code == 8 or state_code == 12:
+        # State 18 is the one-second follower shift window after yellow.
+        if state_code == 8 or state_code == 18:
             flags |= _FLAG_BACK
-        if 11 <= state_code <= 14:
+        if 11 <= state_code <= 14 or state_code == 18:
             flags |= _FLAG_RETURN
     if target_seen and not hard_stop:
         flags |= _FLAG_TARGET

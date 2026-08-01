@@ -1318,6 +1318,16 @@ def update_follow_targets(gyro_z):
         push_yaw_target = None
 
     if (
+        (master_flags & MASTER_MOTION_FLAG_RETURN)
+        and not mode_key
+        and ff_vy < 0.0
+        and cam_error_x <= -72
+        and cam_error_y <= -4
+        and vy < -24.0
+    ):
+        vy = -24.0
+
+    if (
         not (master_flags & MASTER_MOTION_FLAG_RETURN)
         and
         # RETURN reverse and BACK keep their own following behavior.

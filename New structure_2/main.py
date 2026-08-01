@@ -760,7 +760,11 @@ def solve_follow_pose_twist(
                 Follow_Feedforward_Lateral_Gain,
                 Follow_Feedforward_Lateral_Limit,
                 0.0 if master_flags & MASTER_MOTION_FLAG_BACK else (
-                    0.66
+                    (
+                        0.66
+                        if error_x > -48
+                        else (0.82 if error_x > -72 else 1.0)
+                    )
                     if (
                         (master_flags & MASTER_MOTION_FLAG_RETURN)
                         and ff_vy < 0.0
@@ -1302,7 +1306,7 @@ def update_follow_targets(gyro_z):
             vy,
             1.0,
             Follow_Lateral_Limit,
-            0.75,
+            0.0,
         )
 
     if push_follow_active:
@@ -1316,16 +1320,6 @@ def update_follow_targets(gyro_z):
         turn_rate_cmd = calc_follow_angle(turn_rate_cmd * 1.50)
     else:
         push_yaw_target = None
-
-    if (
-        (master_flags & MASTER_MOTION_FLAG_RETURN)
-        and not mode_key
-        and ff_vy < 0.0
-        and cam_error_x <= -72
-        and cam_error_y <= -4
-        and vy < -24.0
-    ):
-        vy = -24.0
 
     if (
         not (master_flags & MASTER_MOTION_FLAG_RETURN)

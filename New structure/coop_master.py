@@ -91,7 +91,7 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
     if not car_started:
         _return_shift_until_ms = 0
     elif state_code == 12 and _return_shift_until_ms == 0:
-        _return_shift_until_ms = utime.ticks_add(now, 1000)
+        _return_shift_until_ms = utime.ticks_add(now, 10000)
     if _return_shift_until_ms:
         state_code = (
             18
@@ -139,7 +139,7 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             vx = 0.0
             vy = 0.0
             wz = 0.0
-        # State 18 is the one-second follower shift window after yellow.
+        # State 18 is the ten-second follower shift window after yellow.
         if state_code == 8 or state_code == 18:
             flags |= _FLAG_BACK
         if 11 <= state_code <= 14 or state_code == 18:

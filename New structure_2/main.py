@@ -31,6 +31,7 @@ follow_low_pwm = _pid_mod.follow_low_pwm
 
 # ====================== Base config ======================
 TICK_PERIOD_MS = cfg.TICK_PERIOD_MS
+ENC_SCALE = cfg.ENC_SCALE
 MOTOR_DUTY_MAX = cfg.MOTOR_DUTY_MAX
 MOTOR_DUTY_MIN = cfg.MOTOR_DUTY_MIN
 PWM_SMOOTH_FACTOR = cfg.PWM_SMOOTH_FACTOR
@@ -1828,9 +1829,9 @@ def calc_speed_closed_loop():
     vz_cmd = update_follow_targets(gyro_z)
     calc_wheel_spd(move_cmd, cam_target_vx, cam_target_vy, vz_cmd)
 
-    e_fl = _pid_mod.encoder_window(pid_fl, enc_fl.get())
-    e_fr = _pid_mod.encoder_window(pid_fr, enc_fr.get())
-    e_b = _pid_mod.encoder_window(pid_b, enc_b.get())
+    e_fl = enc_fl.get() * ENC_SCALE
+    e_fr = enc_fr.get() * ENC_SCALE
+    e_b = enc_b.get() * ENC_SCALE
     t_fl = move_cmd.speed_fl
     t_fr = move_cmd.speed_fr
     t_b = move_cmd.speed_b
@@ -1878,9 +1879,9 @@ led = Pin(cfg.LED_HB_PIN, Pin.OUT, pull=Pin.PULL_UP_47K, value=True)
 motor_fl = Motor(cfg.MOTOR_FL_PH, cfg.MOTOR_FL_PWM, freq=cfg.MOTOR_FREQ, invert=cfg.MOTOR_FL_INVERT)
 motor_fr = Motor(cfg.MOTOR_FR_PH, cfg.MOTOR_FR_PWM, freq=cfg.MOTOR_FREQ, invert=cfg.MOTOR_FR_INVERT)
 motor_b = Motor(cfg.MOTOR_B_PH, cfg.MOTOR_B_PWM, freq=cfg.MOTOR_FREQ, invert=cfg.MOTOR_B_INVERT)
-enc_fl = encoder(cfg.ENC_FL_A, cfg.ENC_FL_B, cfg.ENC_FL_INVERT)
-enc_fr = encoder(cfg.ENC_FR_A, cfg.ENC_FR_B, cfg.ENC_FR_INVERT)
-enc_b = encoder(cfg.ENC_B_A, cfg.ENC_B_B, cfg.ENC_B_INVERT)
+enc_fl = encoder(cfg.ENC_FL_B, cfg.ENC_FL_A, cfg.ENC_FL_INVERT)
+enc_fr = encoder(cfg.ENC_FR_B, cfg.ENC_FR_A, cfg.ENC_FR_INVERT)
+enc_b = encoder(cfg.ENC_B_B, cfg.ENC_B_A, cfg.ENC_B_INVERT)
 
 wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
 coop_rx_buf = bytearray(32)

@@ -39,15 +39,6 @@ def _take_pending():
     return count
 
 
-def _signed_average(value, count):
-    if count <= 1:
-        return value
-    half = count >> 1
-    if value >= 0:
-        return (value + half) // count
-    return -((-value + half) // count)
-
-
 wireless = None
 
 
@@ -159,7 +150,7 @@ def _run_skip_probe():
     while base_count < 12:
         pending = _wait_for_tick()
         value, _, _ = _read_target(_WHEEL_FL)
-        base_sum += _signed_average(value, pending)
+        base_sum += value
         base_count += 1
 
     base = base_sum // base_count
@@ -203,9 +194,6 @@ def _run_phase(wheel, pwm):
         if pending > 1:
             late_events += 1
             late_ticks += pending - 1
-            value = _signed_average(value, pending)
-            other_1 = _signed_average(other_1, pending)
-            other_2 = _signed_average(other_2, pending)
 
         sample_count += 1
         sample_sum += value

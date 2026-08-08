@@ -2,10 +2,11 @@
 MOTOR_FL_PH, MOTOR_FL_PWM, MOTOR_FL_INVERT = "C29", "C28", False
 MOTOR_FR_PH, MOTOR_FR_PWM, MOTOR_FR_INVERT = "C31", "C30", False
 MOTOR_B_PH,  MOTOR_B_PWM,  MOTOR_B_INVERT  = "D5",  "D4",  True
-# Encoder
-ENC_FL_A, ENC_FL_B, ENC_FL_INVERT = "C0",  "C1",  True
-ENC_FR_A, ENC_FR_B, ENC_FR_INVERT = "C2",  "C3",  True
-ENC_B_A,  ENC_B_B,  ENC_B_INVERT  = "D13", "D14", True
+# Encoder: A=PULSE, B=DIR; smartcar.encoder() uses DIR,PULSE.
+ENC_FL_A, ENC_FL_B, ENC_FL_INVERT = "C0",  "C1",  False
+ENC_FR_A, ENC_FR_B, ENC_FR_INVERT = "C2",  "C3",  False
+ENC_B_A,  ENC_B_B,  ENC_B_INVERT  = "D13", "D14", False
+ENC_SCALE = 0.05
 # Keys & LEDs
 BTN_EXIT_PIN, BTN_START_PIN, BTN_MODE_PIN = "C8", "C9", "C14"
 LED_HB_PIN = "C4"

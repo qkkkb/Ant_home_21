@@ -43,15 +43,6 @@ def turn_ctrl(pid, err_yaw, motor_slow_flag=0):
     return pid.output
 
 
-def encoder_window(pid, sample):
-    index = pid.enc_index
-    total = pid.enc_sum + sample - pid.enc_samples[index]
-    pid.enc_samples[index] = sample
-    pid.enc_sum = total
-    pid.enc_index = (index + 1) & 3
-    return total * 0.5
-
-
 def speed_ctrl(pid, actual_speed, tar_spd):
     """
     速度环：默认使用 pid.kp / pid.ki。

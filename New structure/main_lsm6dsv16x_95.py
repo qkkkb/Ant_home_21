@@ -8,7 +8,7 @@ from move_base import calc_wheel_spd
 import pid as _pid_mod
 import config as cfg
 from hardware import Motor
-import coop_master
+import tune_log
 
 # 设置 PID 最大 PWM 值
 _pid_mod.PWM_MAX = cfg.PWM_MAX
@@ -1462,9 +1462,9 @@ led = Pin(cfg.LED_HB_PIN, Pin.OUT, pull=Pin.PULL_UP_47K, value=True)
 motor_fl = Motor(cfg.MOTOR_FL_PH, cfg.MOTOR_FL_PWM, freq=cfg.MOTOR_FREQ, invert=cfg.MOTOR_FL_INVERT)
 motor_fr = Motor(cfg.MOTOR_FR_PH, cfg.MOTOR_FR_PWM, freq=cfg.MOTOR_FREQ, invert=cfg.MOTOR_FR_INVERT)
 motor_b  = Motor(cfg.MOTOR_B_PH,  cfg.MOTOR_B_PWM,  freq=cfg.MOTOR_FREQ, invert=cfg.MOTOR_B_INVERT)
-enc_fl = encoder(cfg.ENC_FL_A, cfg.ENC_FL_B, cfg.ENC_FL_INVERT)
-enc_fr = encoder(cfg.ENC_FR_A, cfg.ENC_FR_B, cfg.ENC_FR_INVERT)
-enc_b  = encoder(cfg.ENC_B_A,  cfg.ENC_B_B,  cfg.ENC_B_INVERT)
+enc_fl = encoder(cfg.ENC_FL_DIR, cfg.ENC_FL_PULSE, cfg.ENC_FL_INVERT)
+enc_fr = encoder(cfg.ENC_FR_DIR, cfg.ENC_FR_PULSE, cfg.ENC_FR_INVERT)
+enc_b  = encoder(cfg.ENC_B_DIR,  cfg.ENC_B_PULSE,  cfg.ENC_B_INVERT)
 
 cam_uart = UART(cfg.CAM_UART_ID, cfg.CAM_UART_BAUD)
 cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
@@ -1611,18 +1611,16 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
 # ====================== 初始化 LED 显示 ======================
 update_nav_led_display()
 gc.collect()
-coop_master.init()
+tune_log.init(cfg.COOP_WIRELESS_BAUD)
 gc.collect()
 
 # ---------------------- Ticker ----------------------
 pit_flag = False
-pit_count = 0
 
 # 定时中断回调：置位标志，通知主循环执行控制
 def time_pit_handler(_):
-    global pit_flag, pit_count
+    global pit_flag
     pit_flag = True
-    pit_count += 1
 
 pit1 = ticker(1)
 pit1.capture_list(enc_fl, enc_fr, enc_b)
@@ -1682,9 +1680,6 @@ def calc_speed_closed_loop():
     e_fl = enc_fl.get()
     e_fr = enc_fr.get()
     e_b = enc_b.get()
-    # Broadcast motion estimate at 20 ms; the speed loop remains at 5 ms.
-    if (pit_count & 3) == 0:
-        coop_master.update_state(e_fl, e_fr, e_b, gyro_z)
     low_speed = abs(e_fl) <= Nav_Low_Speed_Th and abs(e_fr) <= Nav_Low_Speed_Th and abs(e_b) <= Nav_Low_Speed_Th
     update_nav_state_and_targets(yaw_deg, low_speed, gyro_z)
 
@@ -1803,11 +1798,6 @@ def calc_speed_closed_loop():
     # 车体运动学分解：输出三个轮子的目标转速
     calc_wheel_spd(move_cmd, cam_target_vx, cam_target_vy, vz_cmd)
 
-    # 读取当前编码器速度
-    e_fl = enc_fl.get()
-    e_fr = enc_fr.get()
-    e_b = enc_b.get()
-
     # 目标速度
     t_fl = move_cmd.speed_fl
     t_fr = move_cmd.speed_fr
@@ -1820,6 +1810,14 @@ def calc_speed_closed_loop():
 
     # PWM 平滑输出
     set_three_pwm_smooth(u_fl, u_fr, u_b)
+
+    tune_log.send(
+        utime.ticks_ms(), nav_state_code(nav_state), yaw_ref_deg, yaw_deg,
+        yaw_err_deg, gyro_z, turn_rate_cmd, vz_cmd,
+        push_orbit_target_delta - push_orbit_progress_deg,
+        t_fl, t_fr, t_b, e_fl, e_fr, e_b,
+        last_pwm_fl, last_pwm_fr, last_pwm_b,
+    )
 
     return None
 
@@ -1852,17 +1850,6 @@ try:
         if pit_flag:
             pit_flag = False
             calc_speed_closed_loop()
-
-        coop_master.send_if_due(
-            now,
-            car_started,
-            nav_state_code(nav_state),
-            cam_target_seen(),
-            imu_runtime.read_yaw(),
-            cam_target_vx,
-            cam_target_vy,
-            last_turn_rate_cmd,
-        )
 
         if utime.ticks_diff(now, last_status_ms) >= 1000:
             led.toggle()

@@ -24,8 +24,8 @@ _LOG_PERIOD_MS = const(100)
 _LOOP_SLEEP_MS = const(5)
 
 _WHEEL_NAMES = ("FL", "FR", "B")
-_PULSE_PINS = (cfg.ENC_FL_A, cfg.ENC_FR_A, cfg.ENC_B_A)
-_DIR_PINS = (cfg.ENC_FL_B, cfg.ENC_FR_B, cfg.ENC_B_B)
+_PULSE_PINS = (cfg.ENC_FL_PULSE, cfg.ENC_FR_PULSE, cfg.ENC_B_PULSE)
+_DIR_PINS = (cfg.ENC_FL_DIR, cfg.ENC_FR_DIR, cfg.ENC_B_DIR)
 _CURRENT_INVERT = (
     cfg.ENC_FL_INVERT,
     cfg.ENC_FR_INVERT,

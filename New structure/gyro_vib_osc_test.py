@@ -179,9 +179,9 @@ class GyroVibOscTest:
 
         self.motors = MotorRig()
         self.move = MoveBase()
-        self.enc_fl = encoder(cfg.ENC_FL_A, cfg.ENC_FL_B, cfg.ENC_FL_INVERT)
-        self.enc_fr = encoder(cfg.ENC_FR_A, cfg.ENC_FR_B, cfg.ENC_FR_INVERT)
-        self.enc_b = encoder(cfg.ENC_B_A, cfg.ENC_B_B, cfg.ENC_B_INVERT)
+        self.enc_fl = encoder(cfg.ENC_FL_DIR, cfg.ENC_FL_PULSE, cfg.ENC_FL_INVERT)
+        self.enc_fr = encoder(cfg.ENC_FR_DIR, cfg.ENC_FR_PULSE, cfg.ENC_FR_INVERT)
+        self.enc_b = encoder(cfg.ENC_B_DIR, cfg.ENC_B_PULSE, cfg.ENC_B_INVERT)
         self.pit = ticker(1)
         self.pit.capture_list(self.enc_fl, self.enc_fr, self.enc_b)
         self.pit.callback(pit_cb)

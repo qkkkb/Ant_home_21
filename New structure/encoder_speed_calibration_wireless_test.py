@@ -35,11 +35,12 @@ _CLOSED_KP = 300.0
 _CLOSED_KI = 2.0
 _GROUND_KP = 1200.0
 _GROUND_KI = 3.0
+_GROUND_BASE_PWM = const(30000)
 _LOG_BUF_SIZE = const(192)
 
 _OPEN_PWM_LEVELS = (6000, 12000, 18000, 24000, 30000)
 _CLOSED_TARGETS = (10, 20, 30, 45, 60)
-_GROUND_DIVISORS = (48, 64, 80)
+_GROUND_DIVISORS = (64,)
 
 _pit_flag = False
 
@@ -561,6 +562,19 @@ class EncoderSpeedCalibration:
         u_fr = pid_mod.speed_ctrl(self.pid_fr, a_fr, t_fr)
         u_b = pid_mod.speed_ctrl(self.pid_b, a_b, t_b)
 
+        if t_fl > 0:
+            u_fl += _GROUND_BASE_PWM
+        elif t_fl < 0:
+            u_fl -= _GROUND_BASE_PWM
+        if t_fr > 0:
+            u_fr += _GROUND_BASE_PWM
+        elif t_fr < 0:
+            u_fr -= _GROUND_BASE_PWM
+        if t_b > 0:
+            u_b += _GROUND_BASE_PWM
+        elif t_b < 0:
+            u_b -= _GROUND_BASE_PWM
+
         if t_fl > 0 and u_fl < 0 or t_fl < 0 and u_fl > 0:
             u_fl = 0
         if t_fr > 0 and u_fr < 0 or t_fr < 0 and u_fr > 0:
@@ -630,6 +644,7 @@ class EncoderSpeedCalibration:
     def run_ground_test(self):
         self.set_pid_gains(_GROUND_KP, _GROUND_KI)
         self.send_static("GROUND CLEAR LONG PATH")
+        self.send_static("GROUND DIV64 BASE30000")
         self.send_static("F MS DIV T3 RAW3 E10_3 PWM3 DT")
         try:
             for divisor in _GROUND_DIVISORS:

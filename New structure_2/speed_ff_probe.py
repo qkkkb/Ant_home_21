@@ -137,9 +137,9 @@ def update_control():
     if not pit_flag:
         return False
     pit_flag = False
-    actual_fl = enc_fl.get()
-    actual_fr = enc_fr.get()
-    actual_b = enc_b.get()
+    actual_fl = enc_fl.get() * cfg.ENC_SCALE
+    actual_fr = enc_fr.get() * cfg.ENC_SCALE
+    actual_b = enc_b.get() * cfg.ENC_SCALE
 
     raw_fl = speed_output(pid_fl, actual_fl, target_fl)
     raw_fr = speed_output(pid_fr, actual_fr, target_fr)
@@ -190,9 +190,9 @@ def update_pwm_control():
     if not pit_flag:
         return False
     pit_flag = False
-    actual_fl = enc_fl.get()
-    actual_fr = enc_fr.get()
-    actual_b = enc_b.get()
+    actual_fl = enc_fl.get() * cfg.ENC_SCALE
+    actual_fr = enc_fr.get() * cfg.ENC_SCALE
+    actual_b = enc_b.get() * cfg.ENC_SCALE
     pwm_fl = smooth_pwm(raw_fl, pwm_fl)
     pwm_fr = smooth_pwm(raw_fr, pwm_fr)
     pwm_b = smooth_pwm(raw_b, pwm_b)
@@ -525,9 +525,9 @@ def init_hardware():
         freq=cfg.MOTOR_FREQ,
         invert=cfg.MOTOR_B_INVERT,
     )
-    enc_fl = encoder(cfg.ENC_FL_A, cfg.ENC_FL_B, cfg.ENC_FL_INVERT)
-    enc_fr = encoder(cfg.ENC_FR_A, cfg.ENC_FR_B, cfg.ENC_FR_INVERT)
-    enc_b = encoder(cfg.ENC_B_A, cfg.ENC_B_B, cfg.ENC_B_INVERT)
+    enc_fl = encoder(cfg.ENC_FL_DIR, cfg.ENC_FL_PULSE, cfg.ENC_FL_INVERT)
+    enc_fr = encoder(cfg.ENC_FR_DIR, cfg.ENC_FR_PULSE, cfg.ENC_FR_INVERT)
+    enc_b = encoder(cfg.ENC_B_DIR, cfg.ENC_B_PULSE, cfg.ENC_B_INVERT)
     pid_fl = SpeedPID()
     pid_fr = SpeedPID()
     pid_b = SpeedPID()

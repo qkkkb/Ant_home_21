@@ -74,10 +74,9 @@ motor_b = Motor(
 )
 motors = (motor_fl, motor_fr, motor_b)
 
-# Current config keeps A=PULSE and B=DIR. smartcar.encoder() expects DIR,PULSE.
-enc_fl = encoder(cfg.ENC_FL_B, cfg.ENC_FL_A, False)
-enc_fr = encoder(cfg.ENC_FR_B, cfg.ENC_FR_A, False)
-enc_b = encoder(cfg.ENC_B_B, cfg.ENC_B_A, False)
+enc_fl = encoder(cfg.ENC_FL_DIR, cfg.ENC_FL_PULSE, False)
+enc_fr = encoder(cfg.ENC_FR_DIR, cfg.ENC_FR_PULSE, False)
+enc_b = encoder(cfg.ENC_B_DIR, cfg.ENC_B_PULSE, False)
 
 pit = ticker(1)
 pit.capture_list(enc_fl, enc_fr, enc_b)

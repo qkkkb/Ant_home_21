@@ -31,11 +31,15 @@ _GROUND_RUN_MS = const(1000)
 _GROUND_STOP_MS = const(1000)
 _GROUND_LOG_MS = const(100)
 _GROUND_BASE_VX = 22.0
+_CLOSED_KP = 300.0
+_CLOSED_KI = 2.0
+_GROUND_KP = 1200.0
+_GROUND_KI = 3.0
 _LOG_BUF_SIZE = const(192)
 
 _OPEN_PWM_LEVELS = (6000, 12000, 18000, 24000, 30000)
 _CLOSED_TARGETS = (10, 20, 30, 45, 60)
-_GROUND_SCALE10 = (10, 20, 30)
+_GROUND_DIVISORS = (48, 64, 80)
 
 _pit_flag = False
 
@@ -280,18 +284,34 @@ class EncoderSpeedCalibration:
         except Exception:
             pass
 
-    def send_ground(self, elapsed, scale10, t_fl, t_fr, t_b, pwm_fl, pwm_fr, pwm_b):
+    def send_ground(
+        self,
+        elapsed,
+        divisor,
+        t_fl,
+        t_fr,
+        t_b,
+        a_fl,
+        a_fr,
+        a_b,
+        pwm_fl,
+        pwm_fr,
+        pwm_b,
+    ):
         buf = self.log_buf
         buf[0] = 70
         buf[1] = 32
         pos = _put_int(buf, 2, elapsed)
-        pos = _put_int(buf, pos, scale10)
+        pos = _put_int(buf, pos, divisor)
         pos = _put_int(buf, pos, t_fl)
         pos = _put_int(buf, pos, t_fr)
         pos = _put_int(buf, pos, t_b)
         pos = _put_int(buf, pos, self.e_fl)
         pos = _put_int(buf, pos, self.e_fr)
         pos = _put_int(buf, pos, self.e_b)
+        pos = _put_int(buf, pos, a_fl * 10.0)
+        pos = _put_int(buf, pos, a_fr * 10.0)
+        pos = _put_int(buf, pos, a_b * 10.0)
         pos = _put_int(buf, pos, pwm_fl)
         pos = _put_int(buf, pos, pwm_fr)
         pos = _put_int(buf, pos, pwm_b)
@@ -322,6 +342,16 @@ class EncoderSpeedCalibration:
         _reset_pid(self.pid_fl)
         _reset_pid(self.pid_fr)
         _reset_pid(self.pid_b)
+
+    def set_pid_gains(self, kp, ki):
+        index = 0
+        while index < 3:
+            speed_pid = self.pids[index]
+            speed_pid.kp = kp
+            speed_pid.ki = ki
+            speed_pid.init_c()
+            _reset_pid(speed_pid)
+            index += 1
 
     def prepare_motor_direction(self, motor, value):
         motor.pwm.duty_u16(0)
@@ -502,6 +532,7 @@ class EncoderSpeedCalibration:
         )
 
     def run_closed_test(self):
+        self.set_pid_gains(_CLOSED_KP, _CLOSED_KI)
         self.send_static("CLOSED LIFT WHEELS")
         wheel = 0
         while wheel < 3:
@@ -514,10 +545,21 @@ class EncoderSpeedCalibration:
             wheel += 1
         self.send_static("CLOSED DONE")
 
-    def run_three_pid(self, t_fl, t_fr, t_b, last_fl, last_fr, last_b):
-        u_fl = pid_mod.speed_ctrl(self.pid_fl, self.e_fl, t_fl)
-        u_fr = pid_mod.speed_ctrl(self.pid_fr, self.e_fr, t_fr)
-        u_b = pid_mod.speed_ctrl(self.pid_b, self.e_b, t_b)
+    def run_three_pid(
+        self,
+        t_fl,
+        t_fr,
+        t_b,
+        a_fl,
+        a_fr,
+        a_b,
+        last_fl,
+        last_fr,
+        last_b,
+    ):
+        u_fl = pid_mod.speed_ctrl(self.pid_fl, a_fl, t_fl)
+        u_fr = pid_mod.speed_ctrl(self.pid_fr, a_fr, t_fr)
+        u_b = pid_mod.speed_ctrl(self.pid_b, a_b, t_b)
 
         if t_fl > 0 and u_fl < 0 or t_fl < 0 and u_fl > 0:
             u_fl = 0
@@ -534,12 +576,12 @@ class EncoderSpeedCalibration:
         self.motor_b.duty(last_b)
         return last_fl, last_fr, last_b
 
-    def run_ground_phase(self, scale10):
+    def run_ground_phase(self, divisor):
         calc_wheel_spd(self.move, _GROUND_BASE_VX, 0.0, 0.0)
-        scale = scale10 * 0.1
-        t_fl = self.move.speed_fl * scale
-        t_fr = self.move.speed_fr * scale
-        t_b = self.move.speed_b * scale
+        t_fl = self.move.speed_fl
+        t_fr = self.move.speed_fr
+        t_b = self.move.speed_b
+        inv_divisor = 1.0 / divisor
 
         self.reset_pids()
         self.prepare_three_directions(t_fl, t_fr, t_b)
@@ -552,25 +594,50 @@ class EncoderSpeedCalibration:
 
         while utime.ticks_diff(utime.ticks_ms(), start_ms) < _GROUND_RUN_MS:
             self.wait_tick()
+            a_fl = self.e_fl * inv_divisor
+            a_fr = self.e_fr * inv_divisor
+            a_b = self.e_b * inv_divisor
             last_fl, last_fr, last_b = self.run_three_pid(
-                t_fl, t_fr, t_b, last_fl, last_fr, last_b
+                t_fl,
+                t_fr,
+                t_b,
+                a_fl,
+                a_fr,
+                a_b,
+                last_fl,
+                last_fr,
+                last_b,
             )
             now_ms = utime.ticks_ms()
             if utime.ticks_diff(now_ms, next_log_ms) >= 0:
                 next_log_ms = utime.ticks_add(now_ms, _GROUND_LOG_MS)
                 self.send_ground(
-                    utime.ticks_diff(now_ms, start_ms), scale10,
-                    t_fl, t_fr, t_b, last_fl, last_fr, last_b,
+                    utime.ticks_diff(now_ms, start_ms),
+                    divisor,
+                    t_fl,
+                    t_fr,
+                    t_b,
+                    a_fl,
+                    a_fr,
+                    a_b,
+                    last_fl,
+                    last_fr,
+                    last_b,
                 )
 
         self.stop_all()
 
     def run_ground_test(self):
-        self.send_static("GROUND CLEAR 1M PATH")
-        for scale10 in _GROUND_SCALE10:
-            self.run_ground_phase(scale10)
-            self.wait_stopped(_GROUND_STOP_MS)
-        self.send_static("GROUND DONE")
+        self.set_pid_gains(_GROUND_KP, _GROUND_KI)
+        self.send_static("GROUND CLEAR LONG PATH")
+        self.send_static("F MS DIV T3 RAW3 E10_3 PWM3 DT")
+        try:
+            for divisor in _GROUND_DIVISORS:
+                self.run_ground_phase(divisor)
+                self.wait_stopped(_GROUND_STOP_MS)
+            self.send_static("GROUND DONE")
+        finally:
+            self.set_pid_gains(_CLOSED_KP, _CLOSED_KI)
 
     def run_selected(self):
         self.running = True
@@ -609,7 +676,7 @@ class EncoderSpeedCalibration:
         self.send_static("ENC SPEED CAL")
         self.send_static("C14 MODE 0=OPEN 1=CLOSED 2=GROUND")
         self.send_static("C9 RUN C8 STOP")
-        self.send_static("K 300 2 5")
+        self.send_static("KC 300 2 KG 1200 3 T 5")
         self.send_mode()
 
         while not self.exit_requested:

@@ -18,6 +18,7 @@ _TEST_PWM = const(24000)
 _RUN_MS = const(1500)
 _SETTLE_MS = const(120)
 _STOP_MS = const(400)
+_DIR_SETTLE_MS = const(20)
 _AUTO_START_DELAY_MS = const(1000)
 _LOG_PERIOD_MS = const(100)
 _LOOP_SLEEP_MS = const(5)
@@ -181,7 +182,15 @@ class EncoderPulseDirTest:
 
     def _set_test_motor(self, wheel, pwm):
         self._stop_motors()
-        self.motors[wheel].duty(pwm)
+        motor = self.motors[wheel]
+        direction = 1 if pwm > 0 else 0
+        if motor.invert:
+            direction = 1 - direction
+        motor.pwm.duty_u16(0)
+        motor.ph.value(direction)
+        utime.sleep_ms(_DIR_SETTLE_MS)
+        motor.pwm.duty_u16(abs(int(pwm)))
+        return direction
 
     def _service_running_controls(self):
         if self.key_exit.value() == 0:
@@ -200,7 +209,7 @@ class EncoderPulseDirTest:
         return True
 
     def _run_phase(self, wheel, pwm, phase_name):
-        self._set_test_motor(wheel, pwm)
+        direction = self._set_test_motor(wheel, pwm)
         start_ms = utime.ticks_ms()
         next_log_ms = start_ms
         positive_count = 0
@@ -211,8 +220,8 @@ class EncoderPulseDirTest:
         max_other_2 = 0
 
         self.log(
-            "PHASE %s %s PWM=%d MS=%d"
-            % (_WHEEL_NAMES[wheel], phase_name, pwm, _RUN_MS)
+            "PHASE %s %s PWM=%d DIR_OUT=%d MS=%d"
+            % (_WHEEL_NAMES[wheel], phase_name, pwm, direction, _RUN_MS)
         )
 
         while utime.ticks_diff(utime.ticks_ms(), start_ms) < _RUN_MS:
@@ -248,12 +257,13 @@ class EncoderPulseDirTest:
                         negative_count += 1
 
                 self.log(
-                    "S %s %s T=%d PWM=%d ENC=%d,%d,%d SIGN=%s,%s,%s"
+                    "S %s %s T=%d PWM=%d DIR_OUT=%d ENC=%d,%d,%d SIGN=%s,%s,%s"
                     % (
                         _WHEEL_NAMES[wheel],
                         phase_name,
                         elapsed_ms,
                         pwm,
+                        direction,
                         values[0],
                         values[1],
                         values[2],

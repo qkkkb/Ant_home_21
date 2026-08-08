@@ -49,7 +49,7 @@ def _put_int(buf, pos, value):
 
 def send(
     now, state, yaw_ref, yaw, yaw_err, gyro_z, turn_cmd, vz_cmd,
-    orbit_remain, target_fl, target_fr, target_b,
+    orbit_remain, encoder_dt_ms, target_fl, target_fr, target_b,
     enc_fl, enc_fr, enc_b, pwm_fl, pwm_fr, pwm_b,
 ):
     global _last_ms
@@ -73,6 +73,7 @@ def send(
         pos = _put_int(buf, pos, turn_cmd)
         pos = _put_int(buf, pos, vz_cmd)
         pos = _put_int(buf, pos, orbit_remain)
+        pos = _put_int(buf, pos, encoder_dt_ms)
         pos = _put_int(buf, pos, target_fl)
         pos = _put_int(buf, pos, target_fr)
         pos = _put_int(buf, pos, target_b)

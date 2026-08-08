@@ -109,7 +109,7 @@ Nav_Fine_Push_Ok_Y_Min = -12
 Nav_Fine_Push_Ok_Y_Max = 24
 Nav_Fine_Push_Ok_Ms = 40
 Nav_Transition_Grace_Ms = 200
-Nav_Low_Speed_Th = 30
+Nav_Low_Speed_Th = 6
 Nav_Normal_Follow_Scale = 0.70
 Nav_Coarse_Forward_Gain = 0.180
 Nav_Coarse_Lateral_Gain = 0.085		#COARSE 横移系数
@@ -1576,6 +1576,15 @@ def clamp_duty(value):
         return -MOTOR_DUTY_MAX
     return value
 
+
+def normalize_encoder_speed(raw_value, dt_ms):
+    value = int(raw_value) * TICK_PERIOD_MS
+    half_dt = dt_ms >> 1
+    if value >= 0:
+        return (value + half_dt) // dt_ms
+    return -((-value + half_dt) // dt_ms)
+
+
 # PWM 平滑处理
 def smooth_value(target, last):
     delta = target - last
@@ -1660,6 +1669,7 @@ loop_count = 0
 last_vz_cmd = 0.0
 last_turn_rate_cmd = 0.0
 yaw_ref_deg = 0.0
+last_encoder_ms = 0
 
 
 # ====================== 速度闭环主函数（含发车判断） ======================
@@ -1667,9 +1677,11 @@ def calc_speed_closed_loop():
     global last_vz_cmd, last_turn_rate_cmd
     global last_pwm_fl, last_pwm_fr, last_pwm_b
     global cam_target_vx, cam_target_vy
+    global last_encoder_ms
 
     # 未发车：直接输出 0，占空比清零
     if not car_started:
+        last_encoder_ms = 0
         set_three_pwm_smooth(0, 0, 0)
         return None
 
@@ -1677,9 +1689,20 @@ def calc_speed_closed_loop():
     # 读取陀螺仪数据
     gyro_z = imu_runtime.read_gyro_z()
     yaw_deg = imu_runtime.read_yaw()
-    e_fl = enc_fl.get()
-    e_fr = enc_fr.get()
-    e_b = enc_b.get()
+    encoder_ms = utime.ticks_ms()
+    raw_fl = enc_fl.get()
+    raw_fr = enc_fr.get()
+    raw_b = enc_b.get()
+    if last_encoder_ms:
+        encoder_dt_ms = utime.ticks_diff(encoder_ms, last_encoder_ms)
+        if encoder_dt_ms <= 0:
+            encoder_dt_ms = TICK_PERIOD_MS
+    else:
+        encoder_dt_ms = TICK_PERIOD_MS
+    last_encoder_ms = encoder_ms
+    e_fl = normalize_encoder_speed(raw_fl, encoder_dt_ms)
+    e_fr = normalize_encoder_speed(raw_fr, encoder_dt_ms)
+    e_b = normalize_encoder_speed(raw_b, encoder_dt_ms)
     low_speed = abs(e_fl) <= Nav_Low_Speed_Th and abs(e_fr) <= Nav_Low_Speed_Th and abs(e_b) <= Nav_Low_Speed_Th
     update_nav_state_and_targets(yaw_deg, low_speed, gyro_z)
 
@@ -1814,7 +1837,7 @@ def calc_speed_closed_loop():
     tune_log.send(
         utime.ticks_ms(), nav_state_code(nav_state), yaw_ref_deg, yaw_deg,
         yaw_err_deg, gyro_z, turn_rate_cmd, vz_cmd,
-        push_orbit_target_delta - push_orbit_progress_deg,
+        push_orbit_target_delta - push_orbit_progress_deg, encoder_dt_ms,
         t_fl, t_fr, t_b, e_fl, e_fr, e_b,
         last_pwm_fl, last_pwm_fr, last_pwm_b,
     )

@@ -1,4 +1,3 @@
-from array import array
 from machine import Pin
 from micropython import const
 from seekfree import WIRELESS_UART
@@ -15,14 +14,12 @@ _WHEEL_FR = const(1)
 _WHEEL_B = const(2)
 _WHEEL_COUNT = const(3)
 
-_RX_BUF_LEN = const(48)
-_LINE_BUF_LEN = const(48)
 _TEST_PWM = const(12000)
 _RUN_MS = const(800)
 _SETTLE_MS = const(120)
 _STOP_MS = const(400)
+_AUTO_START_DELAY_MS = const(1000)
 _LOG_PERIOD_MS = const(100)
-_STATUS_PERIOD_MS = const(1000)
 _LOOP_SLEEP_MS = const(5)
 
 _WHEEL_NAMES = ("FL", "FR", "B")
@@ -58,42 +55,6 @@ def _phase_sign(positive_count, negative_count):
     return 0
 
 
-class WirelessLineReader:
-    def __init__(self):
-        self.rx_buf = array("b", [0] * _RX_BUF_LEN)
-        self.line_buf = bytearray(_LINE_BUF_LEN)
-        self.line_len = 0
-
-    def poll(self, wireless):
-        if wireless is None:
-            return None
-        try:
-            count = wireless.receive_bytearray(self.rx_buf, _RX_BUF_LEN)
-        except Exception:
-            return None
-        if not count:
-            return None
-
-        index = 0
-        while index < count:
-            value = int(self.rx_buf[index]) & 0xFF
-            index += 1
-            if value == 10 or value == 13:
-                if self.line_len:
-                    line = bytes(self.line_buf[: self.line_len]).decode(
-                        "ascii", "ignore"
-                    )
-                    self.line_len = 0
-                    return line.strip()
-            elif 32 <= value <= 126:
-                if self.line_len < _LINE_BUF_LEN:
-                    self.line_buf[self.line_len] = value
-                    self.line_len += 1
-                else:
-                    self.line_len = 0
-        return None
-
-
 class EncoderPulseDirTest:
     def __init__(self):
         gc.collect()
@@ -103,7 +64,6 @@ class EncoderPulseDirTest:
             self.wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
         except Exception:
             pass
-        self.reader = WirelessLineReader()
 
         self.motor_fl = Motor(
             cfg.MOTOR_FL_PH,
@@ -126,9 +86,9 @@ class EncoderPulseDirTest:
         self.motors = (self.motor_fl, self.motor_fr, self.motor_b)
 
         # 测试时关闭软件反向，直接观察新编码器的原始方向极性。
-        self.enc_fl = encoder(_PULSE_PINS[0], _DIR_PINS[0], False)
-        self.enc_fr = encoder(_PULSE_PINS[1], _DIR_PINS[1], False)
-        self.enc_b = encoder(_PULSE_PINS[2], _DIR_PINS[2], False)
+        self.enc_fl = encoder(_DIR_PINS[0], _PULSE_PINS[0], False)
+        self.enc_fr = encoder(_DIR_PINS[1], _PULSE_PINS[1], False)
+        self.enc_b = encoder(_DIR_PINS[2], _PULSE_PINS[2], False)
         self.encoders = (self.enc_fl, self.enc_fr, self.enc_b)
 
         self.pit = ticker(1)
@@ -137,8 +97,6 @@ class EncoderPulseDirTest:
         self.pit.start(cfg.TICK_PERIOD_MS)
 
         self.key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
-        self.key_start = Pin(cfg.BTN_START_PIN, Pin.IN, Pin.PULL_UP)
-        self.key_mode = Pin(cfg.BTN_MODE_PIN, Pin.IN, Pin.PULL_UP)
         self.led = Pin(
             cfg.LED_HB_PIN,
             Pin.OUT,
@@ -150,13 +108,8 @@ class EncoderPulseDirTest:
         self.led_b = Pin(cfg.LED_ROTATE_PIN, Pin.OUT, value=0)
         self.wheel_leds = (self.led_fl, self.led_fr, self.led_b)
 
-        self.selected_wheel = _WHEEL_FL
-        self.last_mode_level = 1
-        self.last_start_level = 1
         self.exit_requested = False
         self.stop_requested = False
-        self.last_status_ms = utime.ticks_ms()
-        self._update_wheel_leds()
 
         try:
             gc.threshold(gc.mem_free() // 4 + gc.mem_alloc())
@@ -178,13 +131,8 @@ class EncoderPulseDirTest:
             except Exception:
                 pass
 
-    def help(self):
-        self.log("KEY C14 NEXT C9 TEST C8 EXIT")
-        self.log("WIRE FL FR B ALL STOP HELP")
-        self.log("TEST RAW ENCODER INVERT=0")
-
     def log_config(self):
-        self.log("ENCODER API ORDER=PULSE,DIR RAW_INV=0")
+        self.log("ENCODER API ORDER=DIR,PULSE RAW_INV=0")
         self.log(
             "ENC FL PULSE=%s DIR=%s CURRENT_INV=%d"
             % (
@@ -210,22 +158,12 @@ class EncoderPulseDirTest:
             )
         )
 
-    def _update_wheel_leds(self):
+    def _show_wheel(self, wheel):
         index = 0
         while index < _WHEEL_COUNT:
-            self.wheel_leds[index].value(1 if index == self.selected_wheel else 0)
+            self.wheel_leds[index].value(1 if index == wheel else 0)
             index += 1
-
-    def _select_wheel(self, wheel):
-        self.selected_wheel = wheel
-        self._update_wheel_leds()
         self.log("SELECT %s" % _WHEEL_NAMES[wheel])
-
-    def _next_wheel(self):
-        wheel = self.selected_wheel + 1
-        if wheel >= _WHEEL_COUNT:
-            wheel = _WHEEL_FL
-        self._select_wheel(wheel)
 
     def _read_encoders(self):
         global _pit_flag
@@ -249,19 +187,7 @@ class EncoderPulseDirTest:
         if self.key_exit.value() == 0:
             self.exit_requested = True
             self.stop_requested = True
-            return
-
-        line = self.reader.poll(self.wireless)
-        if line is None:
-            return
-        command = line.upper()
-        if command == "STOP" or command == "S":
-            self.stop_requested = True
-            self.log("STOP REQUEST")
-        elif command == "HELP" or command == "?":
-            self.help()
-        else:
-            self.log("BUSY USE STOP")
+            self.log("C8 EMERGENCY STOP")
 
     def _wait_stopped(self, wait_ms):
         self._stop_motors()
@@ -396,6 +322,7 @@ class EncoderPulseDirTest:
 
     def run_wheel_test(self, wheel):
         self.stop_requested = False
+        self._show_wheel(wheel)
         self.log("TEST %s START" % _WHEEL_NAMES[wheel])
         gc.collect()
 
@@ -423,79 +350,15 @@ class EncoderPulseDirTest:
             wheel += 1
         self.log("ALL DONE")
 
-    def _handle_command(self, line):
-        if not line:
-            return
-        command = line.upper()
-        if command == "FL":
-            self._select_wheel(_WHEEL_FL)
-            self.run_wheel_test(_WHEEL_FL)
-        elif command == "FR":
-            self._select_wheel(_WHEEL_FR)
-            self.run_wheel_test(_WHEEL_FR)
-        elif command == "B":
-            self._select_wheel(_WHEEL_B)
-            self.run_wheel_test(_WHEEL_B)
-        elif command == "ALL":
-            self.run_all_tests()
-        elif command == "STOP" or command == "S":
-            self._stop_motors()
-            self.log("STOP")
-        elif command == "HELP" or command == "?":
-            self.help()
-        else:
-            self.log("ERR CMD")
-
-    def _poll_keys(self):
-        mode_level = self.key_mode.value()
-        if self.last_mode_level == 1 and mode_level == 0:
-            utime.sleep_ms(20)
-            if self.key_mode.value() == 0:
-                self._next_wheel()
-        self.last_mode_level = mode_level
-
-        start_level = self.key_start.value()
-        if self.last_start_level == 1 and start_level == 0:
-            utime.sleep_ms(20)
-            if self.key_start.value() == 0:
-                self.run_wheel_test(self.selected_wheel)
-        self.last_start_level = start_level
-
-        if self.key_exit.value() == 0:
-            self.exit_requested = True
-
     def run(self):
         self.log("=== PULSE DIR ENCODER TEST ===")
         self.log_config()
-        self.help()
-        self.log("SELECT FL")
+        self.log("AUTO RUN FL FR B; C8=EMERGENCY STOP")
 
         try:
-            while not self.exit_requested:
-                self._poll_keys()
-                if self.exit_requested:
-                    break
-
-                line = self.reader.poll(self.wireless)
-                if line is not None:
-                    self._handle_command(line)
-
-                now_ms = utime.ticks_ms()
-                if utime.ticks_diff(now_ms, self.last_status_ms) >= _STATUS_PERIOD_MS:
-                    self.last_status_ms = now_ms
-                    self.led.toggle()
-                    values = self._read_encoders()
-                    self.log(
-                        "READY SELECT=%s ENC=%d,%d,%d"
-                        % (
-                            _WHEEL_NAMES[self.selected_wheel],
-                            values[0],
-                            values[1],
-                            values[2],
-                        )
-                    )
-
-                utime.sleep_ms(_LOOP_SLEEP_MS)
+            self.led.value(False)
+            if self._wait_stopped(_AUTO_START_DELAY_MS):
+                self.run_all_tests()
         finally:
             self._stop_motors()
             try:

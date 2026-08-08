@@ -17,6 +17,7 @@ MOTOR_DUTY_MAX = 60000
 MOTOR_DUTY_MIN = 300
 # Control
 TICK_PERIOD_MS    = 5
+ENCODER_SPEED_SCALE = 0.015625  # 1 / 64, convert new encoder to control units
 PWM_SMOOTH_FACTOR = 0.4
 MAX_PWM_CHANGE    = 4800
 # Camera UART

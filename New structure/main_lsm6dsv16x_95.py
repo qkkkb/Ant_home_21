@@ -19,6 +19,7 @@ turn_ctrl = _pid_mod.turn_ctrl
 # ====================== 基础配置 ======================
 # 系统控制周期
 TICK_PERIOD_MS = cfg.TICK_PERIOD_MS
+ENCODER_SPEED_SCALE = cfg.ENCODER_SPEED_SCALE
 # 电机最大/最小有效占空比
 MOTOR_DUTY_MAX = cfg.MOTOR_DUTY_MAX
 MOTOR_DUTY_MIN = cfg.MOTOR_DUTY_MIN
@@ -1700,9 +1701,9 @@ def calc_speed_closed_loop():
     else:
         encoder_dt_ms = TICK_PERIOD_MS
     last_encoder_ms = encoder_ms
-    e_fl = normalize_encoder_speed(raw_fl, encoder_dt_ms)
-    e_fr = normalize_encoder_speed(raw_fr, encoder_dt_ms)
-    e_b = normalize_encoder_speed(raw_b, encoder_dt_ms)
+    e_fl = normalize_encoder_speed(raw_fl, encoder_dt_ms) * ENCODER_SPEED_SCALE
+    e_fr = normalize_encoder_speed(raw_fr, encoder_dt_ms) * ENCODER_SPEED_SCALE
+    e_b = normalize_encoder_speed(raw_b, encoder_dt_ms) * ENCODER_SPEED_SCALE
     low_speed = abs(e_fl) <= Nav_Low_Speed_Th and abs(e_fr) <= Nav_Low_Speed_Th and abs(e_b) <= Nav_Low_Speed_Th
     update_nav_state_and_targets(yaw_deg, low_speed, gyro_z)
 

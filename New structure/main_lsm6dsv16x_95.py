@@ -197,10 +197,6 @@ Nav_Push_Turn_Ok_Ms = 150
 Nav_Push_Turn_Forced_Dir = 1
 Nav_Push_Turn_Force_Window_Yaw = 170.0  # 接近180度时保留指定首转方向
 Nav_Push_Turn_Correct_Rate = 35.0       # 越过目标后按连续运动下限做最短路修正
-Nav_Direct_Spin_Enter_Rate = 40.0
-Nav_Direct_Spin_Target_Rate = 35.0
-Nav_Direct_Spin_Start_Speed = 0.3
-Nav_Direct_Spin_Kick_Timeout_Ms = 250
 Nav_Push_Turn_Max_Ms = 6000             # 推后回转超时直接停车
 Nav_Post_Turn_No_Target_Ms = 100
 Nav_Post_Turn_Forward_Ms = 1500
@@ -345,7 +341,6 @@ def reset_gyro_pid_state():
 
 def reset_speed_pid_state():
     global last_pwm_fl, last_pwm_fr, last_pwm_b
-    global direct_spin_active, direct_spin_start_ms, direct_spin_dir
 
     move_cmd.tar_spd_x = 0.0
     move_cmd.tar_spd_y = 0.0
@@ -379,9 +374,6 @@ def reset_speed_pid_state():
     last_pwm_fl = 0
     last_pwm_fr = 0
     last_pwm_b = 0
-    direct_spin_active = False
-    direct_spin_start_ms = 0
-    direct_spin_dir = 0
 
 
 def get_push_orbit_motion(yaw_err_abs):
@@ -1620,27 +1612,11 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
     last_pwm_b = s_b
 
 
-def direct_spin_pwm_base(wheel, positive, kick):
-    if wheel == 0:
-        if positive:
-            return 6000 if kick else 3800
-        return 6900 if kick else 4000
-    if wheel == 1:
-        if positive:
-            return 6700 if kick else 4000
-        return 7900 if kick else 4400
-    if positive:
-        return 8100 if kick else 5000
-    return 6700 if kick else 4800
-
-
-def direct_spin_wheel_base(pid, actual, wheel, positive, elapsed_ms):
-    hold = direct_spin_pwm_base(wheel, positive, False)
+def _spin_pwm(pid, actual, direction, hold, kick, active):
     if pid.delta_tar:
         return hold
 
-    aligned_actual = actual if positive else -actual
-    if aligned_actual >= Nav_Direct_Spin_Start_Speed:
+    if direction * actual >= 0.3:
         pid.delta_tar_last += 1
         if pid.delta_tar_last >= 2:
             pid.delta_tar = 1
@@ -1649,69 +1625,7 @@ def direct_spin_wheel_base(pid, actual, wheel, positive, elapsed_ms):
     else:
         pid.delta_tar_last = 0
 
-    if elapsed_ms >= Nav_Direct_Spin_Kick_Timeout_Ms:
-        return hold
-    return direct_spin_pwm_base(wheel, positive, True)
-
-
-def direct_spin_correction(rate_cmd, gyro_z):
-    positive = rate_cmd > 0.0
-    aligned_rate = gyro_z if positive else -gyro_z
-    error = Nav_Direct_Spin_Target_Rate - aligned_rate
-    integral_last = gyro_pid.output
-    integral = integral_last + 0.1 * error
-    if integral > 1500.0:
-        integral = 1500.0
-    elif integral < 0.0:
-        integral = 0.0
-
-    command = (90.0 if positive else 150.0) + 10.0 * error + integral
-    if command > 2000.0:
-        command = 2000.0
-        if error > 0.0:
-            integral = integral_last
-    elif command < 0.0:
-        command = 0.0
-    gyro_pid.output = integral
-    return int(command)
-
-
-def update_direct_spin(rate_cmd, gyro_z, e_fl, e_fr, e_b, now):
-    global direct_spin_active, direct_spin_start_ms, direct_spin_dir
-
-    positive = rate_cmd > 0.0
-    spin_dir = 1 if positive else -1
-    if (not direct_spin_active) or spin_dir != direct_spin_dir:
-        direct_spin_active = True
-        direct_spin_dir = spin_dir
-        direct_spin_start_ms = now
-        gyro_pid.output = 0.0
-        gyro_pid.err = 0.0
-        gyro_pid.err_last = 0.0
-        pid_fl.delta_tar = 1 if spin_dir * e_fl >= Nav_Direct_Spin_Start_Speed else 0
-        pid_fr.delta_tar = 1 if spin_dir * e_fr >= Nav_Direct_Spin_Start_Speed else 0
-        pid_b.delta_tar = 1 if spin_dir * e_b >= Nav_Direct_Spin_Start_Speed else 0
-        pid_fl.delta_tar_last = 0
-        pid_fr.delta_tar_last = 0
-        pid_b.delta_tar_last = 0
-
-    elapsed_ms = utime.ticks_diff(now, direct_spin_start_ms)
-    base_fl = direct_spin_wheel_base(pid_fl, e_fl, 0, positive, elapsed_ms)
-    base_fr = direct_spin_wheel_base(pid_fr, e_fr, 1, positive, elapsed_ms)
-    base_b = direct_spin_wheel_base(pid_b, e_b, 2, positive, elapsed_ms)
-
-    correction = 0
-    if pid_fl.delta_tar and pid_fr.delta_tar and pid_b.delta_tar:
-        correction = direct_spin_correction(rate_cmd, gyro_z)
-    else:
-        gyro_pid.output = 0.0
-
-    set_three_pwm_smooth(
-        spin_dir * (base_fl + correction),
-        spin_dir * (base_fr + correction),
-        spin_dir * (base_b + correction),
-    )
-    return correction
+    return kick if active else hold
 
 
 # ====================== 初始化 LED 显示 ======================
@@ -1767,9 +1681,6 @@ last_vz_cmd = 0.0
 last_turn_rate_cmd = 0.0
 yaw_ref_deg = 0.0
 last_encoder_ms = 0
-direct_spin_active = False
-direct_spin_start_ms = 0
-direct_spin_dir = 0
 
 
 # ====================== 速度闭环主函数（含发车判断） ======================
@@ -1778,7 +1689,6 @@ def calc_speed_closed_loop():
     global last_pwm_fl, last_pwm_fr, last_pwm_b
     global cam_target_vx, cam_target_vy
     global last_encoder_ms
-    global direct_spin_active, direct_spin_start_ms, direct_spin_dir
 
     # 未发车：直接输出 0，占空比清零
     if not car_started:
@@ -1891,94 +1801,129 @@ def calc_speed_closed_loop():
     else:
         turn_rate_cmd = turn_ctrl(turn_pid, yaw_err_deg, 0)
 
-    direct_spin_mode = (
+    if (
         nav_state in _NAV_TURN_STATES
         and turn_rate_cmd != 0.0
         and cam_target_vx == 0.0
         and cam_target_vy == 0.0
-        and abs(turn_rate_cmd) <= Nav_Direct_Spin_Enter_Rate
-    )
-    if direct_spin_mode:
-        correction = update_direct_spin(
-            turn_rate_cmd, gyro_z, e_fl, e_fr, e_b, encoder_ms
+        and abs(turn_rate_cmd) <= Nav_Push_Turn_Slow_Rate + 5.0
+    ):
+        turn_pid.output = 1 if turn_rate_cmd > 0.0 else -1
+        if gyro_pid.gyro_output_limit >= 0.0 or gyro_pid.err != turn_pid.output:
+            gyro_pid.gyro_output_limit = -1.0
+            gyro_pid.output = 0.0
+            gyro_pid.err = turn_pid.output
+            gyro_pid.err_last = 0
+            pid_fl.delta_tar = 1 if turn_pid.output * e_fl >= 0.3 else 0
+            pid_fr.delta_tar = 1 if turn_pid.output * e_fr >= 0.3 else 0
+            pid_b.delta_tar = 1 if turn_pid.output * e_b >= 0.3 else 0
+            pid_fl.delta_tar_last = 0
+            pid_fr.delta_tar_last = 0
+            pid_b.delta_tar_last = 0
+        elif gyro_pid.err_last < 50:
+            gyro_pid.err_last += 1
+
+        if turn_pid.output > 0:
+            u_fl = _spin_pwm(pid_fl, e_fl, 1, 3800, 6000, gyro_pid.err_last < 50)
+            u_fr = _spin_pwm(pid_fr, e_fr, 1, 4000, 6700, gyro_pid.err_last < 50)
+            u_b = _spin_pwm(pid_b, e_b, 1, 5000, 8100, gyro_pid.err_last < 50)
+            vz_cmd = 90.0
+        else:
+            u_fl = _spin_pwm(pid_fl, e_fl, -1, 4000, 6900, gyro_pid.err_last < 50)
+            u_fr = _spin_pwm(pid_fr, e_fr, -1, 4400, 7900, gyro_pid.err_last < 50)
+            u_b = _spin_pwm(pid_b, e_b, -1, 4800, 6700, gyro_pid.err_last < 50)
+            vz_cmd = 150.0
+
+        if pid_fl.delta_tar and pid_fr.delta_tar and pid_b.delta_tar:
+            turn_pid.err = Nav_Push_Turn_Slow_Rate - turn_pid.output * gyro_z
+            turn_pid.err_last = gyro_pid.output
+            gyro_pid.output += 0.1 * turn_pid.err
+            if gyro_pid.output > 1500.0:
+                gyro_pid.output = 1500.0
+            elif gyro_pid.output < 0.0:
+                gyro_pid.output = 0.0
+            vz_cmd += 10.0 * turn_pid.err + gyro_pid.output
+            if vz_cmd > 2000.0:
+                vz_cmd = 2000.0
+                if turn_pid.err > 0.0:
+                    gyro_pid.output = turn_pid.err_last
+            elif vz_cmd < 0.0:
+                vz_cmd = 0.0
+        else:
+            vz_cmd = 0.0
+            gyro_pid.output = 0.0
+
+        vz_cmd = int(vz_cmd)
+        set_three_pwm_smooth(
+            gyro_pid.err * (u_fl + vz_cmd),
+            gyro_pid.err * (u_fr + vz_cmd),
+            gyro_pid.err * (u_b + vz_cmd),
         )
-        direct_rate_cmd = (
-            Nav_Direct_Spin_Target_Rate
-            if turn_rate_cmd > 0.0
-            else -Nav_Direct_Spin_Target_Rate
-        )
+        turn_rate_cmd = gyro_pid.err * Nav_Push_Turn_Slow_Rate
+        t_fl = 0.0
+        t_fr = 0.0
+        t_b = 0.0
         move_cmd.tar_spd_x = 0.0
         move_cmd.tar_spd_y = 0.0
         move_cmd.tar_spd_z = 0.0
         move_cmd.speed_fl = 0.0
         move_cmd.speed_fr = 0.0
         move_cmd.speed_b = 0.0
-        last_turn_rate_cmd = direct_rate_cmd
+        last_turn_rate_cmd = turn_rate_cmd
         last_vz_cmd = 0.0
-        tune_log.send(
-            utime.ticks_ms(), nav_state_code(nav_state), yaw_ref_deg, yaw_deg,
-            yaw_err_deg, gyro_z, direct_rate_cmd, correction,
-            push_orbit_target_delta - push_orbit_progress_deg, encoder_dt_ms,
-            0.0, 0.0, 0.0, e_fl, e_fr, e_b,
-            last_pwm_fl, last_pwm_fr, last_pwm_b,
-        )
-        return None
-
-    if direct_spin_active:
-        direct_spin_active = False
-        direct_spin_start_ms = 0
-        direct_spin_dir = 0
-        reset_gyro_pid_state()
-        pid_fl.delta_tar = 0
-        pid_fr.delta_tar = 0
-        pid_b.delta_tar = 0
-        pid_fl.delta_tar_last = 0
-        pid_fr.delta_tar_last = 0
-        pid_b.delta_tar_last = 0
-
-    # 陀螺仪内环（方向控制）
-    if nav_state in _NAV_TURN_STATES:
-        gyro_pid.gyro_kp = Nav_Push_Turn_Gyro_Kp
-        gyro_pid.gyro_ki = Nav_Push_Turn_Gyro_Ki
     else:
-        gyro_pid.gyro_kp = GYRO_KP
-        gyro_pid.gyro_ki = GYRO_KI
+        if gyro_pid.gyro_output_limit < 0.0:
+            reset_gyro_pid_state()
+            pid_fl.delta_tar = 0
+            pid_fr.delta_tar = 0
+            pid_b.delta_tar = 0
+            pid_fl.delta_tar_last = 0
+            pid_fr.delta_tar_last = 0
+            pid_b.delta_tar_last = 0
 
-    if nav_state == NAV_STATE_PUSH_ORIENT:
-        gyro_pid.gyro_output_limit = Nav_Push_Orbit_Gyro_Limit
-    elif nav_state == NAV_STATE_PUSH:
-        if push_dir_code == Push_Dir_Up:
-            gyro_pid.gyro_output_limit = Nav_Ball_Push_Gyro_Limit
+        # 陀螺仪内环（方向控制）
+        if nav_state in _NAV_TURN_STATES:
+            gyro_pid.gyro_kp = Nav_Push_Turn_Gyro_Kp
+            gyro_pid.gyro_ki = Nav_Push_Turn_Gyro_Ki
         else:
-            gyro_pid.gyro_output_limit = Nav_Push_Execute_Gyro_Limit
-    elif nav_state in _NAV_TURN_STATES:
-        gyro_pid.gyro_output_limit = Nav_Push_Turn_Gyro_Limit
-    elif nav_state in _NAV_TRACK_STATES:
-        gyro_pid.gyro_output_limit = Nav_Track_Gyro_Limit
-    else:
-        gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
-    vz_cmd = gyro_ctrl(gyro_pid, turn_rate_cmd - gyro_z)
-    move_cmd.tar_spd_x = cam_target_vx
-    move_cmd.tar_spd_y = cam_target_vy
-    move_cmd.tar_spd_z = vz_cmd
-    last_turn_rate_cmd = turn_rate_cmd
-    last_vz_cmd = vz_cmd
+            gyro_pid.gyro_kp = GYRO_KP
+            gyro_pid.gyro_ki = GYRO_KI
 
-    # 车体运动学分解：输出三个轮子的目标转速
-    calc_wheel_spd(move_cmd, cam_target_vx, cam_target_vy, vz_cmd)
+        if nav_state == NAV_STATE_PUSH_ORIENT:
+            gyro_pid.gyro_output_limit = Nav_Push_Orbit_Gyro_Limit
+        elif nav_state == NAV_STATE_PUSH:
+            if push_dir_code == Push_Dir_Up:
+                gyro_pid.gyro_output_limit = Nav_Ball_Push_Gyro_Limit
+            else:
+                gyro_pid.gyro_output_limit = Nav_Push_Execute_Gyro_Limit
+        elif nav_state in _NAV_TURN_STATES:
+            gyro_pid.gyro_output_limit = Nav_Push_Turn_Gyro_Limit
+        elif nav_state in _NAV_TRACK_STATES:
+            gyro_pid.gyro_output_limit = Nav_Track_Gyro_Limit
+        else:
+            gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
+        vz_cmd = gyro_ctrl(gyro_pid, turn_rate_cmd - gyro_z)
+        move_cmd.tar_spd_x = cam_target_vx
+        move_cmd.tar_spd_y = cam_target_vy
+        move_cmd.tar_spd_z = vz_cmd
+        last_turn_rate_cmd = turn_rate_cmd
+        last_vz_cmd = vz_cmd
 
-    # 目标速度
-    t_fl = move_cmd.speed_fl
-    t_fr = move_cmd.speed_fr
-    t_b = move_cmd.speed_b
+        # 车体运动学分解：输出三个轮子的目标转速
+        calc_wheel_spd(move_cmd, cam_target_vx, cam_target_vy, vz_cmd)
 
-    # 速度 PID 输出
-    u_fl = speed_ctrl(pid_fl, e_fl, t_fl)
-    u_fr = speed_ctrl(pid_fr, e_fr, t_fr)
-    u_b = speed_ctrl(pid_b, e_b, t_b)
+        # 目标速度
+        t_fl = move_cmd.speed_fl
+        t_fr = move_cmd.speed_fr
+        t_b = move_cmd.speed_b
 
-    # PWM 平滑输出
-    set_three_pwm_smooth(u_fl, u_fr, u_b)
+        # 速度 PID 输出
+        u_fl = speed_ctrl(pid_fl, e_fl, t_fl)
+        u_fr = speed_ctrl(pid_fr, e_fr, t_fr)
+        u_b = speed_ctrl(pid_b, e_b, t_b)
+
+        # PWM 平滑输出
+        set_three_pwm_smooth(u_fl, u_fr, u_b)
 
     tune_log.send(
         utime.ticks_ms(), nav_state_code(nav_state), yaw_ref_deg, yaw_deg,

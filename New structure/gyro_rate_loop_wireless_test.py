@@ -225,6 +225,7 @@ class GyroRateLoopTest:
         self.filter_ready = False
         self.vz_cmd = 0.0
         self.rate_integral = 0.0
+        self.rate_start_done = False
         self.running = False
         self.exit_requested = False
         self.update_leds()
@@ -314,6 +315,7 @@ class GyroRateLoopTest:
         self.gyro_filt = 0.0
         self.vz_cmd = 0.0
         self.rate_integral = 0.0
+        self.rate_start_done = False
 
     def check_exit(self):
         if self.key_exit.value() == 0:
@@ -367,6 +369,7 @@ class GyroRateLoopTest:
     def feedforward_rate_ctrl(self, rate_cmd):
         if rate_cmd == 0.0:
             self.rate_integral = 0.0
+            self.rate_start_done = False
             if (
                 -_RATE_STOP_DEADBAND
                 <= self.gyro_filt
@@ -380,9 +383,23 @@ class GyroRateLoopTest:
                 return -_RATE_STOP_LIMIT
             return command
 
+        rate_abs = abs(rate_cmd)
+        start_active = False
+        if (
+            _RATE_START_CMD_MIN <= rate_abs <= _RATE_START_CMD_MAX
+            and not self.rate_start_done
+        ):
+            if abs(self.gyro_filt) >= _RATE_START_GYRO_MAX:
+                self.rate_start_done = True
+            else:
+                start_active = True
+
         error = rate_cmd - self.gyro_filt
-        integral_last = self.rate_integral
-        integral = integral_last + _RATE_FB_KI * error
+        integral_last = 0.0 if start_active else self.rate_integral
+        if start_active:
+            integral = 0.0
+        else:
+            integral = integral_last + _RATE_FB_KI * error
         if integral > _RATE_FB_I_LIMIT:
             integral = _RATE_FB_I_LIMIT
         elif integral < -_RATE_FB_I_LIMIT:
@@ -402,10 +419,8 @@ class GyroRateLoopTest:
             if error < 0.0:
                 integral = integral_last
 
-        rate_abs = abs(rate_cmd)
         if (
-            _RATE_START_CMD_MIN <= rate_abs <= _RATE_START_CMD_MAX
-            and abs(self.gyro_filt) < _RATE_START_GYRO_MAX
+            start_active
             and abs(self.e_fl) <= _RATE_START_ENCODER_MAX
             and abs(self.e_fr) <= _RATE_START_ENCODER_MAX
             and abs(self.e_b) <= _RATE_START_ENCODER_MAX
@@ -540,7 +555,7 @@ class GyroRateLoopTest:
         self.send_static("BASE A.25 KP.08 KI.005")
         self.send_static("FF .031 KP.02 KI.0005 I2 A.5")
         self.send_static("STOP KP.03 LIM5 DB8")
-        self.send_static("START C10-30 G5 E.5 V2")
+        self.send_static("START ONCE C10-30 G5 E.5 V2")
         self.send_static("R M P MS C10 G10 F10 Z10 Y10 E10_3 PWM3 DT")
         self.send_mode()
 

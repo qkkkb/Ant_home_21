@@ -49,7 +49,10 @@ _FF_BLEND_SPEED = 0.3
 _START_SPEED = 0.3
 _START_TARGET_MIN = 0.3
 _START_STALL_TICKS = const(4)
-_START_STEP = const(100)
+_START_CONFIRM_TICKS = const(2)
+_START_REARM_SPEED = 0.1
+_START_REARM_TICKS = const(20)
+_START_STEP = const(50)
 _START_DECAY = const(200)
 _START_LIMIT = const(3200)
 
@@ -107,6 +110,8 @@ def _reset_speed_pid(pid):
     pid.err = 0.0
     pid.err_last = 0.0
     pid.tar_spd_last = 0.0
+    pid.delta_tar = 0
+    pid.delta_tar_last = 0
     pid.delta_ud = 0
     pid.param_a = 0
     pid.param_b = 0.0
@@ -163,29 +168,60 @@ def _moving_ff_ctrl(pid, actual, target, wheel, adaptive):
         _reset_speed_pid(pid)
 
     error = target - actual
+    target_abs = abs(target)
     integral_last = pid.output
     stalled = False
-    if adaptive and abs(target) >= _START_TARGET_MIN:
-        if -_START_SPEED < actual < _START_SPEED:
-            pid.delta_ud += 1
-            if pid.delta_ud >= _START_STALL_TICKS:
-                stalled = True
-                boost = pid.param_a + _START_STEP
-                if boost > _START_LIMIT:
-                    boost = _START_LIMIT
+    if adaptive:
+        if target_abs >= _START_TARGET_MIN:
+            if target > 0.0:
+                aligned_actual = actual
+            else:
+                aligned_actual = -actual
+
+            if pid.delta_tar:
+                pid.delta_tar_last = 0
+                if aligned_actual < _START_REARM_SPEED:
+                    pid.delta_ud += 1
+                    if pid.delta_ud >= _START_REARM_TICKS:
+                        pid.delta_tar = 0
+                        pid.delta_ud = 0
+                else:
+                    pid.delta_ud = 0
+                boost = pid.param_a - _START_DECAY
+                if boost < 0:
+                    boost = 0
                 pid.param_a = boost
+            elif aligned_actual >= _START_SPEED:
+                pid.delta_ud = 0
+                pid.delta_tar_last += 1
+                if pid.delta_tar_last >= _START_CONFIRM_TICKS:
+                    pid.delta_tar = 1
+                    pid.delta_tar_last = 0
+                boost = pid.param_a - _START_DECAY
+                if boost < 0:
+                    boost = 0
+                pid.param_a = boost
+            else:
+                pid.delta_tar_last = 0
+                pid.delta_ud += 1
+                if pid.delta_ud >= _START_STALL_TICKS:
+                    stalled = True
+                    boost = pid.param_a + _START_STEP
+                    if boost > _START_LIMIT:
+                        boost = _START_LIMIT
+                    pid.param_a = boost
         else:
             pid.delta_ud = 0
+            pid.delta_tar_last = 0
             boost = pid.param_a - _START_DECAY
-            if boost < 0.0:
+            if boost < 0:
                 boost = 0
             pid.param_a = boost
     else:
         pid.delta_ud = 0
-        boost = pid.param_a - _START_DECAY
-        if boost < 0.0:
-            boost = 0
-        pid.param_a = boost
+        pid.delta_tar = 0
+        pid.delta_tar_last = 0
+        pid.param_a = 0
 
     if stalled:
         integral = integral_last
@@ -197,7 +233,6 @@ def _moving_ff_ctrl(pid, actual, target, wheel, adaptive):
             integral = -_WHEEL_I_LIMIT
 
     base = _moving_ff_base(wheel, target)
-    target_abs = abs(target)
     if target_abs < _FF_BLEND_SPEED:
         base = base * target_abs / _FF_BLEND_SPEED
     feedforward = base + _WHEEL_FF_GAIN * target_abs
@@ -380,6 +415,9 @@ class GyroRateLoopTest:
         pos = _put_int(buf, pos, self.pid_fl.param_a)
         pos = _put_int(buf, pos, self.pid_fr.param_a)
         pos = _put_int(buf, pos, self.pid_b.param_a)
+        pos = _put_int(buf, pos, self.pid_fl.delta_tar)
+        pos = _put_int(buf, pos, self.pid_fr.delta_tar)
+        pos = _put_int(buf, pos, self.pid_b.delta_tar)
         pos = _put_int(buf, pos, self.encoder_dt_ms)
         buf[pos - 1] = 13
         buf[pos] = 10
@@ -496,6 +534,8 @@ class GyroRateLoopTest:
         if self.mode == _MODE_CURRENT or not active:
             pid.param_a = 0
             pid.delta_ud = 0
+            pid.delta_tar = 0
+            pid.delta_tar_last = 0
             return pid_mod.speed_ctrl(pid, actual, target)
         return _moving_ff_ctrl(
             pid,
@@ -626,8 +666,8 @@ class GyroRateLoopTest:
         self.send_static("P +15 -15 +15 -15 +15 -15")
         self.send_static("RATE FF.031 KP.02 KI.0005 I2 A.5")
         self.send_static("WFF 1600 BASE 3000/3250 2900/3150 3900/3800 B.3")
-        self.send_static("START V.3 N4 STEP100 DEC200 LIM3200")
-        self.send_static("R M P MS C10 G10 F10 Z10 T10_3 E10_3 PWM3 B3 DT")
+        self.send_static("START V.3 N4 OK2 REARM.1/20 STEP50 DEC200 LIM3200")
+        self.send_static("R M P MS C10 G10 F10 Z10 T10_3 E10_3 PWM3 B3 S3 DT")
         self.send_mode()
 
         while not self.exit_requested:

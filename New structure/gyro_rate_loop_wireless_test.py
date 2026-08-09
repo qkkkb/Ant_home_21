@@ -13,12 +13,12 @@ from move_base import calc_wheel_spd
 import pid as pid_mod
 
 
-_MODE_KS_3200 = const(0)
-_MODE_KS_3600 = const(1)
-_MODE_KS_4000 = const(2)
+_MODE_LOW_CURRENT = const(0)
+_MODE_LOW_KP_010 = const(1)
+_MODE_LOW_KP_005 = const(2)
 _MODE_COUNT = const(3)
 
-_PROFILE_COUNT = const(6)
+_PROFILE_COUNT = const(2)
 _RUN_MS = const(1500)
 _SETTLE_MS = const(800)
 _GAP_MS = const(500)
@@ -28,15 +28,15 @@ _LOG_BUF_SIZE = const(176)
 _RATE_FF_GAIN = 0.031
 _RATE_FB_KP = 0.02
 _RATE_FB_KI = 0.0005
+_RATE_LOW_KP_010 = 0.01
+_RATE_LOW_KP_005 = 0.005
 _RATE_FB_I_LIMIT = 2.0
 _RATE_EMA_ALPHA = 0.5
 _RATE_STOP_KP = 0.03
 _RATE_STOP_LIMIT = 5.0
 _RATE_STOP_DEADBAND = 8.0
 _FRICTION_BLEND_SPEED = 0.5
-_FRICTION_KS_3200 = const(3200)
-_FRICTION_KS_3600 = const(3600)
-_FRICTION_KS_4000 = const(4000)
+_FRICTION_KS = const(3600)
 _GYRO_LIMIT = 18.0
 
 _GYRO_SIGN = 1.0
@@ -57,15 +57,7 @@ def _pit_handler(_):
 def _profile_rate(profile):
     if profile == 0:
         return 15.0
-    if profile == 1:
-        return -15.0
-    if profile == 2:
-        return 60.0
-    if profile == 3:
-        return -60.0
-    if profile == 4:
-        return 145.0
-    return -145.0
+    return -15.0
 
 
 def _put_int(buf, pos, value):
@@ -211,7 +203,7 @@ class GyroRateLoopTest:
         self.pit.callback(_pit_handler)
         self.pit.start(cfg.TICK_PERIOD_MS)
 
-        self.mode = _MODE_KS_3200
+        self.mode = _MODE_LOW_CURRENT
         self.last_start = 1
         self.last_mode = 1
         self.last_encoder_ms = 0
@@ -290,9 +282,9 @@ class GyroRateLoopTest:
             pass
 
     def update_leds(self):
-        self.led_0.value(1 if self.mode == _MODE_KS_3200 else 0)
-        self.led_1.value(1 if self.mode == _MODE_KS_3600 else 0)
-        self.led_2.value(1 if self.mode == _MODE_KS_4000 else 0)
+        self.led_0.value(1 if self.mode == _MODE_LOW_CURRENT else 0)
+        self.led_1.value(1 if self.mode == _MODE_LOW_KP_010 else 0)
+        self.led_2.value(1 if self.mode == _MODE_LOW_KP_005 else 0)
 
     def stop_all(self):
         self.motor_fl.duty(0)
@@ -370,7 +362,21 @@ class GyroRateLoopTest:
 
         error = rate_cmd - self.gyro_filt
         integral_last = self.rate_integral
-        integral = integral_last + _RATE_FB_KI * error
+        kp = _RATE_FB_KP
+        ki = _RATE_FB_KI
+        if -30.0 <= rate_cmd <= 30.0:
+            if self.mode == _MODE_LOW_KP_010:
+                kp = _RATE_LOW_KP_010
+                ki = 0.0
+            elif self.mode == _MODE_LOW_KP_005:
+                kp = _RATE_LOW_KP_005
+                ki = 0.0
+
+        if ki:
+            integral = integral_last + ki * error
+        else:
+            integral_last = 0.0
+            integral = 0.0
         if integral > _RATE_FB_I_LIMIT:
             integral = _RATE_FB_I_LIMIT
         elif integral < -_RATE_FB_I_LIMIT:
@@ -378,7 +384,7 @@ class GyroRateLoopTest:
 
         command = (
             _RATE_FF_GAIN * rate_cmd
-            + _RATE_FB_KP * error
+            + kp * error
             + integral
         )
         if command > _GYRO_LIMIT:
@@ -401,15 +407,9 @@ class GyroRateLoopTest:
         u_fr = pid_mod.speed_ctrl(self.pid_fr, self.e_fr, t_fr)
         u_b = pid_mod.speed_ctrl(self.pid_b, self.e_b, t_b)
         if friction_enabled:
-            if self.mode == _MODE_KS_3200:
-                friction = _FRICTION_KS_3200
-            elif self.mode == _MODE_KS_3600:
-                friction = _FRICTION_KS_3600
-            else:
-                friction = _FRICTION_KS_4000
-            u_fl = _add_friction_ff(u_fl, t_fl, friction)
-            u_fr = _add_friction_ff(u_fr, t_fr, friction)
-            u_b = _add_friction_ff(u_b, t_b, friction)
+            u_fl = _add_friction_ff(u_fl, t_fl, _FRICTION_KS)
+            u_fr = _add_friction_ff(u_fr, t_fr, _FRICTION_KS)
+            u_b = _add_friction_ff(u_b, t_b, _FRICTION_KS)
         self.last_pwm_fl = _smooth_pwm(u_fl, self.last_pwm_fl)
         self.last_pwm_fr = _smooth_pwm(u_fr, self.last_pwm_fr)
         self.last_pwm_b = _smooth_pwm(u_b, self.last_pwm_b)
@@ -512,13 +512,14 @@ class GyroRateLoopTest:
         self.last_mode = mode
 
     def run(self):
-        self.send_static("RATE FRICTION AB")
-        self.send_static("C14 0=K32 1=K36 2=K40")
+        self.send_static("RATE LOW AB")
+        self.send_static("C14 0=CUR 1=P10 2=P05")
         self.send_static("C9 RUN C8 EXIT GROUND")
-        self.send_static("P +15 -15 +60 -60 +145 -145")
+        self.send_static("P +15 -15")
         self.send_static("FF .031 KP.02 KI.0005 I2 A.5")
+        self.send_static("LOW P10/P05 KI0")
         self.send_static("STOP KP.03 LIM5 DB8")
-        self.send_static("KS 3200 3600 4000 B.5")
+        self.send_static("KS 3600 B.5")
         self.send_static("R M P MS C10 G10 F10 Z10 Y10 E10_3 PWM3 DT")
         self.send_mode()
 

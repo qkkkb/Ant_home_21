@@ -1850,8 +1850,8 @@ def calc_speed_closed_loop():
 
     tune_log.send(
         utime.ticks_ms(), nav_state_code(nav_state), yaw_ref_deg, yaw_deg,
-        yaw_err_deg, gyro_z, turn_rate_cmd, vz_cmd,
-        -imu_runtime.raw_gyro_z, encoder_dt_ms,
+        -imu_runtime.raw_gyro_z, gyro_z, turn_rate_cmd, vz_cmd,
+        push_orbit_progress_deg, encoder_dt_ms,
         t_fl, t_fr, t_b, e_fl, e_fr, e_b,
         last_pwm_fl, last_pwm_fr, last_pwm_b,
     )

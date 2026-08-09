@@ -54,8 +54,7 @@ def send(
 ):
     global _last_ms
     if (
-        state < 2
-        or state > 3
+        (state != 5 and state != 9 and state != 13 and state < 16)
         or _wireless is None
         or _buf is None
         or utime.ticks_diff(now, _last_ms) < _PERIOD_MS

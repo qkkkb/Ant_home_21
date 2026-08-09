@@ -2,7 +2,7 @@ import utime
 from seekfree import WIRELESS_UART
 
 
-_PERIOD_MS = 100
+_PERIOD_MS = 20
 _BUF_SIZE = 160
 _wireless = None
 _buf = None
@@ -54,7 +54,9 @@ def send(
 ):
     global _last_ms
     if (
-        _wireless is None
+        state < 2
+        or state > 3
+        or _wireless is None
         or _buf is None
         or utime.ticks_diff(now, _last_ms) < _PERIOD_MS
     ):

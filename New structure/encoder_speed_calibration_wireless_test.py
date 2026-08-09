@@ -15,7 +15,8 @@ import pid as pid_mod
 _MODE_OPEN = const(0)
 _MODE_CLOSED = const(1)
 _MODE_GROUND = const(2)
-_MODE_COUNT = const(3)
+_MODE_SKIP = const(3)
+_MODE_COUNT = const(4)
 
 _WHEEL_FL = const(0)
 _WHEEL_FR = const(1)
@@ -36,6 +37,8 @@ _CLOSED_KI = 2.0
 _GROUND_KP = 1200.0
 _GROUND_KI = 3.0
 _GROUND_BASE_PWM = const(30000)
+_SKIP_PWM = const(18000)
+_SKIP_RUN_MS = const(500)
 _LOG_BUF_SIZE = const(192)
 
 _OPEN_PWM_LEVELS = (6000, 12000, 18000, 24000, 30000)
@@ -324,10 +327,27 @@ class EncoderSpeedCalibration:
         except Exception:
             pass
 
+    def send_skip(self, period_ms, count, total_fl, total_fr, total_b):
+        buf = self.log_buf
+        buf[0] = 75
+        buf[1] = 32
+        pos = _put_int(buf, 2, period_ms)
+        pos = _put_int(buf, pos, count)
+        pos = _put_int(buf, pos, _mean(total_fl, count))
+        pos = _put_int(buf, pos, _mean(total_fr, count))
+        pos = _put_int(buf, pos, _mean(total_b, count))
+        buf[pos - 1] = 13
+        buf[pos] = 10
+        try:
+            self.wireless.send_bytearray(buf, pos + 1)
+        except Exception:
+            pass
+
     def update_mode_leds(self):
-        self.led_open.value(1 if self.mode == _MODE_OPEN else 0)
-        self.led_closed.value(1 if self.mode == _MODE_CLOSED else 0)
-        self.led_ground.value(1 if self.mode == _MODE_GROUND else 0)
+        skip = self.mode == _MODE_SKIP
+        self.led_open.value(1 if self.mode == _MODE_OPEN or skip else 0)
+        self.led_closed.value(1 if self.mode == _MODE_CLOSED or skip else 0)
+        self.led_ground.value(1 if self.mode == _MODE_GROUND or skip else 0)
 
     def check_exit(self):
         if self.key_exit.value() == 0:
@@ -654,6 +674,42 @@ class EncoderSpeedCalibration:
         finally:
             self.set_pid_gains(_CLOSED_KP, _CLOSED_KI)
 
+    def run_skip_phase(self, period_ms):
+        self.enc_fl.get()
+        self.enc_fr.get()
+        self.enc_b.get()
+        count = 0
+        total_fl = 0
+        total_fr = 0
+        total_b = 0
+        start_ms = utime.ticks_ms()
+        while utime.ticks_diff(utime.ticks_ms(), start_ms) < _SKIP_RUN_MS:
+            self.check_exit()
+            utime.sleep_ms(period_ms)
+            total_fl += int(self.enc_fl.get())
+            total_fr += int(self.enc_fr.get())
+            total_b += int(self.enc_b.get())
+            count += 1
+        self.send_skip(period_ms, count, total_fl, total_fr, total_b)
+
+    def run_skip_test(self):
+        global _pit_flag
+        self.send_static("SKIP LIFT WHEELS PWM18000")
+        self.prepare_three_directions(1, 1, 1)
+        self.motor_fl.duty(_SKIP_PWM)
+        self.motor_fr.duty(_SKIP_PWM)
+        self.motor_b.duty(_SKIP_PWM)
+        utime.sleep_ms(_OPEN_WARMUP_MS)
+        try:
+            self.send_static("K PERIOD COUNT RAW3")
+            self.run_skip_phase(5)
+            self.run_skip_phase(10)
+            self.run_skip_phase(20)
+            self.send_static("SKIP DONE")
+        finally:
+            self.stop_all()
+            _pit_flag = False
+
     def run_selected(self):
         self.running = True
         try:
@@ -661,8 +717,10 @@ class EncoderSpeedCalibration:
                 self.run_open_test()
             elif self.mode == _MODE_CLOSED:
                 self.run_closed_test()
-            else:
+            elif self.mode == _MODE_GROUND:
                 self.run_ground_test()
+            else:
+                self.run_skip_test()
         finally:
             self.stop_all()
             self.running = False
@@ -689,7 +747,7 @@ class EncoderSpeedCalibration:
 
     def run(self):
         self.send_static("ENC SPEED CAL")
-        self.send_static("C14 MODE 0=OPEN 1=CLOSED 2=GROUND")
+        self.send_static("C14 MODE 0=OPEN 1=CLOSED 2=GROUND 3=SKIP")
         self.send_static("C9 RUN C8 STOP")
         self.send_static("KC 300 2 KG 1200 3 T 5")
         self.send_mode()

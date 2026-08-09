@@ -97,6 +97,8 @@ def _clamp_pwm(value):
 
 
 def _smooth_pwm(target, last):
+    if target == 0:
+        return 0
     delta = target - last
     if delta > cfg.MAX_PWM_CHANGE:
         target = last + cfg.MAX_PWM_CHANGE

@@ -13,10 +13,9 @@ from move_base import calc_wheel_spd
 import pid as pid_mod
 
 
-_MODE_ADAPTIVE_REF = const(0)
-_MODE_KICK_HOLD = const(1)
-_MODE_KICK_HOLD_GYRO = const(2)
-_MODE_COUNT = const(3)
+_MODE_KICK_HOLD = const(0)
+_MODE_KICK_HOLD_GYRO = const(1)
+_MODE_COUNT = const(2)
 
 _PROFILE_COUNT = const(6)
 _RUN_MS = const(1500)
@@ -25,38 +24,14 @@ _GAP_MS = const(500)
 _LOG_MS = const(20)
 _LOG_BUF_SIZE = const(192)
 
-_RATE_FF_GAIN = 0.031
-_RATE_FB_KP = 0.02
-_RATE_FB_KI = 0.0005
-_RATE_FB_I_LIMIT = 2.0
 _RATE_EMA_ALPHA = 0.5
 _RATE_STOP_KP = 0.03
 _RATE_STOP_LIMIT = 5.0
 _RATE_STOP_DEADBAND = 8.0
-_GYRO_LIMIT = 18.0
 
-_WHEEL_FF_GAIN = const(1600)
-_WHEEL_FB_KP = const(300)
-_WHEEL_FB_KI = const(8)
-_WHEEL_I_LIMIT = const(18000)
-_FF_FL_POS = const(3000)
-_FF_FL_NEG = const(3250)
-_FF_FR_POS = const(2900)
-_FF_FR_NEG = const(3150)
-_FF_B_POS = const(3900)
-_FF_B_NEG = const(3800)
-_FF_BLEND_SPEED = 0.3
-_START_SPEED = 0.3
-_START_TARGET_MIN = 0.3
-_START_STALL_TICKS = const(4)
-_START_CONFIRM_TICKS = const(2)
-_START_REARM_SPEED = 0.1
-_START_REARM_TICKS = const(20)
-_START_STEP = const(50)
-_START_DECAY = const(200)
-_START_LIMIT = const(3200)
-
-_DIRECT_KICK_MS = const(150)
+_DIRECT_START_SPEED = 0.3
+_DIRECT_START_CONFIRM_TICKS = const(2)
+_DIRECT_KICK_TIMEOUT_MS = const(250)
 _DIRECT_RATE_KP = const(40)
 _DIRECT_RATE_KI = 0.2
 _DIRECT_RATE_I_LIMIT = const(1500)
@@ -91,8 +66,8 @@ def _pit_handler(_):
 
 def _profile_rate(profile):
     if profile & 1:
-        return -15.0
-    return 15.0
+        return -35.0
+    return 35.0
 
 
 def _put_int(buf, pos, value):
@@ -163,20 +138,6 @@ def _smooth_pwm(target, last):
     return value
 
 
-def _moving_ff_base(wheel, target):
-    if wheel == 0:
-        if target > 0:
-            return _FF_FL_POS
-        return _FF_FL_NEG
-    if wheel == 1:
-        if target > 0:
-            return _FF_FR_POS
-        return _FF_FR_NEG
-    if target > 0:
-        return _FF_B_POS
-    return _FF_B_NEG
-
-
 def _direct_pwm_base(wheel, positive, kick):
     if wheel == 0:
         if positive:
@@ -189,116 +150,6 @@ def _direct_pwm_base(wheel, positive, kick):
     if positive:
         return _KICK_B_POS if kick else _HOLD_B_POS
     return _KICK_B_NEG if kick else _HOLD_B_NEG
-
-
-def _moving_ff_ctrl(pid, actual, target, wheel, adaptive):
-    if target == 0.0:
-        _reset_speed_pid(pid)
-        return 0
-
-    if target * pid.tar_spd_last < 0.0:
-        _reset_speed_pid(pid)
-
-    error = target - actual
-    target_abs = abs(target)
-    integral_last = pid.output
-    stalled = False
-    if adaptive:
-        if target_abs >= _START_TARGET_MIN:
-            if target > 0.0:
-                aligned_actual = actual
-            else:
-                aligned_actual = -actual
-
-            if pid.delta_tar:
-                pid.delta_tar_last = 0
-                if aligned_actual < _START_REARM_SPEED:
-                    pid.delta_ud += 1
-                    if pid.delta_ud >= _START_REARM_TICKS:
-                        pid.delta_tar = 0
-                        pid.delta_ud = 0
-                else:
-                    pid.delta_ud = 0
-                boost = pid.param_a - _START_DECAY
-                if boost < 0:
-                    boost = 0
-                pid.param_a = boost
-            elif aligned_actual >= _START_SPEED:
-                pid.delta_ud = 0
-                pid.delta_tar_last += 1
-                if pid.delta_tar_last >= _START_CONFIRM_TICKS:
-                    pid.delta_tar = 1
-                    pid.delta_tar_last = 0
-                boost = pid.param_a - _START_DECAY
-                if boost < 0:
-                    boost = 0
-                pid.param_a = boost
-            else:
-                pid.delta_tar_last = 0
-                pid.delta_ud += 1
-                if pid.delta_ud >= _START_STALL_TICKS:
-                    stalled = True
-                    boost = pid.param_a + _START_STEP
-                    if boost > _START_LIMIT:
-                        boost = _START_LIMIT
-                    pid.param_a = boost
-        else:
-            pid.delta_ud = 0
-            pid.delta_tar_last = 0
-            boost = pid.param_a - _START_DECAY
-            if boost < 0:
-                boost = 0
-            pid.param_a = boost
-    else:
-        pid.delta_ud = 0
-        pid.delta_tar = 0
-        pid.delta_tar_last = 0
-        pid.param_a = 0
-
-    if stalled:
-        integral = integral_last
-    else:
-        integral = integral_last + _WHEEL_FB_KI * error
-        if integral > _WHEEL_I_LIMIT:
-            integral = _WHEEL_I_LIMIT
-        elif integral < -_WHEEL_I_LIMIT:
-            integral = -_WHEEL_I_LIMIT
-
-    base = _moving_ff_base(wheel, target)
-    if target_abs < _FF_BLEND_SPEED:
-        base = base * target_abs / _FF_BLEND_SPEED
-    feedforward = base + _WHEEL_FF_GAIN * target_abs
-    if target < 0.0:
-        feedforward = -feedforward
-    command = feedforward + _WHEEL_FB_KP * error
-    if target > 0.0:
-        command += pid.param_a
-    else:
-        command -= pid.param_a
-    command += integral
-
-    if command > cfg.MOTOR_DUTY_MAX:
-        command = cfg.MOTOR_DUTY_MAX
-        if error > 0.0:
-            integral = integral_last
-    elif command < -cfg.MOTOR_DUTY_MAX:
-        command = -cfg.MOTOR_DUTY_MAX
-        if error < 0.0:
-            integral = integral_last
-
-    if target > 0.0 and command < 0.0:
-        command = 0.0
-        integral = 0.0
-    elif target < 0.0 and command > 0.0:
-        command = 0.0
-        integral = 0.0
-
-    pid.err = error
-    pid.err_last = error
-    pid.tar_spd_last = target
-    pid.output = integral
-    pid.param_b = integral
-    return command
 
 
 class GyroRateLoopTest:
@@ -372,7 +223,7 @@ class GyroRateLoopTest:
         self.pit.callback(_pit_handler)
         self.pit.start(cfg.TICK_PERIOD_MS)
 
-        self.mode = _MODE_ADAPTIVE_REF
+        self.mode = _MODE_KICK_HOLD
         self.last_start = 1
         self.last_mode = 1
         self.last_encoder_ms = 0
@@ -435,10 +286,7 @@ class GyroRateLoopTest:
         pos = _put_int(buf, pos, rate_cmd * 10.0)
         pos = _put_int(buf, pos, self.gyro_raw * 10.0)
         pos = _put_int(buf, pos, self.gyro_filt * 10.0)
-        if self.mode == _MODE_ADAPTIVE_REF:
-            pos = _put_int(buf, pos, self.vz_cmd * 10.0)
-        else:
-            pos = _put_int(buf, pos, self.vz_cmd)
+        pos = _put_int(buf, pos, self.vz_cmd)
         pos = _put_int(buf, pos, self.move.speed_fl * 10.0)
         pos = _put_int(buf, pos, self.move.speed_fr * 10.0)
         pos = _put_int(buf, pos, self.move.speed_b * 10.0)
@@ -463,9 +311,9 @@ class GyroRateLoopTest:
             pass
 
     def update_leds(self):
-        self.led_0.value(1 if self.mode == _MODE_ADAPTIVE_REF else 0)
-        self.led_1.value(1 if self.mode == _MODE_KICK_HOLD else 0)
-        self.led_2.value(1 if self.mode == _MODE_KICK_HOLD_GYRO else 0)
+        self.led_0.value(1 if self.mode == _MODE_KICK_HOLD else 0)
+        self.led_1.value(1 if self.mode == _MODE_KICK_HOLD_GYRO else 0)
+        self.led_2.value(0)
 
     def stop_all(self):
         self.motor_fl.duty(0)
@@ -526,45 +374,15 @@ class GyroRateLoopTest:
                 self.gyro_raw - self.gyro_filt
             )
 
-    def feedforward_rate_ctrl(self, rate_cmd):
-        if rate_cmd == 0.0:
-            self.rate_integral = 0.0
-            if (
-                -_RATE_STOP_DEADBAND
-                <= self.gyro_filt
-                <= _RATE_STOP_DEADBAND
-            ):
-                return 0.0
-            command = -_RATE_STOP_KP * self.gyro_filt
-            if command > _RATE_STOP_LIMIT:
-                return _RATE_STOP_LIMIT
-            if command < -_RATE_STOP_LIMIT:
-                return -_RATE_STOP_LIMIT
-            return command
-
-        error = rate_cmd - self.gyro_filt
-        integral_last = self.rate_integral
-        integral = integral_last + _RATE_FB_KI * error
-        if integral > _RATE_FB_I_LIMIT:
-            integral = _RATE_FB_I_LIMIT
-        elif integral < -_RATE_FB_I_LIMIT:
-            integral = -_RATE_FB_I_LIMIT
-
-        command = (
-            _RATE_FF_GAIN * rate_cmd
-            + _RATE_FB_KP * error
-            + integral
-        )
-        if command > _GYRO_LIMIT:
-            command = _GYRO_LIMIT
-            if error > 0.0:
-                integral = integral_last
-        elif command < -_GYRO_LIMIT:
-            command = -_GYRO_LIMIT
-            if error < 0.0:
-                integral = integral_last
-
-        self.rate_integral = integral
+    def stop_rate_ctrl(self):
+        self.rate_integral = 0.0
+        if -_RATE_STOP_DEADBAND <= self.gyro_filt <= _RATE_STOP_DEADBAND:
+            return 0.0
+        command = -_RATE_STOP_KP * self.gyro_filt
+        if command > _RATE_STOP_LIMIT:
+            return _RATE_STOP_LIMIT
+        if command < -_RATE_STOP_LIMIT:
+            return -_RATE_STOP_LIMIT
         return command
 
     def direct_rate_ctrl(self, rate_cmd):
@@ -593,34 +411,13 @@ class GyroRateLoopTest:
         self.rate_integral = integral
         return command
 
-    def controller_output(self, pid, actual, target, wheel, active):
-        if not active:
-            pid.param_a = 0
-            pid.delta_ud = 0
-            pid.delta_tar = 0
-            pid.delta_tar_last = 0
-            return pid_mod.speed_ctrl(pid, actual, target)
-        return _moving_ff_ctrl(
-            pid,
-            actual,
-            target,
-            wheel,
-            active,
-        )
-
-    def update_motors(self, active):
+    def update_stop_motors(self):
         t_fl = self.move.speed_fl
         t_fr = self.move.speed_fr
         t_b = self.move.speed_b
-        u_fl = self.controller_output(
-            self.pid_fl, self.e_fl, t_fl, 0, active
-        )
-        u_fr = self.controller_output(
-            self.pid_fr, self.e_fr, t_fr, 1, active
-        )
-        u_b = self.controller_output(
-            self.pid_b, self.e_b, t_b, 2, active
-        )
+        u_fl = pid_mod.speed_ctrl(self.pid_fl, self.e_fl, t_fl)
+        u_fr = pid_mod.speed_ctrl(self.pid_fr, self.e_fr, t_fr)
+        u_b = pid_mod.speed_ctrl(self.pid_b, self.e_b, t_b)
         self.last_pwm_fl = _smooth_pwm(u_fl, self.last_pwm_fl)
         self.last_pwm_fr = _smooth_pwm(u_fr, self.last_pwm_fr)
         self.last_pwm_b = _smooth_pwm(u_b, self.last_pwm_b)
@@ -628,19 +425,49 @@ class GyroRateLoopTest:
         self.motor_fr.duty(self.last_pwm_fr)
         self.motor_b.duty(self.last_pwm_b)
 
+    def direct_wheel_base(self, pid, actual, wheel, positive, elapsed):
+        hold = _direct_pwm_base(wheel, positive, False)
+        if pid.delta_tar:
+            return hold
+
+        aligned_actual = actual if positive else -actual
+        if aligned_actual >= _DIRECT_START_SPEED:
+            pid.delta_tar_last += 1
+            if pid.delta_tar_last >= _DIRECT_START_CONFIRM_TICKS:
+                pid.delta_tar = 1
+                pid.delta_tar_last = 0
+                return hold
+        else:
+            pid.delta_tar_last = 0
+
+        if elapsed >= _DIRECT_KICK_TIMEOUT_MS:
+            return hold
+        return _direct_pwm_base(wheel, positive, True)
+
     def update_direct_motors(self, rate_cmd, elapsed):
         positive = rate_cmd > 0.0
-        kick = elapsed < _DIRECT_KICK_MS
+        base_fl = self.direct_wheel_base(
+            self.pid_fl, self.e_fl, 0, positive, elapsed
+        )
+        base_fr = self.direct_wheel_base(
+            self.pid_fr, self.e_fr, 1, positive, elapsed
+        )
+        base_b = self.direct_wheel_base(
+            self.pid_b, self.e_b, 2, positive, elapsed
+        )
+
         correction = 0
-        if not kick and self.mode == _MODE_KICK_HOLD_GYRO:
+        if (
+            self.mode == _MODE_KICK_HOLD_GYRO
+            and self.pid_fl.delta_tar
+            and self.pid_fr.delta_tar
+            and self.pid_b.delta_tar
+        ):
             correction = int(self.direct_rate_ctrl(rate_cmd))
         else:
             self.rate_integral = 0.0
         self.vz_cmd = correction
 
-        base_fl = _direct_pwm_base(0, positive, kick)
-        base_fr = _direct_pwm_base(1, positive, kick)
-        base_b = _direct_pwm_base(2, positive, kick)
         sign = 1 if positive else -1
         u_fl = sign * (base_fl + correction)
         u_fr = sign * (base_fr + correction)
@@ -652,9 +479,6 @@ class GyroRateLoopTest:
         self.pid_fl.param_a = base_fl
         self.pid_fr.param_a = base_fr
         self.pid_b.param_a = base_b
-        self.pid_fl.delta_tar = 1 if sign * self.e_fl >= 0.1 else 0
-        self.pid_fr.delta_tar = 1 if sign * self.e_fr >= 0.1 else 0
-        self.pid_b.delta_tar = 1 if sign * self.e_b >= 0.1 else 0
 
         self.last_pwm_fl = _smooth_pwm(u_fl, self.last_pwm_fl)
         self.last_pwm_fr = _smooth_pwm(u_fr, self.last_pwm_fr)
@@ -665,7 +489,7 @@ class GyroRateLoopTest:
 
     def control_tick(self, rate_cmd, elapsed):
         self.update_gyro()
-        if self.mode != _MODE_ADAPTIVE_REF and rate_cmd != 0.0:
+        if rate_cmd != 0.0:
             self.direct_was_active = True
             self.update_direct_motors(rate_cmd, elapsed)
             return
@@ -676,9 +500,9 @@ class GyroRateLoopTest:
             _reset_speed_pid(self.pid_b)
             self.rate_integral = 0.0
             self.direct_was_active = False
-        self.vz_cmd = self.feedforward_rate_ctrl(rate_cmd)
+        self.vz_cmd = self.stop_rate_ctrl()
         calc_wheel_spd(self.move, 0.0, 0.0, self.vz_cmd)
-        self.update_motors(rate_cmd != 0.0)
+        self.update_stop_motors()
 
     def calibrate(self):
         global _pit_flag
@@ -769,12 +593,12 @@ class GyroRateLoopTest:
         self.last_mode = mode
 
     def run(self):
-        self.send_static("RATE DIRECT AB")
-        self.send_static("C14 0=ADAPT 1=HOLD 2=HOLD+GYRO")
+        self.send_static("RATE FLOOR AB")
+        self.send_static("C14 0=HOLD 1=HOLD+GYRO")
         self.send_static("C9 RUN C8 EXIT GROUND")
-        self.send_static("P +15 -15 +15 -15 +15 -15")
+        self.send_static("P +35 -35 +35 -35 +35 -35")
         self.send_static("H 3800/4000 4000/4400 5000/4800")
-        self.send_static("K 4500/6900 6700/7900 8100/6700 MS150")
+        self.send_static("K 4500/6900 6700/7900 8100/6700 V.3 N2 TO250")
         self.send_static("G KP40 KI.2 I1500 U2000")
         self.send_static("R M P MS C10 G10 F10 U T10_3 E10_3 PWM3 B3 S3 DT")
         self.send_mode()

@@ -34,8 +34,8 @@ GYRO_SIGN = 1.0
 GYRO_OFFSET_Z = 0.0
 GYRO_SCALE = -1.0
 GYRO_DEADBAND_DPS = 0.8  # 陀螺仪死区阈值
-GYRO_KP = 0.12
-GYRO_KI = 0.008
+GYRO_KP = 0.04
+GYRO_KI = 0.004
 GYRO_OUTPUT_LIMIT = 5.0
 Nav_Track_Gyro_Limit = 12.0
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True   #是否在启动时自动进行陀螺仪标定
@@ -1795,6 +1795,8 @@ def calc_speed_closed_loop():
         gyro_pid.gyro_ki = GYRO_KI
 
     if nav_state == NAV_STATE_PUSH_ORIENT:
+        gyro_pid.gyro_kp = 0.12
+        gyro_pid.gyro_ki = 0.008
         gyro_pid.gyro_output_limit = Nav_Push_Orbit_Gyro_Limit
     elif nav_state == NAV_STATE_PUSH:
         if push_dir_code == Push_Dir_Up:

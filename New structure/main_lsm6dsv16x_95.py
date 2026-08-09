@@ -1578,16 +1578,10 @@ def clamp_duty(value):
     return value
 
 
-def normalize_encoder_speed(raw_value, dt_ms):
-    value = int(raw_value) * TICK_PERIOD_MS
-    half_dt = dt_ms >> 1
-    if value >= 0:
-        return (value + half_dt) // dt_ms
-    return -((-value + half_dt) // dt_ms)
-
-
 # PWM 平滑处理
 def smooth_value(target, last):
+    if target == 0:
+        return 0
     delta = target - last
     if abs(delta) > MAX_PWM_CHANGE:
         target = last + MAX_PWM_CHANGE * (1 if delta > 0 else -1)
@@ -1701,9 +1695,9 @@ def calc_speed_closed_loop():
     else:
         encoder_dt_ms = TICK_PERIOD_MS
     last_encoder_ms = encoder_ms
-    e_fl = normalize_encoder_speed(raw_fl, encoder_dt_ms) * ENCODER_SPEED_SCALE
-    e_fr = normalize_encoder_speed(raw_fr, encoder_dt_ms) * ENCODER_SPEED_SCALE
-    e_b = normalize_encoder_speed(raw_b, encoder_dt_ms) * ENCODER_SPEED_SCALE
+    e_fl = int(raw_fl) * ENCODER_SPEED_SCALE
+    e_fr = int(raw_fr) * ENCODER_SPEED_SCALE
+    e_b = int(raw_b) * ENCODER_SPEED_SCALE
     low_speed = abs(e_fl) <= Nav_Low_Speed_Th and abs(e_fr) <= Nav_Low_Speed_Th and abs(e_b) <= Nav_Low_Speed_Th
     update_nav_state_and_targets(yaw_deg, low_speed, gyro_z)
 

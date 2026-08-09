@@ -37,6 +37,11 @@ _RATE_EMA_ALPHA = 0.5
 _RATE_STOP_KP = 0.03
 _RATE_STOP_LIMIT = 5.0
 _RATE_STOP_DEADBAND = 8.0
+_RATE_START_CMD_MIN = 10.0
+_RATE_START_CMD_MAX = 30.0
+_RATE_START_GYRO_MAX = 5.0
+_RATE_START_ENCODER_MAX = 0.5
+_RATE_START_VZ = 2.0
 _GYRO_LIMIT = 18.0
 
 _GYRO_SIGN = 1.0
@@ -397,6 +402,19 @@ class GyroRateLoopTest:
             if error < 0.0:
                 integral = integral_last
 
+        rate_abs = abs(rate_cmd)
+        if (
+            _RATE_START_CMD_MIN <= rate_abs <= _RATE_START_CMD_MAX
+            and abs(self.gyro_filt) < _RATE_START_GYRO_MAX
+            and abs(self.e_fl) <= _RATE_START_ENCODER_MAX
+            and abs(self.e_fr) <= _RATE_START_ENCODER_MAX
+            and abs(self.e_b) <= _RATE_START_ENCODER_MAX
+        ):
+            if rate_cmd > 0.0 and command < _RATE_START_VZ:
+                command = _RATE_START_VZ
+            elif rate_cmd < 0.0 and command > -_RATE_START_VZ:
+                command = -_RATE_START_VZ
+
         self.rate_integral = integral
         return command
 
@@ -522,6 +540,7 @@ class GyroRateLoopTest:
         self.send_static("BASE A.25 KP.08 KI.005")
         self.send_static("FF .031 KP.02 KI.0005 I2 A.5")
         self.send_static("STOP KP.03 LIM5 DB8")
+        self.send_static("START C10-30 G5 E.5 V2")
         self.send_static("R M P MS C10 G10 F10 Z10 Y10 E10_3 PWM3 DT")
         self.send_mode()
 

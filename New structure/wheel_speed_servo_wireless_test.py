@@ -16,7 +16,7 @@ _MODE_FF_PI = const(1)
 _MODE_FF_ADAPTIVE = const(2)
 _MODE_COUNT = const(3)
 
-_PROFILE_COUNT = const(6)
+_PROFILE_COUNT = const(7)
 _RUN_MS = const(1000)
 _STOP_MS = const(600)
 _LOG_MS = const(20)
@@ -29,6 +29,8 @@ _FB_KI = const(8)
 _FB_KI_LOW = const(20)
 _LOW_TARGET_MAX = const(7)
 _I_LIMIT = const(18000)
+_BRAKE_KP = const(1200)
+_BRAKE_STOP_SPEED = 1.0
 
 _pit_flag = False
 
@@ -119,6 +121,14 @@ def _production_ctrl(pid, actual, target):
 
 def _candidate_ctrl(pid, actual, target, adaptive_ki):
     if target == 0:
+        if adaptive_ki and abs(actual) > _BRAKE_STOP_SPEED:
+            pid.output = 0.0
+            pid.err = -actual
+            pid.err_last = pid.err
+            pid.tar_spd_last = 0.0
+            pid.param_a = 0.0
+            pid.param_b = 0.0
+            return _clamp_pwm(-_BRAKE_KP * actual)
         _reset_pid(pid)
         return 0
 
@@ -391,13 +401,21 @@ class WheelSpeedServoTest:
             self.target_fl = 7
             self.target_fr = 7
             self.target_b = -20
+        elif profile == 5 and elapsed < (_RUN_MS >> 1):
+            self.target_fl = 19
+            self.target_fr = -19
+            self.target_b = 0
+        elif profile == 5:
+            self.target_fl = -19
+            self.target_fr = 19
+            self.target_b = 0
         elif elapsed < (_RUN_MS >> 1):
             self.target_fl = 19
             self.target_fr = -19
             self.target_b = 0
         else:
-            self.target_fl = -19
-            self.target_fr = 19
+            self.target_fl = 0
+            self.target_fr = 0
             self.target_b = 0
 
     def run_profile(self, profile):
@@ -467,10 +485,11 @@ class WheelSpeedServoTest:
 
     def run(self):
         self.send_static("WHEEL SERVO AB")
-        self.send_static("C14 0=PID 1=FFPI 2=FFPI+LOWI")
+        self.send_static("C14 0=PID 1=FFPI 2=FFPI+LOWI+BRAKE")
         self.send_static("C9 RUN C8 EXIT")
-        self.send_static("P 0=F 1=SPIN 2=O1 3=O2 4=O3 5=REV")
+        self.send_static("P 0=F 1=SPIN 2=O1 3=O2 4=O3 5=REV 6=STOP")
         self.send_static("K 1450 300 8 20 7 18000")
+        self.send_static("B 1200 10")
         self.send_static("T M P MS T3 E10_3 PWM3 I3 DT")
         self.send_mode()
 

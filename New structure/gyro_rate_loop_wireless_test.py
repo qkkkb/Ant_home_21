@@ -22,18 +22,21 @@ _PROFILE_COUNT = const(6)
 _RUN_MS = const(1500)
 _SETTLE_MS = const(800)
 _GAP_MS = const(500)
-_LOG_MS = const(10)
+_LOG_MS = const(20)
 _LOG_BUF_SIZE = const(176)
 
 _BASE_KP = 0.08
 _BASE_KI = 0.005
 _BASE_EMA_ALPHA = 0.25
 
-_RATE_FF_GAIN = 0.05
+_RATE_FF_GAIN = 0.031
 _RATE_FB_KP = 0.02
 _RATE_FB_KI = 0.0005
-_RATE_FB_I_LIMIT = 3.0
+_RATE_FB_I_LIMIT = 2.0
 _RATE_EMA_ALPHA = 0.5
+_RATE_STOP_KP = 0.03
+_RATE_STOP_LIMIT = 5.0
+_RATE_STOP_DEADBAND = 8.0
 _GYRO_LIMIT = 18.0
 
 _GYRO_SIGN = 1.0
@@ -53,13 +56,13 @@ def _pit_handler(_):
 
 def _profile_rate(profile):
     if profile == 0:
-        return 60.0
+        return 15.0
     if profile == 1:
-        return -60.0
+        return -15.0
     if profile == 2:
-        return 100.0
+        return 60.0
     if profile == 3:
-        return -100.0
+        return -60.0
     if profile == 4:
         return 145.0
     return -145.0
@@ -357,6 +360,21 @@ class GyroRateLoopTest:
             )
 
     def feedforward_rate_ctrl(self, rate_cmd):
+        if rate_cmd == 0.0:
+            self.rate_integral = 0.0
+            if (
+                -_RATE_STOP_DEADBAND
+                <= self.gyro_filt
+                <= _RATE_STOP_DEADBAND
+            ):
+                return 0.0
+            command = -_RATE_STOP_KP * self.gyro_filt
+            if command > _RATE_STOP_LIMIT:
+                return _RATE_STOP_LIMIT
+            if command < -_RATE_STOP_LIMIT:
+                return -_RATE_STOP_LIMIT
+            return command
+
         error = rate_cmd - self.gyro_filt
         integral_last = self.rate_integral
         integral = integral_last + _RATE_FB_KI * error
@@ -500,9 +518,10 @@ class GyroRateLoopTest:
         self.send_static("GYRO RATE AB")
         self.send_static("C14 0=BASE 1=FFRAW 2=FFEMA")
         self.send_static("C9 RUN C8 EXIT GROUND")
-        self.send_static("P +60 -60 +100 -100 +145 -145")
+        self.send_static("P +15 -15 +60 -60 +145 -145")
         self.send_static("BASE A.25 KP.08 KI.005")
-        self.send_static("FF .05 KP.02 KI.0005 I3 A.5")
+        self.send_static("FF .031 KP.02 KI.0005 I2 A.5")
+        self.send_static("STOP KP.03 LIM5 DB8")
         self.send_static("R M P MS C10 G10 F10 Z10 Y10 E10_3 PWM3 DT")
         self.send_mode()
 

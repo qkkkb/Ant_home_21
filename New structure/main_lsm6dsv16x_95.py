@@ -76,6 +76,7 @@ _NAV_TRACK_STATES = (
     NAV_STATE_FINE,
     NAV_STATE_PUSH_CLASSIFY,
     NAV_STATE_PUSH_PREPARE,
+    NAV_STATE_PUSH_BACK,
     NAV_STATE_RETURN_LEFT,
     NAV_STATE_RETURN_BACK,
     NAV_STATE_RETURN_FINAL,
@@ -184,7 +185,7 @@ Nav_Ball_Push_Gyro_Limit = 22.0
 Nav_Push_Line_Lost_Ms = 150
 Nav_Push_Line_Extra_Ms = 100
 Nav_Push_Back_Speed = 20.0
-Nav_Push_Back_Ms = 2500
+Nav_Push_Back_Ms = 833
 Nav_Push_Turn_Slow_Yaw = 95.0
 Nav_Push_Turn_Fast_Rate = 145.0
 Nav_Push_Turn_Slow_Rate = 35.0
@@ -1741,7 +1742,7 @@ def calc_speed_closed_loop():
     elif nav_state == NAV_STATE_PUSH_ORIENT:
         orbit_remaining = max(0.0, push_orbit_target_delta - push_orbit_progress_deg)
         if push_orbit_reached:
-            orbit_vy_mag = Nav_Push_Orbit_Slow_Vy * push_orbit_radius_ratio
+            orbit_vy_mag = 0.0
             orbit_turn_mag = 0.0
         else:
             orbit_vy_mag, orbit_turn_mag = get_push_orbit_motion(orbit_remaining)

@@ -14,7 +14,8 @@ _MODE_SCAN = const(0)
 _MODE_COUNT = const(1)
 
 _PROFILE_COUNT = const(6)
-_RUN_MS = const(1550)
+_UP_MS = const(3100)
+_RUN_MS = const(6200)
 _SETTLE_MS = const(800)
 _GAP_MS = const(500)
 _LOG_MS = const(20)
@@ -24,7 +25,7 @@ _RATE_EMA_ALPHA = 0.5
 _PWM_START = const(3000)
 _PWM_END = const(9000)
 _PWM_STEP = const(200)
-_PWM_STEP_MS = const(50)
+_PWM_STEP_MS = const(100)
 
 _GYRO_SIGN = 1.0
 _GYRO_SCALE = -1.0
@@ -216,7 +217,7 @@ class GyroRateLoopTest:
         except Exception:
             pass
 
-    def send_log(self, profile, elapsed, direction):
+    def send_log(self, profile, elapsed, direction, phase):
         buf = self.log_buf
         buf[0] = 82
         buf[1] = 32
@@ -224,6 +225,7 @@ class GyroRateLoopTest:
         pos = _put_int(buf, pos, profile)
         pos = _put_int(buf, pos, elapsed)
         pos = _put_int(buf, pos, direction * 10)
+        pos = _put_int(buf, pos, phase)
         pos = _put_int(buf, pos, self.gyro_raw * 10.0)
         pos = _put_int(buf, pos, self.gyro_filt * 10.0)
         pos = _put_int(buf, pos, self.open_pwm)
@@ -301,18 +303,22 @@ class GyroRateLoopTest:
                 self.gyro_raw - self.gyro_filt
             )
 
-    def control_tick(self, profile, elapsed, active):
+    def control_tick(self, profile, elapsed):
         self.update_gyro()
-        if active:
+        if elapsed < _UP_MS:
+            phase = 1
             step = elapsed // _PWM_STEP_MS
             target = _PWM_START + step * _PWM_STEP
-            if target > _PWM_END:
-                target = _PWM_END
-            if profile & 1:
-                target = -target
+        elif elapsed < _RUN_MS:
+            phase = -1
+            step = (elapsed - _UP_MS) // _PWM_STEP_MS
+            target = _PWM_END - step * _PWM_STEP
         else:
+            phase = 0
             target = 0
 
+        if profile & 1:
+            target = -target
         self.open_pwm = target
         wheel = profile >> 1
         target_fl = target if wheel == 0 else 0
@@ -324,6 +330,7 @@ class GyroRateLoopTest:
         self.motor_fl.duty(self.last_pwm_fl)
         self.motor_fr.duty(self.last_pwm_fr)
         self.motor_b.duty(self.last_pwm_b)
+        return phase
 
     def calibrate(self):
         global _pit_flag
@@ -366,11 +373,10 @@ class GyroRateLoopTest:
             self.wait_tick()
             now = utime.ticks_ms()
             elapsed = utime.ticks_diff(now, start_ms)
-            active = elapsed < _RUN_MS
-            self.control_tick(profile, elapsed, active)
+            phase = self.control_tick(profile, elapsed)
             if utime.ticks_diff(now, next_log_ms) >= 0:
                 next_log_ms = utime.ticks_add(now, _LOG_MS)
-                self.send_log(profile, elapsed, direction)
+                self.send_log(profile, elapsed, direction, phase)
 
         self.stop_all()
 
@@ -417,8 +423,9 @@ class GyroRateLoopTest:
         self.send_static("PWM BREAKAWAY")
         self.send_static("C9 RUN C8 EXIT GROUND")
         self.send_static("P 0=FL+ 1=FL- 2=FR+ 3=FR- 4=B+ 5=B-")
-        self.send_static("U 3000:200/50:9000")
-        self.send_static("R M P MS D10 G10 F10 U Y10 E10_3 PWM3 DT")
+        self.send_static("U 3000:200/100:9000:200/100:3000")
+        self.send_static("Q 1=UP -1=DOWN 0=STOP")
+        self.send_static("R M P MS D10 Q G10 F10 U Y10 E10_3 PWM3 DT")
         self.send_mode()
 
         while not self.exit_requested:

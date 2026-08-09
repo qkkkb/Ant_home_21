@@ -8,14 +8,11 @@ import utime
 import config as cfg
 from hardware import Motor
 from lsm6dsv16x_gyro_runtime import LSM6DSV16XYawRuntime
-from models import MoveBase, SpeedPID
-from move_base import calc_wheel_spd
-import pid as pid_mod
 
 
-_MODE_LOW_CURRENT = const(0)
-_MODE_LOW_KP_010 = const(1)
-_MODE_LOW_KP_005 = const(2)
+_MODE_PWM_4200 = const(0)
+_MODE_PWM_4800 = const(1)
+_MODE_PWM_5400 = const(2)
 _MODE_COUNT = const(3)
 
 _PROFILE_COUNT = const(2)
@@ -25,19 +22,10 @@ _GAP_MS = const(500)
 _LOG_MS = const(20)
 _LOG_BUF_SIZE = const(176)
 
-_RATE_FF_GAIN = 0.031
-_RATE_FB_KP = 0.02
-_RATE_FB_KI = 0.0005
-_RATE_LOW_KP_010 = 0.01
-_RATE_LOW_KP_005 = 0.005
-_RATE_FB_I_LIMIT = 2.0
 _RATE_EMA_ALPHA = 0.5
-_RATE_STOP_KP = 0.03
-_RATE_STOP_LIMIT = 5.0
-_RATE_STOP_DEADBAND = 8.0
-_FRICTION_BLEND_SPEED = 0.5
-_FRICTION_KS = const(3600)
-_GYRO_LIMIT = 18.0
+_OPEN_PWM_4200 = const(4200)
+_OPEN_PWM_4800 = const(4800)
+_OPEN_PWM_5400 = const(5400)
 
 _GYRO_SIGN = 1.0
 _GYRO_SCALE = -1.0
@@ -88,14 +76,6 @@ def _put_int(buf, pos, value):
     return pos + 1
 
 
-def _reset_speed_pid(pid):
-    pid.output = 0.0
-    pid.err = 0.0
-    pid.err_last = 0.0
-    pid.tar_spd_last = 0.0
-    pid.param_b = 0.0
-
-
 def _clamp_pwm(value):
     if value > cfg.MOTOR_DUTY_MAX:
         return cfg.MOTOR_DUTY_MAX
@@ -124,18 +104,9 @@ def _smooth_pwm(target, last):
     return value
 
 
-def _add_friction_ff(command, target, friction):
-    if target >= _FRICTION_BLEND_SPEED:
-        return command + friction
-    if target <= -_FRICTION_BLEND_SPEED:
-        return command - friction
-    return command + target * friction * 2.0
-
-
 class GyroRateLoopTest:
     def __init__(self):
         gc.collect()
-        pid_mod.PWM_MAX = cfg.PWM_MAX
 
         self.wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
         self.log_buf = bytearray(_LOG_BUF_SIZE)
@@ -177,14 +148,6 @@ class GyroRateLoopTest:
             tick_period_ms=cfg.TICK_PERIOD_MS,
         )
 
-        self.pid_fl = SpeedPID()
-        self.pid_fr = SpeedPID()
-        self.pid_b = SpeedPID()
-        self.pid_fl.init_c()
-        self.pid_fr.init_c()
-        self.pid_b.init_c()
-        self.move = MoveBase()
-
         self.key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
         self.key_start = Pin(cfg.BTN_START_PIN, Pin.IN, Pin.PULL_UP)
         self.key_mode = Pin(cfg.BTN_MODE_PIN, Pin.IN, Pin.PULL_UP)
@@ -203,7 +166,7 @@ class GyroRateLoopTest:
         self.pit.callback(_pit_handler)
         self.pit.start(cfg.TICK_PERIOD_MS)
 
-        self.mode = _MODE_LOW_CURRENT
+        self.mode = _MODE_PWM_4200
         self.last_start = 1
         self.last_mode = 1
         self.last_encoder_ms = 0
@@ -217,8 +180,7 @@ class GyroRateLoopTest:
         self.gyro_raw = 0.0
         self.gyro_filt = 0.0
         self.filter_ready = False
-        self.vz_cmd = 0.0
-        self.rate_integral = 0.0
+        self.open_pwm = 0
         self.running = False
         self.exit_requested = False
         self.update_leds()
@@ -265,7 +227,7 @@ class GyroRateLoopTest:
         pos = _put_int(buf, pos, rate_cmd * 10.0)
         pos = _put_int(buf, pos, self.gyro_raw * 10.0)
         pos = _put_int(buf, pos, self.gyro_filt * 10.0)
-        pos = _put_int(buf, pos, self.vz_cmd * 10.0)
+        pos = _put_int(buf, pos, self.open_pwm)
         pos = _put_int(buf, pos, self.imu.read_yaw() * 10.0)
         pos = _put_int(buf, pos, self.e_fl * 10.0)
         pos = _put_int(buf, pos, self.e_fr * 10.0)
@@ -282,9 +244,9 @@ class GyroRateLoopTest:
             pass
 
     def update_leds(self):
-        self.led_0.value(1 if self.mode == _MODE_LOW_CURRENT else 0)
-        self.led_1.value(1 if self.mode == _MODE_LOW_KP_010 else 0)
-        self.led_2.value(1 if self.mode == _MODE_LOW_KP_005 else 0)
+        self.led_0.value(1 if self.mode == _MODE_PWM_4200 else 0)
+        self.led_1.value(1 if self.mode == _MODE_PWM_4800 else 0)
+        self.led_2.value(1 if self.mode == _MODE_PWM_5400 else 0)
 
     def stop_all(self):
         self.motor_fl.duty(0)
@@ -295,13 +257,9 @@ class GyroRateLoopTest:
         self.last_pwm_b = 0
 
     def reset_controllers(self):
-        _reset_speed_pid(self.pid_fl)
-        _reset_speed_pid(self.pid_fr)
-        _reset_speed_pid(self.pid_b)
         self.filter_ready = False
         self.gyro_filt = 0.0
-        self.vz_cmd = 0.0
-        self.rate_integral = 0.0
+        self.open_pwm = 0
 
     def check_exit(self):
         if self.key_exit.value() == 0:
@@ -344,84 +302,26 @@ class GyroRateLoopTest:
                 self.gyro_raw - self.gyro_filt
             )
 
-    def feedforward_rate_ctrl(self, rate_cmd):
+    def control_tick(self, rate_cmd):
+        self.update_gyro()
         if rate_cmd == 0.0:
-            self.rate_integral = 0.0
-            if (
-                -_RATE_STOP_DEADBAND
-                <= self.gyro_filt
-                <= _RATE_STOP_DEADBAND
-            ):
-                return 0.0
-            command = -_RATE_STOP_KP * self.gyro_filt
-            if command > _RATE_STOP_LIMIT:
-                return _RATE_STOP_LIMIT
-            if command < -_RATE_STOP_LIMIT:
-                return -_RATE_STOP_LIMIT
-            return command
-
-        error = rate_cmd - self.gyro_filt
-        integral_last = self.rate_integral
-        kp = _RATE_FB_KP
-        ki = _RATE_FB_KI
-        if -30.0 <= rate_cmd <= 30.0:
-            if self.mode == _MODE_LOW_KP_010:
-                kp = _RATE_LOW_KP_010
-                ki = 0.0
-            elif self.mode == _MODE_LOW_KP_005:
-                kp = _RATE_LOW_KP_005
-                ki = 0.0
-
-        if ki:
-            integral = integral_last + ki * error
+            target = 0
+        elif self.mode == _MODE_PWM_4200:
+            target = _OPEN_PWM_4200
+        elif self.mode == _MODE_PWM_4800:
+            target = _OPEN_PWM_4800
         else:
-            integral_last = 0.0
-            integral = 0.0
-        if integral > _RATE_FB_I_LIMIT:
-            integral = _RATE_FB_I_LIMIT
-        elif integral < -_RATE_FB_I_LIMIT:
-            integral = -_RATE_FB_I_LIMIT
+            target = _OPEN_PWM_5400
 
-        command = (
-            _RATE_FF_GAIN * rate_cmd
-            + kp * error
-            + integral
-        )
-        if command > _GYRO_LIMIT:
-            command = _GYRO_LIMIT
-            if error > 0.0:
-                integral = integral_last
-        elif command < -_GYRO_LIMIT:
-            command = -_GYRO_LIMIT
-            if error < 0.0:
-                integral = integral_last
-
-        self.rate_integral = integral
-        return command
-
-    def update_motors(self, friction_enabled):
-        t_fl = self.move.speed_fl
-        t_fr = self.move.speed_fr
-        t_b = self.move.speed_b
-        u_fl = pid_mod.speed_ctrl(self.pid_fl, self.e_fl, t_fl)
-        u_fr = pid_mod.speed_ctrl(self.pid_fr, self.e_fr, t_fr)
-        u_b = pid_mod.speed_ctrl(self.pid_b, self.e_b, t_b)
-        if friction_enabled:
-            u_fl = _add_friction_ff(u_fl, t_fl, _FRICTION_KS)
-            u_fr = _add_friction_ff(u_fr, t_fr, _FRICTION_KS)
-            u_b = _add_friction_ff(u_b, t_b, _FRICTION_KS)
-        self.last_pwm_fl = _smooth_pwm(u_fl, self.last_pwm_fl)
-        self.last_pwm_fr = _smooth_pwm(u_fr, self.last_pwm_fr)
-        self.last_pwm_b = _smooth_pwm(u_b, self.last_pwm_b)
+        if rate_cmd < 0.0:
+            target = -target
+        self.open_pwm = target
+        self.last_pwm_fl = _smooth_pwm(target, self.last_pwm_fl)
+        self.last_pwm_fr = _smooth_pwm(target, self.last_pwm_fr)
+        self.last_pwm_b = _smooth_pwm(target, self.last_pwm_b)
         self.motor_fl.duty(self.last_pwm_fl)
         self.motor_fr.duty(self.last_pwm_fr)
         self.motor_b.duty(self.last_pwm_b)
-
-    def control_tick(self, rate_cmd):
-        self.update_gyro()
-        self.vz_cmd = self.feedforward_rate_ctrl(rate_cmd)
-        calc_wheel_spd(self.move, 0.0, 0.0, self.vz_cmd)
-        self.update_motors(rate_cmd != 0.0)
 
     def calibrate(self):
         global _pit_flag
@@ -512,15 +412,12 @@ class GyroRateLoopTest:
         self.last_mode = mode
 
     def run(self):
-        self.send_static("RATE LOW AB")
-        self.send_static("C14 0=CUR 1=P10 2=P05")
+        self.send_static("GYRO OPEN PWM")
+        self.send_static("C14 0=U42 1=U48 2=U54")
         self.send_static("C9 RUN C8 EXIT GROUND")
-        self.send_static("P +15 -15")
-        self.send_static("FF .031 KP.02 KI.0005 I2 A.5")
-        self.send_static("LOW P10/P05 KI0")
-        self.send_static("STOP KP.03 LIM5 DB8")
-        self.send_static("KS 3600 B.5")
-        self.send_static("R M P MS C10 G10 F10 Z10 Y10 E10_3 PWM3 DT")
+        self.send_static("P + - LABEL15")
+        self.send_static("NO RATE OR SPEED LOOP")
+        self.send_static("R M P MS L10 G10 F10 U Y10 E10_3 PWM3 DT")
         self.send_mode()
 
         while not self.exit_requested:

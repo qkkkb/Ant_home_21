@@ -13,9 +13,9 @@ from move_base import calc_wheel_spd
 import pid as pid_mod
 
 
-_MODE_RAW = const(0)
-_MODE_EMA = const(1)
-_MODE_EMA_SOFT = const(2)
+_MODE_BASELINE = const(0)
+_MODE_FF_RAW = const(1)
+_MODE_FF_EMA = const(2)
 _MODE_COUNT = const(3)
 
 _PROFILE_COUNT = const(6)
@@ -25,11 +25,16 @@ _GAP_MS = const(500)
 _LOG_MS = const(10)
 _LOG_BUF_SIZE = const(176)
 
-_GYRO_KP = 0.11
-_GYRO_KP_SOFT = 0.08
-_GYRO_KI = 0.005
+_BASE_KP = 0.08
+_BASE_KI = 0.005
+_BASE_EMA_ALPHA = 0.25
+
+_RATE_FF_GAIN = 0.05
+_RATE_FB_KP = 0.02
+_RATE_FB_KI = 0.0005
+_RATE_FB_I_LIMIT = 3.0
+_RATE_EMA_ALPHA = 0.5
 _GYRO_LIMIT = 18.0
-_EMA_ALPHA = 0.25
 
 _GYRO_SIGN = 1.0
 _GYRO_SCALE = -1.0
@@ -196,7 +201,7 @@ class GyroRateLoopTest:
         self.pit.callback(_pit_handler)
         self.pit.start(cfg.TICK_PERIOD_MS)
 
-        self.mode = _MODE_RAW
+        self.mode = _MODE_BASELINE
         self.last_start = 1
         self.last_mode = 1
         self.last_encoder_ms = 0
@@ -211,6 +216,7 @@ class GyroRateLoopTest:
         self.gyro_filt = 0.0
         self.filter_ready = False
         self.vz_cmd = 0.0
+        self.rate_integral = 0.0
         self.running = False
         self.exit_requested = False
         self.update_leds()
@@ -274,9 +280,9 @@ class GyroRateLoopTest:
             pass
 
     def update_leds(self):
-        self.led_0.value(1 if self.mode == _MODE_RAW else 0)
-        self.led_1.value(1 if self.mode == _MODE_EMA else 0)
-        self.led_2.value(1 if self.mode == _MODE_EMA_SOFT else 0)
+        self.led_0.value(1 if self.mode == _MODE_BASELINE else 0)
+        self.led_1.value(1 if self.mode == _MODE_FF_RAW else 0)
+        self.led_2.value(1 if self.mode == _MODE_FF_EMA else 0)
 
     def stop_all(self):
         self.motor_fl.duty(0)
@@ -293,14 +299,13 @@ class GyroRateLoopTest:
         self.gyro_pid.output = 0.0
         self.gyro_pid.err = 0.0
         self.gyro_pid.err_last = 0.0
-        self.gyro_pid.gyro_kp = (
-            _GYRO_KP_SOFT if self.mode == _MODE_EMA_SOFT else _GYRO_KP
-        )
-        self.gyro_pid.gyro_ki = _GYRO_KI
+        self.gyro_pid.gyro_kp = _BASE_KP
+        self.gyro_pid.gyro_ki = _BASE_KI
         self.gyro_pid.gyro_output_limit = _GYRO_LIMIT
         self.filter_ready = False
         self.gyro_filt = 0.0
         self.vz_cmd = 0.0
+        self.rate_integral = 0.0
 
     def check_exit(self):
         if self.key_exit.value() == 0:
@@ -335,16 +340,47 @@ class GyroRateLoopTest:
 
     def update_gyro(self):
         self.gyro_raw = self.imu.read_gyro_z()
-        if self.mode == _MODE_RAW:
+        if self.mode == _MODE_FF_RAW:
             self.gyro_filt = self.gyro_raw
             self.filter_ready = True
         elif not self.filter_ready:
             self.gyro_filt = self.gyro_raw
             self.filter_ready = True
         else:
-            self.gyro_filt += _EMA_ALPHA * (
+            alpha = (
+                _BASE_EMA_ALPHA
+                if self.mode == _MODE_BASELINE
+                else _RATE_EMA_ALPHA
+            )
+            self.gyro_filt += alpha * (
                 self.gyro_raw - self.gyro_filt
             )
+
+    def feedforward_rate_ctrl(self, rate_cmd):
+        error = rate_cmd - self.gyro_filt
+        integral_last = self.rate_integral
+        integral = integral_last + _RATE_FB_KI * error
+        if integral > _RATE_FB_I_LIMIT:
+            integral = _RATE_FB_I_LIMIT
+        elif integral < -_RATE_FB_I_LIMIT:
+            integral = -_RATE_FB_I_LIMIT
+
+        command = (
+            _RATE_FF_GAIN * rate_cmd
+            + _RATE_FB_KP * error
+            + integral
+        )
+        if command > _GYRO_LIMIT:
+            command = _GYRO_LIMIT
+            if error > 0.0:
+                integral = integral_last
+        elif command < -_GYRO_LIMIT:
+            command = -_GYRO_LIMIT
+            if error < 0.0:
+                integral = integral_last
+
+        self.rate_integral = integral
+        return command
 
     def update_motors(self):
         t_fl = self.move.speed_fl
@@ -362,10 +398,13 @@ class GyroRateLoopTest:
 
     def control_tick(self, rate_cmd):
         self.update_gyro()
-        self.vz_cmd = pid_mod.gyro_ctrl(
-            self.gyro_pid,
-            rate_cmd - self.gyro_filt,
-        )
+        if self.mode == _MODE_BASELINE:
+            self.vz_cmd = pid_mod.gyro_ctrl(
+                self.gyro_pid,
+                rate_cmd - self.gyro_filt,
+            )
+        else:
+            self.vz_cmd = self.feedforward_rate_ctrl(rate_cmd)
         calc_wheel_spd(self.move, 0.0, 0.0, self.vz_cmd)
         self.update_motors()
 
@@ -459,10 +498,11 @@ class GyroRateLoopTest:
 
     def run(self):
         self.send_static("GYRO RATE AB")
-        self.send_static("C14 0=RAW 1=EMA 2=EMA+KP")
+        self.send_static("C14 0=BASE 1=FFRAW 2=FFEMA")
         self.send_static("C9 RUN C8 EXIT GROUND")
         self.send_static("P +60 -60 +100 -100 +145 -145")
-        self.send_static("K KP110 KI5 A250 KP80 LIM180")
+        self.send_static("BASE A.25 KP.08 KI.005")
+        self.send_static("FF .05 KP.02 KI.0005 I3 A.5")
         self.send_static("R M P MS C10 G10 F10 Z10 Y10 E10_3 PWM3 DT")
         self.send_mode()
 

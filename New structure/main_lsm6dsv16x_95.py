@@ -190,8 +190,8 @@ Nav_Push_Turn_Slow_Yaw = 95.0
 Nav_Push_Turn_Fast_Rate = 145.0
 Nav_Push_Turn_Slow_Rate = 35.0
 Nav_Push_Turn_Gyro_Limit = 18.0
-Nav_Push_Turn_Gyro_Kp = 0.11
-Nav_Push_Turn_Gyro_Ki = 0.005
+Nav_Push_Turn_Gyro_Kp = 0.04
+Nav_Push_Turn_Gyro_Ki = 0.002
 Nav_Push_Turn_Ok_Yaw = 6.0
 Nav_Push_Turn_Recover_Yaw = 12.0
 Nav_Push_Turn_Ok_Ms = 150
@@ -1795,8 +1795,8 @@ def calc_speed_closed_loop():
         gyro_pid.gyro_ki = GYRO_KI
 
     if nav_state == NAV_STATE_PUSH_ORIENT:
-        gyro_pid.gyro_kp = 0.12
-        gyro_pid.gyro_ki = 0.008
+        gyro_pid.gyro_kp = Nav_Push_Turn_Gyro_Kp
+        gyro_pid.gyro_ki = Nav_Push_Turn_Gyro_Ki
         gyro_pid.gyro_output_limit = Nav_Push_Orbit_Gyro_Limit
     elif nav_state == NAV_STATE_PUSH:
         if push_dir_code == Push_Dir_Up:

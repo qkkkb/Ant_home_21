@@ -8,14 +8,14 @@ import utime
 import config as cfg
 from hardware import Motor
 from lsm6dsv16x_gyro_runtime import LSM6DSV16XYawRuntime
-from models import AnglePID, MoveBase, SpeedPID
+from models import MoveBase, SpeedPID
 from move_base import calc_wheel_spd
 import pid as pid_mod
 
 
-_MODE_BASELINE = const(0)
-_MODE_FF_RAW = const(1)
-_MODE_FF_EMA = const(2)
+_MODE_CURRENT = const(0)
+_MODE_PRELOAD_3200 = const(1)
+_MODE_PRELOAD_4000 = const(2)
 _MODE_COUNT = const(3)
 
 _PROFILE_COUNT = const(6)
@@ -24,10 +24,6 @@ _SETTLE_MS = const(800)
 _GAP_MS = const(500)
 _LOG_MS = const(20)
 _LOG_BUF_SIZE = const(176)
-
-_BASE_KP = 0.08
-_BASE_KI = 0.005
-_BASE_EMA_ALPHA = 0.25
 
 _RATE_FF_GAIN = 0.031
 _RATE_FB_KP = 0.02
@@ -41,6 +37,8 @@ _RATE_START_CMD_MIN = 10.0
 _RATE_START_CMD_MAX = 30.0
 _RATE_START_GYRO_MAX = 5.0
 _RATE_START_VZ = 2.0
+_SPEED_PRELOAD_3200 = const(3200)
+_SPEED_PRELOAD_4000 = const(4000)
 _GYRO_LIMIT = 18.0
 
 _GYRO_SIGN = 1.0
@@ -187,7 +185,6 @@ class GyroRateLoopTest:
         self.pid_fl.init_c()
         self.pid_fr.init_c()
         self.pid_b.init_c()
-        self.gyro_pid = AnglePID()
         self.move = MoveBase()
 
         self.key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
@@ -208,7 +205,7 @@ class GyroRateLoopTest:
         self.pit.callback(_pit_handler)
         self.pit.start(cfg.TICK_PERIOD_MS)
 
-        self.mode = _MODE_BASELINE
+        self.mode = _MODE_CURRENT
         self.last_start = 1
         self.last_mode = 1
         self.last_encoder_ms = 0
@@ -288,9 +285,9 @@ class GyroRateLoopTest:
             pass
 
     def update_leds(self):
-        self.led_0.value(1 if self.mode == _MODE_BASELINE else 0)
-        self.led_1.value(1 if self.mode == _MODE_FF_RAW else 0)
-        self.led_2.value(1 if self.mode == _MODE_FF_EMA else 0)
+        self.led_0.value(1 if self.mode == _MODE_CURRENT else 0)
+        self.led_1.value(1 if self.mode == _MODE_PRELOAD_3200 else 0)
+        self.led_2.value(1 if self.mode == _MODE_PRELOAD_4000 else 0)
 
     def stop_all(self):
         self.motor_fl.duty(0)
@@ -304,12 +301,6 @@ class GyroRateLoopTest:
         _reset_speed_pid(self.pid_fl)
         _reset_speed_pid(self.pid_fr)
         _reset_speed_pid(self.pid_b)
-        self.gyro_pid.output = 0.0
-        self.gyro_pid.err = 0.0
-        self.gyro_pid.err_last = 0.0
-        self.gyro_pid.gyro_kp = _BASE_KP
-        self.gyro_pid.gyro_ki = _BASE_KI
-        self.gyro_pid.gyro_output_limit = _GYRO_LIMIT
         self.filter_ready = False
         self.gyro_filt = 0.0
         self.vz_cmd = 0.0
@@ -349,19 +340,11 @@ class GyroRateLoopTest:
 
     def update_gyro(self):
         self.gyro_raw = self.imu.read_gyro_z()
-        if self.mode == _MODE_FF_RAW:
-            self.gyro_filt = self.gyro_raw
-            self.filter_ready = True
-        elif not self.filter_ready:
+        if not self.filter_ready:
             self.gyro_filt = self.gyro_raw
             self.filter_ready = True
         else:
-            alpha = (
-                _BASE_EMA_ALPHA
-                if self.mode == _MODE_BASELINE
-                else _RATE_EMA_ALPHA
-            )
-            self.gyro_filt += alpha * (
+            self.gyro_filt += _RATE_EMA_ALPHA * (
                 self.gyro_raw - self.gyro_filt
             )
 
@@ -385,7 +368,8 @@ class GyroRateLoopTest:
         rate_abs = abs(rate_cmd)
         start_active = False
         if (
-            _RATE_START_CMD_MIN <= rate_abs <= _RATE_START_CMD_MAX
+            self.mode == _MODE_CURRENT
+            and _RATE_START_CMD_MIN <= rate_abs <= _RATE_START_CMD_MAX
             and not self.rate_start_done
         ):
             if abs(self.gyro_filt) >= _RATE_START_GYRO_MAX:
@@ -427,10 +411,24 @@ class GyroRateLoopTest:
         self.rate_integral = integral
         return command
 
-    def update_motors(self):
+    def update_motors(self, preload_enabled):
         t_fl = self.move.speed_fl
         t_fr = self.move.speed_fr
         t_b = self.move.speed_b
+        preload = 0.0
+        if self.mode == _MODE_PRELOAD_3200:
+            preload = _SPEED_PRELOAD_3200
+        elif self.mode == _MODE_PRELOAD_4000:
+            preload = _SPEED_PRELOAD_4000
+
+        if preload_enabled and preload:
+            if t_fl and self.pid_fl.tar_spd_last == 0.0:
+                self.pid_fl.output = preload if t_fl > 0.0 else -preload
+            if t_fr and self.pid_fr.tar_spd_last == 0.0:
+                self.pid_fr.output = preload if t_fr > 0.0 else -preload
+            if t_b and self.pid_b.tar_spd_last == 0.0:
+                self.pid_b.output = preload if t_b > 0.0 else -preload
+
         u_fl = pid_mod.speed_ctrl(self.pid_fl, self.e_fl, t_fl)
         u_fr = pid_mod.speed_ctrl(self.pid_fr, self.e_fr, t_fr)
         u_b = pid_mod.speed_ctrl(self.pid_b, self.e_b, t_b)
@@ -443,15 +441,9 @@ class GyroRateLoopTest:
 
     def control_tick(self, rate_cmd):
         self.update_gyro()
-        if self.mode == _MODE_BASELINE:
-            self.vz_cmd = pid_mod.gyro_ctrl(
-                self.gyro_pid,
-                rate_cmd - self.gyro_filt,
-            )
-        else:
-            self.vz_cmd = self.feedforward_rate_ctrl(rate_cmd)
+        self.vz_cmd = self.feedforward_rate_ctrl(rate_cmd)
         calc_wheel_spd(self.move, 0.0, 0.0, self.vz_cmd)
-        self.update_motors()
+        self.update_motors(rate_cmd != 0.0)
 
     def calibrate(self):
         global _pit_flag
@@ -542,14 +534,14 @@ class GyroRateLoopTest:
         self.last_mode = mode
 
     def run(self):
-        self.send_static("GYRO RATE AB")
-        self.send_static("C14 0=BASE 1=FFRAW 2=FFEMA")
+        self.send_static("RATE WHEEL AB")
+        self.send_static("C14 0=CUR 1=I32 2=I40")
         self.send_static("C9 RUN C8 EXIT GROUND")
         self.send_static("P +15 -15 +60 -60 +145 -145")
-        self.send_static("BASE A.25 KP.08 KI.005")
         self.send_static("FF .031 KP.02 KI.0005 I2 A.5")
         self.send_static("STOP KP.03 LIM5 DB8")
-        self.send_static("START ONCE C10-30 G5 V2")
+        self.send_static("CUR START V2 G5")
+        self.send_static("I32=3200 I40=4000")
         self.send_static("R M P MS C10 G10 F10 Z10 Y10 E10_3 PWM3 DT")
         self.send_mode()
 

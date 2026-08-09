@@ -2,11 +2,13 @@ import utime
 from seekfree import WIRELESS_UART
 
 
-_PERIOD_MS = 20
+_PERIOD_MS = 50
+_FAST_PERIOD_MS = 20
 _BUF_SIZE = 160
 _wireless = None
 _buf = None
 _last_ms = 0
+_last_state = -1
 
 
 def init(baud):
@@ -48,33 +50,48 @@ def _put_int(buf, pos, value):
 
 
 def send(
-    now, state, yaw_ref, yaw, yaw_err, gyro_z, turn_cmd, vz_cmd,
-    orbit_remain, encoder_dt_ms, target_fl, target_fr, target_b,
+    now, state, flags, state_ms, yaw_ref, yaw, yaw_err, gyro_z,
+    vx_cmd, vy_cmd, turn_cmd, vz_cmd, cam_x, cam_y,
+    encoder_dt_ms, orbit_progress, target_fl, target_fr, target_b,
     enc_fl, enc_fr, enc_b, pwm_fl, pwm_fr, pwm_b,
 ):
-    global _last_ms
+    global _last_ms, _last_state
+    period_ms = (
+        _FAST_PERIOD_MS
+        if state == 5 or state == 9 or state == 13 or state >= 16
+        else _PERIOD_MS
+    )
     if (
-        (state != 5 and state != 9 and state != 13 and state < 16)
-        or _wireless is None
+        _wireless is None
         or _buf is None
-        or utime.ticks_diff(now, _last_ms) < _PERIOD_MS
+        or (
+            state == _last_state
+            and utime.ticks_diff(now, _last_ms) < period_ms
+        )
     ):
         return
     _last_ms = now
+    _last_state = state
     try:
         buf = _buf
         buf[0] = 71
         buf[1] = 32
         pos = 2
         pos = _put_int(buf, pos, state)
+        pos = _put_int(buf, pos, flags)
+        pos = _put_int(buf, pos, state_ms)
         pos = _put_int(buf, pos, yaw_ref)
         pos = _put_int(buf, pos, yaw)
         pos = _put_int(buf, pos, yaw_err)
         pos = _put_int(buf, pos, gyro_z)
+        pos = _put_int(buf, pos, vx_cmd)
+        pos = _put_int(buf, pos, vy_cmd)
         pos = _put_int(buf, pos, turn_cmd)
         pos = _put_int(buf, pos, vz_cmd)
-        pos = _put_int(buf, pos, orbit_remain)
+        pos = _put_int(buf, pos, cam_x)
+        pos = _put_int(buf, pos, cam_y)
         pos = _put_int(buf, pos, encoder_dt_ms)
+        pos = _put_int(buf, pos, orbit_progress)
         pos = _put_int(buf, pos, target_fl)
         pos = _put_int(buf, pos, target_fr)
         pos = _put_int(buf, pos, target_b)

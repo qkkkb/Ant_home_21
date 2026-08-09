@@ -1864,9 +1864,20 @@ def calc_speed_closed_loop():
     set_three_pwm_smooth(u_fl, u_fr, u_b)
 
     tune_log.send(
-        utime.ticks_ms(), nav_state_code(nav_state), yaw_ref_deg, yaw_deg,
-        -imu_runtime.raw_gyro_z, gyro_z, turn_rate_cmd, vz_cmd,
-        push_orbit_progress_deg, encoder_dt_ms,
+        encoder_ms, nav_state_code(nav_state),
+        cam_has_target
+        | (line_crossed << 1)
+        | (push_dir_code << 2)
+        | (pushed_object_count << 5)
+        | (push_orbit_reached << 8)
+        | (push_turn_settle << 9)
+        | (low_speed << 10)
+        | (nav_ready_for_push << 11)
+        | (push_line_seen_once << 12),
+        utime.ticks_diff(encoder_ms, nav_transition_ms),
+        yaw_ref_deg, yaw_deg, yaw_err_deg, gyro_z,
+        cam_target_vx, cam_target_vy, turn_rate_cmd, vz_cmd,
+        cam_error_x, cam_error_y, encoder_dt_ms, push_orbit_progress_deg,
         t_fl, t_fr, t_b, e_fl, e_fr, e_b,
         last_pwm_fl, last_pwm_fr, last_pwm_b,
     )

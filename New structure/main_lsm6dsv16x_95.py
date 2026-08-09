@@ -212,6 +212,7 @@ Nav_Return_Shift_Hold_Ms = 1000
 Nav_Return_Turn_Dir = 1
 Nav_Return_Final_Back_Speed = 14.0
 Nav_Return_Final_Line_Extra_Ms = 60
+Nav_Return_Turn_Ok_Yaw = 2
 Nav_Return_Turn_Ok_Ms = 700
 Nav_Return_Max_Ms = 6000
 
@@ -380,12 +381,20 @@ def reset_speed_pid_state():
 def get_push_orbit_motion(yaw_err_abs):
     if yaw_err_abs <= Nav_Push_Orient_Ok_Yaw:
         return 0.0, 0.0
+    if yaw_err_abs <= Nav_Push_Orbit_Skip_Yaw:
+        span = Nav_Push_Orbit_Skip_Yaw - Nav_Push_Orient_Ok_Yaw
+        ratio = (yaw_err_abs - Nav_Push_Orient_Ok_Yaw) / span
+        turn_rate_mag = Nav_Push_Turn_Slow_Rate + (
+            Nav_Push_Orbit_Slow_Rate - Nav_Push_Turn_Slow_Rate
+        ) * ratio
+        vy_base = Nav_Push_Orbit_Slow_Vy * turn_rate_mag / Nav_Push_Orbit_Slow_Rate
+        return vy_base * push_orbit_radius_ratio, turn_rate_mag
     if yaw_err_abs > Nav_Push_Orbit_Slow_Yaw:
         vy_base = Nav_Push_Orbit_Fast_Vy
         turn_rate_mag = Nav_Push_Orbit_Fast_Rate
     else:
-        span = Nav_Push_Orbit_Slow_Yaw - Nav_Push_Orient_Ok_Yaw
-        ratio = (yaw_err_abs - Nav_Push_Orient_Ok_Yaw) / span
+        span = Nav_Push_Orbit_Slow_Yaw - Nav_Push_Orbit_Skip_Yaw
+        ratio = (yaw_err_abs - Nav_Push_Orbit_Skip_Yaw) / span
         vy_base = Nav_Push_Orbit_Slow_Vy + (Nav_Push_Orbit_Fast_Vy - Nav_Push_Orbit_Slow_Vy) * ratio
         turn_rate_mag = Nav_Push_Orbit_Slow_Rate + (Nav_Push_Orbit_Fast_Rate - Nav_Push_Orbit_Slow_Rate) * ratio
     return vy_base * push_orbit_radius_ratio, turn_rate_mag
@@ -752,19 +761,18 @@ def update_return_home(now, yaw_deg, low_speed, gyro_z):
         cam_target_vx = 0.0
         cam_target_vy = 0.0
         yaw_err_abs = abs(-wrapped_yaw_error(yaw_ref_deg, yaw_deg))
-        if yaw_err_abs <= Nav_Push_Turn_Ok_Yaw:
+        if yaw_err_abs <= Nav_Return_Turn_Ok_Yaw:
             if not push_turn_settle:
                 reset_gyro_pid_state()
             push_turn_settle = True
             push_turn_reached_once = True
-        elif push_turn_settle and yaw_err_abs > Nav_Push_Turn_Recover_Yaw:
+        elif push_turn_settle and yaw_err_abs > Nav_Return_Turn_Ok_Yaw + 1:
             push_turn_settle = False
             nav_push_turn_ok_since_ms = 0
         if push_turn_settle and low_speed and abs(gyro_z) <= 8.0:
             if nav_push_turn_ok_since_ms == 0:
                 nav_push_turn_ok_since_ms = now
             elif utime.ticks_diff(now, nav_push_turn_ok_since_ms) >= Nav_Return_Turn_Ok_Ms:
-                imu_runtime.reset_yaw(field_up_yaw)
                 nav_set_state(NAV_STATE_RETURN_FINAL)
         else:
             nav_push_turn_ok_since_ms = 0
@@ -1777,6 +1785,13 @@ def calc_speed_closed_loop():
                 Nav_Return_Turn_Dir,
                 push_turn_reached_once,
             )
+            if turn_rate_cmd == 0.0:
+                if abs(yaw_err_deg) > Nav_Return_Turn_Ok_Yaw:
+                    turn_rate_cmd = (
+                        Nav_Push_Turn_Correct_Rate
+                        if yaw_err_deg > 0.0
+                        else -Nav_Push_Turn_Correct_Rate
+                    )
         gyro_rate_mode = True
 
     if gyro_rate_mode:

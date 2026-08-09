@@ -10,22 +10,21 @@ from hardware import Motor
 from lsm6dsv16x_gyro_runtime import LSM6DSV16XYawRuntime
 
 
-_MODE_PWM_4200 = const(0)
-_MODE_PWM_4800 = const(1)
-_MODE_PWM_5400 = const(2)
-_MODE_COUNT = const(3)
+_MODE_SCAN = const(0)
+_MODE_COUNT = const(1)
 
-_PROFILE_COUNT = const(2)
-_RUN_MS = const(1500)
+_PROFILE_COUNT = const(6)
+_RUN_MS = const(1550)
 _SETTLE_MS = const(800)
 _GAP_MS = const(500)
 _LOG_MS = const(20)
 _LOG_BUF_SIZE = const(176)
 
 _RATE_EMA_ALPHA = 0.5
-_OPEN_PWM_4200 = const(4200)
-_OPEN_PWM_4800 = const(4800)
-_OPEN_PWM_5400 = const(5400)
+_PWM_START = const(3000)
+_PWM_END = const(9000)
+_PWM_STEP = const(200)
+_PWM_STEP_MS = const(50)
 
 _GYRO_SIGN = 1.0
 _GYRO_SCALE = -1.0
@@ -42,10 +41,10 @@ def _pit_handler(_):
     _pit_flag = True
 
 
-def _profile_rate(profile):
-    if profile == 0:
-        return 15.0
-    return -15.0
+def _profile_direction(profile):
+    if profile & 1:
+        return -1
+    return 1
 
 
 def _put_int(buf, pos, value):
@@ -166,7 +165,7 @@ class GyroRateLoopTest:
         self.pit.callback(_pit_handler)
         self.pit.start(cfg.TICK_PERIOD_MS)
 
-        self.mode = _MODE_PWM_4200
+        self.mode = _MODE_SCAN
         self.last_start = 1
         self.last_mode = 1
         self.last_encoder_ms = 0
@@ -204,12 +203,12 @@ class GyroRateLoopTest:
         except Exception:
             pass
 
-    def send_profile(self, profile, rate):
+    def send_profile(self, profile, direction):
         buf = self.log_buf
         buf[0] = 80
         buf[1] = 32
         pos = _put_int(buf, 2, profile)
-        pos = _put_int(buf, pos, rate)
+        pos = _put_int(buf, pos, direction * 10)
         buf[pos - 1] = 13
         buf[pos] = 10
         try:
@@ -217,14 +216,14 @@ class GyroRateLoopTest:
         except Exception:
             pass
 
-    def send_log(self, profile, elapsed, rate_cmd):
+    def send_log(self, profile, elapsed, direction):
         buf = self.log_buf
         buf[0] = 82
         buf[1] = 32
         pos = _put_int(buf, 2, self.mode)
         pos = _put_int(buf, pos, profile)
         pos = _put_int(buf, pos, elapsed)
-        pos = _put_int(buf, pos, rate_cmd * 10.0)
+        pos = _put_int(buf, pos, direction * 10)
         pos = _put_int(buf, pos, self.gyro_raw * 10.0)
         pos = _put_int(buf, pos, self.gyro_filt * 10.0)
         pos = _put_int(buf, pos, self.open_pwm)
@@ -244,9 +243,9 @@ class GyroRateLoopTest:
             pass
 
     def update_leds(self):
-        self.led_0.value(1 if self.mode == _MODE_PWM_4200 else 0)
-        self.led_1.value(1 if self.mode == _MODE_PWM_4800 else 0)
-        self.led_2.value(1 if self.mode == _MODE_PWM_5400 else 0)
+        self.led_0.value(1)
+        self.led_1.value(0)
+        self.led_2.value(0)
 
     def stop_all(self):
         self.motor_fl.duty(0)
@@ -302,23 +301,26 @@ class GyroRateLoopTest:
                 self.gyro_raw - self.gyro_filt
             )
 
-    def control_tick(self, rate_cmd):
+    def control_tick(self, profile, elapsed, active):
         self.update_gyro()
-        if rate_cmd == 0.0:
-            target = 0
-        elif self.mode == _MODE_PWM_4200:
-            target = _OPEN_PWM_4200
-        elif self.mode == _MODE_PWM_4800:
-            target = _OPEN_PWM_4800
+        if active:
+            step = elapsed // _PWM_STEP_MS
+            target = _PWM_START + step * _PWM_STEP
+            if target > _PWM_END:
+                target = _PWM_END
+            if profile & 1:
+                target = -target
         else:
-            target = _OPEN_PWM_5400
+            target = 0
 
-        if rate_cmd < 0.0:
-            target = -target
         self.open_pwm = target
-        self.last_pwm_fl = _smooth_pwm(target, self.last_pwm_fl)
-        self.last_pwm_fr = _smooth_pwm(target, self.last_pwm_fr)
-        self.last_pwm_b = _smooth_pwm(target, self.last_pwm_b)
+        wheel = profile >> 1
+        target_fl = target if wheel == 0 else 0
+        target_fr = target if wheel == 1 else 0
+        target_b = target if wheel == 2 else 0
+        self.last_pwm_fl = _smooth_pwm(target_fl, self.last_pwm_fl)
+        self.last_pwm_fr = _smooth_pwm(target_fr, self.last_pwm_fr)
+        self.last_pwm_b = _smooth_pwm(target_b, self.last_pwm_b)
         self.motor_fl.duty(self.last_pwm_fl)
         self.motor_fr.duty(self.last_pwm_fr)
         self.motor_b.duty(self.last_pwm_b)
@@ -350,12 +352,12 @@ class GyroRateLoopTest:
         gc.collect()
 
     def run_profile(self, profile):
-        rate = _profile_rate(profile)
+        direction = _profile_direction(profile)
         self.stop_all()
         self.reset_controllers()
         self.last_encoder_ms = 0
         self.imu.reset_yaw(0.0)
-        self.send_profile(profile, rate)
+        self.send_profile(profile, direction)
 
         start_ms = utime.ticks_ms()
         next_log_ms = start_ms
@@ -364,11 +366,11 @@ class GyroRateLoopTest:
             self.wait_tick()
             now = utime.ticks_ms()
             elapsed = utime.ticks_diff(now, start_ms)
-            rate_cmd = rate if elapsed < _RUN_MS else 0.0
-            self.control_tick(rate_cmd)
+            active = elapsed < _RUN_MS
+            self.control_tick(profile, elapsed, active)
             if utime.ticks_diff(now, next_log_ms) >= 0:
                 next_log_ms = utime.ticks_add(now, _LOG_MS)
-                self.send_log(profile, elapsed, rate_cmd)
+                self.send_log(profile, elapsed, direction)
 
         self.stop_all()
 
@@ -412,12 +414,11 @@ class GyroRateLoopTest:
         self.last_mode = mode
 
     def run(self):
-        self.send_static("GYRO OPEN PWM")
-        self.send_static("C14 0=U42 1=U48 2=U54")
+        self.send_static("PWM BREAKAWAY")
         self.send_static("C9 RUN C8 EXIT GROUND")
-        self.send_static("P + - LABEL15")
-        self.send_static("NO RATE OR SPEED LOOP")
-        self.send_static("R M P MS L10 G10 F10 U Y10 E10_3 PWM3 DT")
+        self.send_static("P 0=FL+ 1=FL- 2=FR+ 3=FR- 4=B+ 5=B-")
+        self.send_static("U 3000:200/50:9000")
+        self.send_static("R M P MS D10 G10 F10 U Y10 E10_3 PWM3 DT")
         self.send_mode()
 
         while not self.exit_requested:

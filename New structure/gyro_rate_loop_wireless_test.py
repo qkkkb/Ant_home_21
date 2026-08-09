@@ -32,8 +32,10 @@ _RATE_STOP_DEADBAND = 8.0
 _DIRECT_START_SPEED = 0.3
 _DIRECT_START_CONFIRM_TICKS = const(2)
 _DIRECT_KICK_TIMEOUT_MS = const(250)
-_DIRECT_RATE_KP = const(40)
-_DIRECT_RATE_KI = 0.2
+_DIRECT_RATE_FF_POS = const(90)
+_DIRECT_RATE_FF_NEG = const(150)
+_DIRECT_RATE_KP = const(10)
+_DIRECT_RATE_KI = 0.1
 _DIRECT_RATE_I_LIMIT = const(1500)
 _DIRECT_RATE_LIMIT = const(2000)
 _HOLD_FL_POS = const(3800)
@@ -389,9 +391,11 @@ class GyroRateLoopTest:
         if rate_cmd > 0.0:
             aligned_rate = self.gyro_filt
             target_rate = rate_cmd
+            feedforward = _DIRECT_RATE_FF_POS
         else:
             aligned_rate = -self.gyro_filt
             target_rate = -rate_cmd
+            feedforward = _DIRECT_RATE_FF_NEG
         error = target_rate - aligned_rate
         integral_last = self.rate_integral
         integral = integral_last + _DIRECT_RATE_KI * error
@@ -400,7 +404,7 @@ class GyroRateLoopTest:
         elif integral < 0.0:
             integral = 0.0
 
-        command = _DIRECT_RATE_KP * error + integral
+        command = feedforward + _DIRECT_RATE_KP * error + integral
         if command > _DIRECT_RATE_LIMIT:
             command = _DIRECT_RATE_LIMIT
             if error > 0.0:
@@ -599,7 +603,7 @@ class GyroRateLoopTest:
         self.send_static("P +35 -35 +35 -35 +35 -35")
         self.send_static("H 3800/4000 4000/4400 5000/4800")
         self.send_static("K 4500/6900 6700/7900 8100/6700 V.3 N2 TO250")
-        self.send_static("G KP40 KI.2 I1500 U2000")
+        self.send_static("G FF90/150 KP10 KI.1 I1500 U2000")
         self.send_static("R M P MS C10 G10 F10 U T10_3 E10_3 PWM3 B3 S3 DT")
         self.send_mode()
 

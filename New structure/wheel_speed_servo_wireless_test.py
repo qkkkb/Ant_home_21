@@ -13,7 +13,7 @@ import pid as pid_mod
 
 _MODE_PID = const(0)
 _MODE_FF_PI = const(1)
-_MODE_FF_START = const(2)
+_MODE_FF_ADAPTIVE = const(2)
 _MODE_COUNT = const(3)
 
 _PROFILE_COUNT = const(6)
@@ -26,11 +26,9 @@ _LOG_BUF_SIZE = const(192)
 _FF_GAIN = const(1450)
 _FB_KP = const(300)
 _FB_KI = const(8)
+_FB_KI_LOW = const(20)
+_LOW_TARGET_MAX = const(7)
 _I_LIMIT = const(18000)
-_START_PWM = const(2500)
-_START_TICKS = const(6)
-_START_TARGET_MIN = const(2)
-_STOP_SPEED = 0.5
 
 _pit_flag = False
 
@@ -119,7 +117,7 @@ def _production_ctrl(pid, actual, target):
     return pid_mod.speed_ctrl(pid, actual, target)
 
 
-def _candidate_ctrl(pid, actual, target, start_assist):
+def _candidate_ctrl(pid, actual, target, adaptive_ki):
     if target == 0:
         _reset_pid(pid)
         return 0
@@ -130,26 +128,17 @@ def _candidate_ctrl(pid, actual, target, start_assist):
 
     error = target - actual
     integral_last = pid.output
-    integral = integral_last + _FB_KI * error
+    ki = _FB_KI
+    if adaptive_ki and abs(target) <= _LOW_TARGET_MAX:
+        ki = _FB_KI_LOW
+    integral = integral_last + ki * error
     if integral > _I_LIMIT:
         integral = _I_LIMIT
     elif integral < -_I_LIMIT:
         integral = -_I_LIMIT
 
-    boost = 0
-    if (
-        start_assist
-        and abs(target) >= _START_TARGET_MIN
-        and abs(actual) <= _STOP_SPEED
-    ):
-        pid.param_a += 1.0
-        if pid.param_a >= _START_TICKS:
-            boost = _START_PWM if target > 0 else -_START_PWM
-    else:
-        pid.param_a = 0.0
-
     feedforward = _FF_GAIN * target
-    command = feedforward + _FB_KP * error + integral + boost
+    command = feedforward + _FB_KP * error + integral
 
     if command > cfg.MOTOR_DUTY_MAX:
         command = cfg.MOTOR_DUTY_MAX
@@ -171,7 +160,7 @@ def _candidate_ctrl(pid, actual, target, start_assist):
     pid.err_last = error
     pid.tar_spd_last = target
     pid.output = integral
-    pid.param_b = boost
+    pid.param_b = integral
     return command
 
 
@@ -304,7 +293,7 @@ class WheelSpeedServoTest:
     def update_leds(self):
         self.led_0.value(1 if self.mode == _MODE_PID else 0)
         self.led_1.value(1 if self.mode == _MODE_FF_PI else 0)
-        self.led_2.value(1 if self.mode == _MODE_FF_START else 0)
+        self.led_2.value(1 if self.mode == _MODE_FF_ADAPTIVE else 0)
 
     def stop_all(self):
         self.motor_fl.duty(0)
@@ -357,7 +346,7 @@ class WheelSpeedServoTest:
             pid,
             actual,
             target,
-            self.mode == _MODE_FF_START,
+            self.mode == _MODE_FF_ADAPTIVE,
         )
 
     def update_motors(self, t_fl, t_fr, t_b):
@@ -478,11 +467,11 @@ class WheelSpeedServoTest:
 
     def run(self):
         self.send_static("WHEEL SERVO AB")
-        self.send_static("C14 0=PID 1=FFPI 2=FFPI+START")
+        self.send_static("C14 0=PID 1=FFPI 2=FFPI+LOWI")
         self.send_static("C9 RUN C8 EXIT")
         self.send_static("P 0=F 1=SPIN 2=O1 3=O2 4=O3 5=REV")
-        self.send_static("K 1450 300 8 18000 2500 6")
-        self.send_static("T M P MS T3 E10_3 PWM3 BOOST3 DT")
+        self.send_static("K 1450 300 8 20 7 18000")
+        self.send_static("T M P MS T3 E10_3 PWM3 I3 DT")
         self.send_mode()
 
         while not self.exit_requested:

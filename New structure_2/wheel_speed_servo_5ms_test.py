@@ -164,8 +164,6 @@ class WheelServo5msTest:
         wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
 
         self.key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
-        self.key_start = Pin(cfg.BTN_START_PIN, Pin.IN, Pin.PULL_UP)
-        self.led = Pin(cfg.LED_HB_PIN, Pin.OUT, pull=Pin.PULL_UP_47K, value=True)
 
         self.motor_fl = Motor(
             cfg.MOTOR_FL_PH,
@@ -457,21 +455,6 @@ class WheelServo5msTest:
             profile += 1
         _log("=== TEST COMPLETE ===")
 
-    def wait_start(self):
-        _log("C9=START C8=EXIT; RAISE WHEELS AND CLEAR THE CHASSIS")
-        last = 1
-        while True:
-            self.check_exit()
-            value = self.key_start.value()
-            if last == 1 and value == 0:
-                self.wait_ms(20)
-                if self.key_start.value() == 0:
-                    return
-            last = value
-            self.led.toggle()
-            utime.sleep_ms(100)
-
-
 def main():
     tester = None
     try:
@@ -481,7 +464,6 @@ def main():
         except Exception:
             pass
         tester = WheelServo5msTest()
-        tester.wait_start()
         tester.run_all()
     except KeyboardInterrupt:
         _log("EMERGENCY STOP")

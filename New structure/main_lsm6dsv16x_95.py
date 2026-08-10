@@ -8,7 +8,7 @@ from move_base import calc_wheel_spd
 import pid as _pid_mod
 import config as cfg
 from hardware import Motor
-import tune_log
+import coop_master
 
 # 设置 PID 最大 PWM 值
 _pid_mod.PWM_MAX = cfg.PWM_MAX
@@ -1627,16 +1627,18 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
 # ====================== 初始化 LED 显示 ======================
 update_nav_led_display()
 gc.collect()
-tune_log.init(cfg.COOP_WIRELESS_BAUD)
+coop_master.init()
 gc.collect()
 
 # ---------------------- Ticker ----------------------
 pit_flag = False
+pit_count = 0
 
 # 定时中断回调：置位标志，通知主循环执行控制
 def time_pit_handler(_):
-    global pit_flag
+    global pit_flag, pit_count
     pit_flag = True
+    pit_count = (pit_count + 1) & 3
 
 pit1 = ticker(1)
 pit1.capture_list(enc_fl, enc_fr, enc_b)
@@ -1710,6 +1712,8 @@ def calc_speed_closed_loop():
     e_fl = int(raw_fl) * ENCODER_SPEED_SCALE
     e_fr = int(raw_fr) * ENCODER_SPEED_SCALE
     e_b = int(raw_b) * ENCODER_SPEED_SCALE
+    if (pit_count & 3) == 0:
+        coop_master.update_state(e_fl, e_fr, e_b, gyro_z)
     low_speed = abs(e_fl) <= Nav_Low_Speed_Th and abs(e_fr) <= Nav_Low_Speed_Th and abs(e_b) <= Nav_Low_Speed_Th
     update_nav_state_and_targets(yaw_deg, low_speed, gyro_z)
 
@@ -1866,25 +1870,6 @@ def calc_speed_closed_loop():
     # PWM 平滑输出
     set_three_pwm_smooth(u_fl, u_fr, u_b)
 
-    tune_log.send(
-        encoder_ms, nav_state_code(nav_state),
-        cam_has_target
-        | (line_crossed << 1)
-        | (push_dir_code << 2)
-        | (pushed_object_count << 5)
-        | (push_orbit_reached << 8)
-        | (push_turn_settle << 9)
-        | (low_speed << 10)
-        | (nav_ready_for_push << 11)
-        | (push_line_seen_once << 12),
-        utime.ticks_diff(encoder_ms, nav_transition_ms),
-        yaw_ref_deg, yaw_deg, yaw_err_deg, gyro_z,
-        cam_target_vx, cam_target_vy, turn_rate_cmd, vz_cmd,
-        cam_error_x, cam_error_y, encoder_dt_ms, push_orbit_progress_deg,
-        t_fl, t_fr, t_b, e_fl, e_fr, e_b,
-        last_pwm_fl, last_pwm_fr, last_pwm_b,
-    )
-
     return None
 
 try:
@@ -1916,6 +1901,17 @@ try:
         if pit_flag:
             pit_flag = False
             calc_speed_closed_loop()
+
+        coop_master.send_if_due(
+            now,
+            car_started,
+            nav_state_code(nav_state),
+            cam_target_seen(),
+            imu_runtime.read_yaw(),
+            cam_target_vx,
+            cam_target_vy,
+            last_turn_rate_cmd,
+        )
 
         if utime.ticks_diff(now, last_status_ms) >= 1000:
             led.toggle()

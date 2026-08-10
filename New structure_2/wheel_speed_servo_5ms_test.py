@@ -29,7 +29,7 @@ _FB_KI = const(8)
 _FB_KI_LOW = const(20)
 _LOW_TARGET_MAX = const(7)
 _I_LIMIT = const(18000)
-_PWM_LIMIT = const(50000)
+_PWM_LIMIT = const(60000)
 _PWM_STEP = const(4800)
 
 _pit_flag = False

@@ -1,7 +1,6 @@
 import gc
 import utime
 
-from machine import Pin
 from micropython import const
 from seekfree import WIRELESS_UART
 from smartcar import encoder, ticker
@@ -163,8 +162,6 @@ class WheelServo5msTest:
         gc.collect()
         wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
 
-        self.key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
-
         self.motor_fl = Motor(
             cfg.MOTOR_FL_PH,
             cfg.MOTOR_FL_PWM,
@@ -211,19 +208,13 @@ class WheelServo5msTest:
         self.pit.callback(_pit_handler)
         self.pit.start(_TICK_MS)
 
-    def check_exit(self):
-        if self.key_exit.value() == 0:
-            raise KeyboardInterrupt
-
     def wait_ms(self, delay_ms):
         end = utime.ticks_add(utime.ticks_ms(), delay_ms)
         while utime.ticks_diff(end, utime.ticks_ms()) > 0:
-            self.check_exit()
             utime.sleep_ms(1)
 
     def wait_tick(self):
         while _pit_pending == 0:
-            self.check_exit()
             utime.sleep_ms(1)
         return _take_pending()
 
@@ -445,7 +436,7 @@ class WheelServo5msTest:
         _log("=== FOLLOWER WHEEL SERVO 5MS TEST ===")
         _log("ENC=RAW/64 CTRL=FF1450+P300+I8/20 PWM_LIMIT=50000")
         _log("SMOOTH=0.4 STEP=4800 DIR_WAIT_MS=20 TICK_MS=5")
-        _log("W=0 FL,1 FR,2 B; C8=EMERGENCY STOP")
+        _log("W=0 FL,1 FR,2 B; NO KEY CONTROL; CTRL+C=STOP")
         _log("P0..9=ALL +/-5,10,19,30,35 P10..17=COMPOUND")
         profile = 0
         while profile < len(_TARGETS):

@@ -294,18 +294,20 @@ class GyroRateLoopTest:
             self.filter_ready = True
 
     def update_motors(self, rate_cmd):
-        if rate_cmd == 0.0 and (
-            self.mode == 0
-            or -_GYRO_STOP_RATE <= self.gyro_filt <= _GYRO_STOP_RATE
-        ):
-            if not self.brake_done:
+        if rate_cmd == 0.0:
+            if self.brake_done:
+                return
+            if (
+                self.mode == 0
+                or -_GYRO_STOP_RATE <= self.gyro_filt <= _GYRO_STOP_RATE
+            ):
                 self.reset_controllers()
                 self.move.speed_fl = 0.0
                 self.move.speed_fr = 0.0
                 self.move.speed_b = 0.0
                 self.stop_all()
                 self.brake_done = True
-            return
+                return
         self.vz_cmd = pid_mod.gyro_ctrl(
             self.gyro_pid,
             rate_cmd - self.gyro_filt,

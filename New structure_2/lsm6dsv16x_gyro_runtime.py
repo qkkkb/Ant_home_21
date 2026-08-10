@@ -221,7 +221,10 @@ class LSM6DSV16XYawRuntime:
         self.last_update_ms = now
 
         self.raw_gyro_z = self._read_raw_gyro_z()
-        self.gyro_z_deg = (self.raw_gyro_z - self.gyro_offset_z) * self.gyro_scale
+        self.gyro_z_deg += 0.25 * (
+            (self.raw_gyro_z - self.gyro_offset_z) * self.gyro_scale
+            - self.gyro_z_deg
+        )
 
         if -self.deadband_dps < self.gyro_z_deg < self.deadband_dps:
             self.gyro_z_deg = 0.0

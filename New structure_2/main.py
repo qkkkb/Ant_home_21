@@ -25,7 +25,6 @@ from coop_protocol import (
 speed_ctrl = _pid_mod.speed_ctrl
 gyro_ctrl = _pid_mod.gyro_ctrl
 speed_reset = _pid_mod.speed_reset
-speed_follow_guard = _pid_mod.speed_follow_guard
 follow_low_pwm = _pid_mod.follow_low_pwm
 
 
@@ -74,7 +73,7 @@ WHEEL_TARGET_STOP_EPS = 0.05
 WHEEL_TARGET_IDLE_EPS = 1.2
 WHEEL_TARGET_NORMAL_IDLE_EPS = 0.35
 FOLLOW_STATIC_LOCK_PWM_LIMIT = 12000
-FOLLOW_RUN_PWM_LIMIT = 50000
+FOLLOW_RUN_PWM_LIMIT = 60000
 _pid_mod.PWM_MAX = FOLLOW_RUN_PWM_LIMIT
 
 
@@ -1677,9 +1676,6 @@ def set_three_pwm_follow(u_fl, u_fr, u_b, t_fl, t_fr, t_b, stall_boost):
     last_pwm_fl = s_fl
     last_pwm_fr = s_fr
     last_pwm_b = s_b
-    pid_fl.output = s_fl
-    pid_fr.output = s_fr
-    pid_b.output = s_b
     return s_fl, s_fr, s_b
 
 
@@ -1721,29 +1717,11 @@ def wheel_target_idle(target):
 
 
 def speed_ctrl_follow(pid, actual_speed, target_speed):
-    if last_follow_mode_key and not (
-        (master_flags & MASTER_MOTION_FLAG_PUSH)
-        and (cam_target_vy >= 8.0 or cam_target_vy <= -8.0)
-    ):
-        pid.ki = 18.0 if last_follow_mode_key == 3 else 8.0
-    elif master_flags and (cam_target_vy >= 8.0 or cam_target_vy <= -8.0):
-        pid.ki = (18, 14)[last_follow_mode_key and pid is pid_b]
-    else:
-        pid.ki = 12.0
     if wheel_target_idle(target_speed):
         if not _orbit:
             speed_reset(pid)
             return 0.0
-    output = speed_ctrl(pid, actual_speed, target_speed)
-    output = speed_follow_guard(
-        pid,
-        output,
-        actual_speed,
-        target_speed,
-        WHEEL_TARGET_STOP_EPS,
-        not master_edge_until_ms,
-    )
-    return output
+    return speed_ctrl(pid, actual_speed, target_speed)
 
 
 def calibrate_gyro_before_launch():

@@ -44,44 +44,44 @@ def turn_ctrl(pid, err_yaw, motor_slow_flag=0):
 
 
 def speed_ctrl(pid, actual_speed, tar_spd):
-    """
-    速度环：默认使用 pid.kp / pid.ki。
-    修改 kp/kd/gama 后，建议调用 pid.init_c() 重算 c1/c2/c3。
-    """
+    if tar_spd == 0:
+        speed_reset(pid)
+        return 0
 
-    pid.err = tar_spd - actual_speed
-    pid.delta_tar = tar_spd - pid.tar_spd_last
+    if tar_spd * pid.tar_spd_last < 0:
+        pid.output = 0.0
 
-    pid.delta_ud = pid.c1 * pid.delta_ud + pid.c2 * pid.delta_tar + pid.c3 * pid.delta_tar_last
-    pid.output += pid.kp * (pid.err - pid.err_last) + pid.ki * pid.err + pid.delta_ud
+    error = tar_spd - actual_speed
+    integral_last = pid.output
+    ki = 20.0 if -7.0 <= tar_spd <= 7.0 else pid.ki
+    integral = integral_last + ki * error
+    if integral > 18000.0:
+        integral = 18000.0
+    elif integral < -18000.0:
+        integral = -18000.0
 
+    command = 1450.0 * tar_spd + pid.kp * error + integral
+    if command > PWM_MAX:
+        command = PWM_MAX
+        if error > 0:
+            integral = integral_last
+    elif command < -PWM_MAX:
+        command = -PWM_MAX
+        if error < 0:
+            integral = integral_last
+
+    if tar_spd > 0 and command < 0:
+        command = 0
+        integral = 0.0
+    elif tar_spd < 0 and command > 0:
+        command = 0
+        integral = 0.0
+
+    pid.err = error
+    pid.err_last = error
     pid.tar_spd_last = tar_spd
-    pid.delta_tar_last = pid.delta_tar
-    pid.err_last = pid.err
-
-    pwm_max = globals().get("PWM_MAX", 24000.0)
-    if pid.output > pwm_max:
-        pid.output = pwm_max
-    elif pid.output < -pwm_max:
-        pid.output = -pwm_max
-    return pid.output
-
-
-def speed_follow_guard(pid, output, actual_speed, target_speed, stop_eps, unload_wrong):
-    if -stop_eps <= target_speed <= stop_eps:
-        if actual_speed == 0:
-            return 0.0
-        return -pid.kp * actual_speed
-    if (
-        unload_wrong
-        and (
-            (output * target_speed < 0.0)
-            == (actual_speed * target_speed <= target_speed * target_speed)
-        )
-    ):
-        pid.output = pid.kp * pid.err
-        return pid.output
-    return output
+    pid.output = integral
+    return command
 
 
 def follow_low_pwm(cmd, target, speed_err, last_pwm, stop_eps, min_duty, smooth):

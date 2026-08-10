@@ -208,8 +208,8 @@ Nav_Return_Left_Speed = 20.0
 Nav_Return_Left_Start_Yaw = 10.0
 Nav_Return_Left_Max_Ms = 10000
 Nav_Return_Back_Speed = 16.0
-Nav_Return_Back_Ms = 1300
-Nav_Return_Shift_Hold_Ms = 650
+Nav_Return_Back_Ms = 250
+Nav_Return_Shift_Hold_Ms = 600
 Nav_Return_Turn_Dir = 1
 Nav_Return_Final_Back_Speed = 14.0
 Nav_Return_Final_Line_Extra_Ms = 60
@@ -1184,6 +1184,8 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 push_orbit_progress_deg += orbit_step
             push_orbit_last_ms = now
         if push_orbit_progress_deg >= orbit_stop_delta or yaw_err_abs <= Nav_Push_Orient_Ok_Yaw:
+            if not push_orbit_reached:
+                reset_speed_pid_state()
             if push_orbit_progress_deg > orbit_stop_delta:
                 push_orbit_progress_deg = orbit_stop_delta
             push_orbit_reached = True

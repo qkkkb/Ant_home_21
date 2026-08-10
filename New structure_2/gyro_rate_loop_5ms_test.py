@@ -21,6 +21,7 @@ _LOG_BUF_SIZE = const(192)
 
 _GYRO_EMA_ALPHA = 0.25
 _GYRO_DEADBAND = 0.8
+_GYRO_STOP_RATE = 4.0
 _GYRO_SIGN = 1.0
 _GYRO_SCALE = -1.0
 _CAL_SAMPLES = const(1000)
@@ -186,6 +187,8 @@ class GyroRateLoopTest:
         self.gyro_filt = 0.0
         self.filter_ready = False
         self.vz_cmd = 0.0
+        self.mode = 0
+        self.brake_done = False
         self.last_pwm_fl = 0
         self.last_pwm_fr = 0
         self.last_pwm_b = 0
@@ -255,6 +258,7 @@ class GyroRateLoopTest:
         self.vz_cmd = 0.0
 
     def set_gyro_mode(self, mode):
+        self.mode = mode
         self.gyro_pid.gyro_kp = _GYRO_KP
         if mode == 0:
             self.gyro_pid.gyro_ki = _GYRO_KI
@@ -290,6 +294,18 @@ class GyroRateLoopTest:
             self.filter_ready = True
 
     def update_motors(self, rate_cmd):
+        if rate_cmd == 0.0 and (
+            self.mode == 0
+            or -_GYRO_STOP_RATE <= self.gyro_filt <= _GYRO_STOP_RATE
+        ):
+            if not self.brake_done:
+                self.reset_controllers()
+                self.move.speed_fl = 0.0
+                self.move.speed_fr = 0.0
+                self.move.speed_b = 0.0
+                self.stop_all()
+                self.brake_done = True
+            return
         self.vz_cmd = pid_mod.gyro_ctrl(
             self.gyro_pid,
             rate_cmd - self.gyro_filt,
@@ -340,6 +356,7 @@ class GyroRateLoopTest:
         rate = _profile_rate(profile)
         self.stop_all()
         self.reset_controllers()
+        self.brake_done = False
         self.set_gyro_mode(_profile_mode(profile))
         self.send_profile(profile, rate)
         start_ms = utime.ticks_ms()
@@ -362,6 +379,7 @@ class GyroRateLoopTest:
         self.send_static("AUTO RUN CLEAR GROUND CTRL+C STOP")
         self.send_static("M 0=N15 1=P40 2=O95 3=S120 BOTH DIR")
         self.send_static("K .04/.004/12 .04/.004/16 .04/.002/28 .04/.002/18")
+        self.send_static("STOP N=NOW P/O/S=PI UNTIL 4DPS THEN RESET")
         self.send_static("R P MS T10 RAW10 FILT10 V100 WT10_3 E10_3 PWM3")
         self.send_static("KEEP STILL")
         utime.sleep_ms(_CAL_SETTLE_MS)

@@ -95,8 +95,8 @@ Follow_Distance_Far_Boost_Error = 6
 Follow_Distance_Far_Boost_Gain = 0.70
 Follow_Distance_Close_Gain = 0.70
 Follow_Distance_Close_Limit = 22.0
-Follow_Feedforward_Forward_Gain = 0.90
-Follow_Feedforward_Lateral_Gain = 2.80
+Follow_Feedforward_Forward_Gain = 1.00
+Follow_Feedforward_Lateral_Gain = 1.00
 Follow_Feedforward_Forward_Limit = 35.0
 Follow_Feedforward_Lateral_Limit = 42.0
 Follow_Push_Feedforward_Forward_Gain = 1.25
@@ -135,20 +135,13 @@ Follow_Spin_Wz_Feedforward_Limit = 120.0
 Follow_Spin_Turn_Rate_Limit = 128.0
 Follow_Pose_Angle_Deadband = 4
 Follow_Pose_Angle_Active_Error = 6
-Follow_Angle_XY_Mode_On_Error = 10
-Follow_Angle_XY_Mode_Full_Error = 42
-Follow_Angle_XY_Min_Scale = 0.38
-Follow_Spin_XY_Min_Scale = 0.94
-Follow_Orbit_XY_Max_Scale = 0.78
-Follow_Spin_XY_Max_Scale = 1.00
-Follow_Pose_Wheel_Target_Limit = 45.0
+Follow_Pose_Wheel_Target_Limit = 33.0
 Follow_Command_Ramp_Vx = 2.0
 Follow_Command_Ramp_Vy = 3.0
 Follow_Orbit_Command_Ramp_Vx = 20.0
 Follow_Orbit_Command_Ramp_Vy = 14.0
 Follow_Target_Lost_Hold_Ms = 450
-Follow_Orbit_Mode_FfWz_Off = 10.0
-Follow_Orbit_Mode_Exit_Ms = 200
+Follow_Orbit_Mode_Exit_Ms = 100
 Follow_Orbit_Mode_FfWz_Filter = 0.22
 Follow_Normal_Wz_Feedforward_Limit = 15.0
 Follow_Spin_Latch_Min_Wz = 26.0
@@ -211,6 +204,7 @@ master_edge_until_ms = 0
 last_hard_stop = False
 last_stall_count = 0
 last_stall_boost = False
+last_alloc_scale = 100
 follow_output_limit = FOLLOW_RUN_PWM_LIMIT
 
 
@@ -263,29 +257,6 @@ def angle_pose_mode_needed(error_angle, orbit_mode=False, spin_mode=False):
         error_angle >= Follow_Normal_Pose_Angle_Active_Error
         or error_angle <= -Follow_Normal_Pose_Angle_Active_Error
     )
-
-
-def angle_xy_lock_scale(error_angle, orbit_mode=False, spin_mode=False):
-    angle_abs = abs(error_angle)
-    if angle_abs <= Follow_Angle_XY_Mode_On_Error:
-        scale = 1.0
-    elif angle_abs >= Follow_Angle_XY_Mode_Full_Error:
-        scale = Follow_Angle_XY_Min_Scale
-    else:
-        span = Follow_Angle_XY_Mode_Full_Error - Follow_Angle_XY_Mode_On_Error
-        scale = 1.0 - (
-            (angle_abs - Follow_Angle_XY_Mode_On_Error)
-            * (1.0 - Follow_Angle_XY_Min_Scale)
-            / span
-        )
-    if spin_mode:
-        if scale < Follow_Spin_XY_Min_Scale:
-            scale = Follow_Spin_XY_Min_Scale
-        if scale > Follow_Spin_XY_Max_Scale:
-            scale = Follow_Spin_XY_Max_Scale
-    elif orbit_mode and scale > Follow_Orbit_XY_Max_Scale:
-        scale = Follow_Orbit_XY_Max_Scale
-    return scale
 
 
 def orbit_feedforward_position_scale(error_x, error_y):
@@ -427,8 +398,6 @@ def update_filtered_ff_wz(ff_wz, fresh_motion):
 
 def update_orbit_follow_mode(
     now,
-    ff_wz,
-    gyro_z,
     explicit_orbit,
     explicit_push,
     explicit_spin,
@@ -454,21 +423,7 @@ def update_orbit_follow_mode(
         orbit_follow_exit_since_ms = 0
         return False
 
-    if (
-        ff_wz > Follow_Orbit_Mode_FfWz_Off
-        or ff_wz < -Follow_Orbit_Mode_FfWz_Off
-        or gyro_z > 8
-        or gyro_z < -8
-        or not cam_target_seen()
-        or cam_error_angle > 8
-        or cam_error_angle < -8
-        or cam_error_y > 8
-        or cam_error_y < -8
-        or cam_error_x + cam_error_angle > 10
-        or cam_error_x + cam_error_angle < -10
-    ):
-        orbit_follow_exit_since_ms = 0
-    elif orbit_follow_exit_since_ms == 0:
+    if orbit_follow_exit_since_ms == 0:
         orbit_follow_exit_since_ms = now
     elif utime.ticks_diff(now, orbit_follow_exit_since_ms) >= Follow_Orbit_Mode_Exit_Ms:
         orbit_follow_active = False
@@ -556,15 +511,6 @@ def calc_follow_angle(error_angle, orbit_mode=False, spin_mode=False):
     )
 
 
-def add_feedforward_assist(base, feedforward, gain, limit):
-    assist = clamp(feedforward * gain, -limit, limit)
-    if base > 0.001 and assist < -0.001:
-        return base
-    if base < -0.001 and assist > 0.001:
-        return base
-    return base + assist
-
-
 def add_feedforward_direct(base, feedforward, gain, limit, conflict_scale=1.0):
     assist = clamp(feedforward * gain, -limit, limit)
     if base * assist < -0.001 and conflict_scale < 1.0:
@@ -603,20 +549,9 @@ def solve_follow_pose_twist(
         error_angle >= active_error
         or error_angle <= -active_error
     )
-    # Local pose features around the calibrated nonparallel formation.
-    cam_vx = error_x if push_mode else error_x + error_angle
+    # Vision already reports independent position and heading errors.
+    cam_vx = error_x
     cam_vy = error_y
-    if (
-        cam_vx > 0.0
-        and not push_mode
-        and not (
-            (master_flags & MASTER_MOTION_FLAG_RETURN)
-            and not (master_flags & MASTER_MOTION_FLAG_BACK)
-            and not orbit_mode
-            and not spin_mode
-        )
-    ):
-        cam_vy -= cam_vx * 5 // 13
     if orbit_mode or spin_mode:
         position_priority = (
             (angle_active and (not spin_mode))
@@ -736,7 +671,7 @@ def solve_follow_pose_twist(
                     else 1.0
                 ),
             )
-            wz = add_feedforward_assist(
+            wz = add_feedforward_direct(
                 wz,
                 ff_wz,
                 Follow_Normal_Wz_Feedforward_Gain,
@@ -779,96 +714,94 @@ def limit_pose_twist_for_wheels(
     vx,
     vy,
     vz,
-    preserve_pose_ratio,
-    preserve_turn,
-    preserve_vy,
+    ff_vx,
+    ff_vy,
+    ff_wz,
+    preserve_feedforward,
 ):
+    global last_alloc_scale
+
     if Follow_Pose_Wheel_Target_Limit <= 0.0:
+        last_alloc_scale = 100
         return vx, vy, vz
 
-    if preserve_vy:
-        # Keep translation near 37 units so Y and yaw retain wheel headroom.
-        pos_max = 43.0 - abs(vy) * 0.57735
-        vx = clamp(vx, -pos_max, pos_max)
-
-    if preserve_turn:
-        limit = Follow_Pose_Wheel_Target_Limit
-        if vz > limit:
-            vz = limit
-        elif vz < -limit:
-            vz = -limit
-        wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
-        wheel_max = wheel_fr
-        wheel_min = wheel_fr
-        if wheel_fl > wheel_max:
-            wheel_max = wheel_fl
-        if wheel_fl < wheel_min:
-            wheel_min = wheel_fl
-        if wheel_b > wheel_max:
-            wheel_max = wheel_b
-        if wheel_b < wheel_min:
-            wheel_min = wheel_b
-        scale = 1.0
-        if wheel_max > 0.001:
-            scale = (limit - vz) / wheel_max
-        if wheel_min < -0.001:
-            tmp = (-limit - vz) / wheel_min
-            if tmp < scale:
-                scale = tmp
-        if scale < 0.0:
-            scale = 0.0
-        if scale < 1.0:
-            vx *= scale
-            vy *= scale
-        return vx, vy, vz
-
-    if preserve_pose_ratio:
+    limit = Follow_Pose_Wheel_Target_Limit
+    if not preserve_feedforward:
         wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, vz)
         target_max = max_wheel_abs(wheel_fr, wheel_fl, wheel_b)
-        if target_max > Follow_Pose_Wheel_Target_Limit:
-            scale = Follow_Pose_Wheel_Target_Limit / target_max
+        if target_max > limit:
+            scale = limit / target_max
             vx *= scale
             vy *= scale
             vz *= scale
+            last_alloc_scale = int(scale * 100.0)
+        else:
+            last_alloc_scale = 100
         return vx, vy, vz
 
-    wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
-    pos_max = max_wheel_abs(wheel_fr, wheel_fl, wheel_b)
-    if pos_max > Follow_Pose_Wheel_Target_Limit:
-        pos_scale = Follow_Pose_Wheel_Target_Limit / pos_max
-        vx *= pos_scale
-        vy *= pos_scale
-        wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
+    # Match the master's rigid motion and yaw first.  Position feedback then
+    # enters the remaining wheel-speed headroom with one common scale, so X
+    # and Y correction keep their direction instead of suppressing each other.
+    base_vx = clamp(
+        (ff_vx + ff_wz * Follow_Target_Point_Wz_To_Vx)
+        * Follow_Feedforward_Forward_Gain,
+        -Follow_Feedforward_Forward_Limit,
+        Follow_Feedforward_Forward_Limit,
+    )
+    base_vy = clamp(
+        (ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy)
+        * Follow_Feedforward_Lateral_Gain,
+        -Follow_Feedforward_Lateral_Limit,
+        Follow_Feedforward_Lateral_Limit,
+    )
+    corr_vx = vx - base_vx
+    corr_vy = vy - base_vy
+    wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(base_vx, base_vy, vz)
+    base_max = max_wheel_abs(wheel_fr, wheel_fl, wheel_b)
+    base_scale = 1.0
+    if base_max > limit:
+        base_scale = limit / base_max
+        base_vx *= base_scale
+        base_vy *= base_scale
+        vz *= base_scale
+        wheel_fr *= base_scale
+        wheel_fl *= base_scale
+        wheel_b *= base_scale
 
-    if -0.001 < vz < 0.001:
-        return vx, vy, 0.0
-
-    if vz > 0.0:
-        remain = Follow_Pose_Wheel_Target_Limit - wheel_fr
-        tmp = Follow_Pose_Wheel_Target_Limit - wheel_fl
-        if tmp < remain:
-            remain = tmp
-        tmp = Follow_Pose_Wheel_Target_Limit - wheel_b
-        if tmp < remain:
-            remain = tmp
-        if remain < 0.0:
-            remain = 0.0
-        if vz > remain:
-            vz = remain
-    else:
-        remain = Follow_Pose_Wheel_Target_Limit + wheel_fr
-        tmp = Follow_Pose_Wheel_Target_Limit + wheel_fl
-        if tmp < remain:
-            remain = tmp
-        tmp = Follow_Pose_Wheel_Target_Limit + wheel_b
-        if tmp < remain:
-            remain = tmp
-        if remain < 0.0:
-            remain = 0.0
-        if -vz > remain:
-            vz = -remain
-
-    return vx, vy, vz
+    corr_fr, corr_fl, corr_b = pose_wheel_targets(corr_vx, corr_vy, 0.0)
+    scale = 1.0
+    if corr_fr > 0.001:
+        scale = (limit - wheel_fr) / corr_fr
+    elif corr_fr < -0.001:
+        scale = (-limit - wheel_fr) / corr_fr
+    if corr_fl > 0.001:
+        tmp = (limit - wheel_fl) / corr_fl
+        if tmp < scale:
+            scale = tmp
+    elif corr_fl < -0.001:
+        tmp = (-limit - wheel_fl) / corr_fl
+        if tmp < scale:
+            scale = tmp
+    if corr_b > 0.001:
+        tmp = (limit - wheel_b) / corr_b
+        if tmp < scale:
+            scale = tmp
+    elif corr_b < -0.001:
+        tmp = (-limit - wheel_b) / corr_b
+        if tmp < scale:
+            scale = tmp
+    if scale < 0.0:
+        scale = 0.0
+    elif scale > 1.0:
+        scale = 1.0
+    last_alloc_scale = int(
+        (scale if scale < base_scale else base_scale) * 100.0
+    )
+    return (
+        base_vx + corr_vx * scale,
+        base_vy + corr_vy * scale,
+        vz,
+    )
 
 
 def reset_turn_loop_state():
@@ -979,13 +912,13 @@ def debug_send_state(log_id, vz_cmd, gyro_z):
             log_id,
             master_flags,
             1 if last_follow_seen else 0,
-            1 if last_hard_stop else 0,
-            1 if last_stall_boost else 0,
-            1 if last_angle_priority_active else 0,
-            1 if master_edge_until_ms else 0,
+            last_follow_mode_key,
+            last_alloc_scale,
             cam_error_x,
             cam_error_y,
             cam_error_angle,
+            int(last_ff_vx),
+            int(last_ff_vy),
             int(cam_target_vx),
             int(cam_target_vy),
             int(vz_cmd),
@@ -1033,8 +966,6 @@ def update_follow_targets(gyro_z):
     filtered_wz = update_filtered_ff_wz(spin_ff_wz if spin_mode_active else ff_wz, fresh_motion)
     orbit_mode_active = update_orbit_follow_mode(
         now,
-        ff_wz,
-        gyro_z,
         explicit_orbit,
         explicit_push,
         spin_mode_active,
@@ -1131,21 +1062,6 @@ def update_follow_targets(gyro_z):
             spin_mode_active,
             push_follow_active,
         )
-        if (
-            not mode_key
-            and (
-                abs(ff_vy) >= 8
-                or abs(cam_error_y) >= 8
-                or (abs(cam_error_x) < 28 and body_vx * ff_vx > 120)
-            )
-        ):
-            vx -= body_vx
-            body_vx *= 0.20 if abs(cam_error_x) < 28 else (
-                0.65
-                if abs(cam_error_x) < 60 or abs(cam_error_y) >= 16
-                else 1.0
-            )
-            vx += body_vx
         if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
             vx -= body_vx * (1.0 - Follow_Static_Visual_Scale)
             vy -= body_vy * (1.0 - Follow_Static_Visual_Scale)
@@ -1202,20 +1118,6 @@ def update_follow_targets(gyro_z):
         vx = -22.0
         body_vx = vx
 
-    if seen and angle_pose_mode_active and not push_follow_active:
-        xy_scale = angle_xy_lock_scale(
-            cam_error_angle,
-            orbit_mode_active,
-            spin_mode_active,
-        )
-        if mode_key:
-            vx *= xy_scale
-            vy *= xy_scale
-        elif not (master_flags & MASTER_MOTION_FLAG_RETURN):
-            vx -= body_vx * (1.0 - xy_scale) * (
-                0.55 + 0.45 * (cam_error_x * cam_error_x < 3600)
-            )
-
     if push_follow_active and seen:
         vx = add_feedforward_direct(
             vx,
@@ -1243,20 +1145,6 @@ def update_follow_targets(gyro_z):
         turn_rate_cmd = calc_follow_angle(turn_rate_cmd * 1.50)
     else:
         push_yaw_target = None
-
-    if (
-        not (master_flags & MASTER_MOTION_FLAG_RETURN)
-        and
-        # RETURN reverse and BACK keep their own following behavior.
-        not (
-            mode_key
-            | angle_pose_mode_active
-            | (master_flags & (0xC0 if ff_vy > 0.0 else 0x40))
-        )
-        and cam_error_y * cam_error_y < 900
-        and body_vy * ff_vy < 0.0
-    ):
-        vy -= body_vy * 0.55
 
     if not mode_key and seen and master_edge_until_ms and not ff_vx and not ff_vy:
         vx = last_cmd_vx
@@ -1377,23 +1265,10 @@ def update_follow_targets(gyro_z):
         cam_target_vx,
         cam_target_vy,
         vz_cmd,
-        (priority_turn_mode and (not push_follow_active))
-        or (gyro_brake_active and (not master_edge_until_ms)),
-        (
-            priority_turn_mode
-            or (gyro_brake_active and (not master_edge_until_ms))
-            or (
-                not mode_key
-                and fresh_motion
-                and (
-                    master_vy >= Follow_Master_Edge_Delta
-                    or master_vy <= -Follow_Master_Edge_Delta
-                )
-            )
-        )
-        and not mode_key
-        and vz_cmd,
-        push_follow_active or (0 < master_flags < 8 and not mode_key),
+        ff_vx,
+        ff_vy,
+        follow_ff_wz,
+        seen and fresh_motion and 0 < master_flags < 8 and not mode_key,
     )
     last_cmd_vx = cam_target_vx
     last_cmd_vy = cam_target_vy
@@ -1423,6 +1298,7 @@ def reset_speed_outputs(keep_orbit_state=False):
     global spin_latched_wz, spin_latch_until_ms
     global last_follow_mode_key
     global master_edge_until_ms
+    global last_alloc_scale
 
     speed_reset(pid_fl)
     speed_reset(pid_fr)
@@ -1436,6 +1312,7 @@ def reset_speed_outputs(keep_orbit_state=False):
     last_cmd_vy = 0.0
     last_cmd_wz = 0.0
     last_angle_priority_active = False
+    last_alloc_scale = 100
     if not keep_orbit_state:
         orbit_follow_active = False
         orbit_follow_exit_since_ms = 0

@@ -1,135 +1,91 @@
-import gc
-import utime
-
+from machine import Pin
 from micropython import const
 from seekfree import WIRELESS_UART
 from smartcar import encoder, ticker
+import gc
+import utime
 
 import config as cfg
 from hardware import Motor
+from models import SpeedPID
+import pid as pid_mod
 
 
-_TICK_MS = const(5)
-_DIR_WAIT_MS = const(20)
-_RUN_MS = const(1200)
-_MEASURE_START_MS = const(300)
-_STOP_TEST_MS = const(600)
-_TRACE_MS = const(200)
-_SETTLE_SAMPLES = const(10)
+_MODE_PID = const(0)
+_MODE_FF_PI = const(1)
+_MODE_FF_ADAPTIVE = const(2)
+_MODE_COUNT = const(3)
 
-_PWM_LIMIT = const(50000)
-_PWM_STEP = const(4800)
+_PROFILE_COUNT = const(7)
+_RUN_MS = const(1000)
+_STOP_MS = const(600)
+_LOG_MS = const(20)
+_LOG_BUF_SIZE = const(192)
+
+# Candidate controller values. The test compares these against the production PID.
 _FF_GAIN = const(1450)
 _FB_KP = const(300)
 _FB_KI = const(8)
 _FB_KI_LOW = const(20)
 _LOW_TARGET_MAX = const(7)
 _I_LIMIT = const(18000)
+_PWM_LIMIT = const(50000)
+_PWM_STEP = const(4800)
 
-# Direct wheel targets: FL, FR, B.  Profiles 15..17 are the compound
-# targets that verified the master's orbit speed servo.
-_TARGETS = (
-    (5, 5, 5),
-    (-5, -5, -5),
-    (10, 10, 10),
-    (-10, -10, -10),
-    (19, 19, 19),
-    (-19, -19, -19),
-    (30, 30, 30),
-    (-30, -30, -30),
-    (35, 35, 35),
-    (-35, -35, -35),
-    (-19, 19, 0),
-    (19, -19, 0),
-    (10, 10, -20),
-    (-10, -10, 20),
-    (10, 10, 10),
-    (-4, -4, -33),
-    (3, 3, -25),
-    (7, 7, -20),
-)
-
-_pit_pending = 0
-wireless = None
+_pit_flag = False
 
 
 def _pit_handler(_):
-    global _pit_pending
-    if _pit_pending < 100:
-        _pit_pending += 1
+    global _pit_flag
+    _pit_flag = True
 
 
-def _take_pending():
-    global _pit_pending
-    count = _pit_pending
-    _pit_pending = 0
-    return count
+def _put_int(buf, pos, value):
+    value = int(value)
+    if value < 0:
+        buf[pos] = 45
+        pos += 1
+        value = -value
+
+    start = pos
+    if value == 0:
+        buf[pos] = 48
+        pos += 1
+    else:
+        while value:
+            buf[pos] = 48 + value % 10
+            value //= 10
+            pos += 1
+        end = pos - 1
+        while start < end:
+            temp = buf[start]
+            buf[start] = buf[end]
+            buf[end] = temp
+            start += 1
+            end -= 1
+
+    buf[pos] = 32
+    return pos + 1
 
 
-def _log(message):
-    print(message)
-    if wireless is not None:
-        try:
-            wireless.send_str(message)
-            wireless.send_str("\r\n")
-        except Exception:
-            pass
+def _reset_pid(pid):
+    pid.output = 0.0
+    pid.err = 0.0
+    pid.err_last = 0.0
+    pid.tar_spd_last = 0.0
+    pid.delta_tar = 0.0
+    pid.delta_tar_last = 0.0
+    pid.delta_ud = 0.0
+    pid.param_a = 0.0
+    pid.param_b = 0.0
 
 
-class _SpeedPI:
-    def __init__(self):
-        self.integral = 0.0
-        self.last_target = 0.0
-        self.error = 0.0
-        self.saturated = 0
-
-    def reset(self):
-        self.integral = 0.0
-        self.last_target = 0.0
-        self.error = 0.0
-        self.saturated = 0
-
-    def update(self, actual, target):
-        if target == 0:
-            self.reset()
-            return 0
-
-        if target * self.last_target < 0:
-            self.integral = 0.0
-
-        error = target - actual
-        integral_last = self.integral
-        ki = _FB_KI_LOW if -_LOW_TARGET_MAX <= target <= _LOW_TARGET_MAX else _FB_KI
-        integral = integral_last + ki * error
-        if integral > _I_LIMIT:
-            integral = _I_LIMIT
-        elif integral < -_I_LIMIT:
-            integral = -_I_LIMIT
-
-        command = _FF_GAIN * target + _FB_KP * error + integral
-        self.saturated = 0
-        if command > _PWM_LIMIT:
-            command = _PWM_LIMIT
-            self.saturated = 1
-            if error > 0:
-                integral = integral_last
-        elif command < -_PWM_LIMIT:
-            command = -_PWM_LIMIT
-            self.saturated = 1
-            if error < 0:
-                integral = integral_last
-
-        if target > 0 and command < 0:
-            command = 0
-            integral = 0.0
-        elif target < 0 and command > 0:
-            command = 0
-            integral = 0.0
-
-        self.error = error
-        self.last_target = target
-        self.integral = integral
-        return int(command)
+def _clamp_pwm(value):
+    if value > _PWM_LIMIT:
+        return _PWM_LIMIT
+    if value < -_PWM_LIMIT:
+        return -_PWM_LIMIT
+    return int(value)
 
 
 def _smooth_pwm(target, last):
@@ -140,15 +96,8 @@ def _smooth_pwm(target, last):
         target = last + _PWM_STEP
     elif delta < -_PWM_STEP:
         target = last - _PWM_STEP
-    mixed = last * 3 + target * 2
-    if mixed >= 0:
-        value = mixed // 5
-    else:
-        value = -((-mixed) // 5)
-    if value > _PWM_LIMIT:
-        return _PWM_LIMIT
-    if value < -_PWM_LIMIT:
-        return -_PWM_LIMIT
+    value = int(last * 0.6 + target * 0.4)
+    value = _clamp_pwm(value)
     if 0 < value < cfg.MOTOR_DUTY_MIN:
         return cfg.MOTOR_DUTY_MIN
     if -cfg.MOTOR_DUTY_MIN < value < 0:
@@ -156,11 +105,67 @@ def _smooth_pwm(target, last):
     return value
 
 
-class WheelServo5msTest:
+def _production_ctrl(pid, actual, target):
+    pid.param_b = 0.0
+    return pid_mod.speed_ctrl(pid, actual, target)
+
+
+def _candidate_ctrl(pid, actual, target, adaptive_ki):
+    if target == 0:
+        _reset_pid(pid)
+        return 0
+
+    if target * pid.tar_spd_last < 0:
+        pid.output = 0.0
+        pid.param_a = 0.0
+
+    error = target - actual
+    integral_last = pid.output
+    ki = _FB_KI
+    if adaptive_ki and abs(target) <= _LOW_TARGET_MAX:
+        ki = _FB_KI_LOW
+    integral = integral_last + ki * error
+    if integral > _I_LIMIT:
+        integral = _I_LIMIT
+    elif integral < -_I_LIMIT:
+        integral = -_I_LIMIT
+
+    feedforward = _FF_GAIN * target
+    command = feedforward + _FB_KP * error + integral
+
+    if command > _PWM_LIMIT:
+        command = _PWM_LIMIT
+        if error > 0:
+            integral = integral_last
+    elif command < -_PWM_LIMIT:
+        command = -_PWM_LIMIT
+        if error < 0:
+            integral = integral_last
+
+    if target > 0 and command < 0:
+        command = 0
+        integral = 0.0
+    elif target < 0 and command > 0:
+        command = 0
+        integral = 0.0
+
+    pid.err = error
+    pid.err_last = error
+    pid.tar_spd_last = target
+    pid.output = integral
+    pid.param_b = integral
+    return command
+
+
+class WheelSpeedServoTest:
     def __init__(self):
-        global wireless
         gc.collect()
-        wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
+        pid_mod.PWM_MAX = cfg.PWM_MAX
+
+        self.wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
+        self.log_buf = bytearray(_LOG_BUF_SIZE)
+        print("BOOT 1 WIRELESS")
+        self.send_static("BOOT 1 WIRELESS")
 
         self.motor_fl = Motor(
             cfg.MOTOR_FL_PH,
@@ -180,292 +185,324 @@ class WheelServo5msTest:
             freq=cfg.MOTOR_FREQ,
             invert=cfg.MOTOR_B_INVERT,
         )
-        self.motors = (self.motor_fl, self.motor_fr, self.motor_b)
+        print("BOOT 2 MOTORS")
+        self.send_static("BOOT 2 MOTORS")
 
-        self.enc_fl = encoder(cfg.ENC_FL_DIR, cfg.ENC_FL_PULSE, cfg.ENC_FL_INVERT)
-        self.enc_fr = encoder(cfg.ENC_FR_DIR, cfg.ENC_FR_PULSE, cfg.ENC_FR_INVERT)
-        self.enc_b = encoder(cfg.ENC_B_DIR, cfg.ENC_B_PULSE, cfg.ENC_B_INVERT)
+        self.enc_fl = encoder(
+            cfg.ENC_FL_DIR, cfg.ENC_FL_PULSE, cfg.ENC_FL_INVERT
+        )
+        self.enc_fr = encoder(
+            cfg.ENC_FR_DIR, cfg.ENC_FR_PULSE, cfg.ENC_FR_INVERT
+        )
+        self.enc_b = encoder(
+            cfg.ENC_B_DIR, cfg.ENC_B_PULSE, cfg.ENC_B_INVERT
+        )
+        print("BOOT 3 ENCODERS")
+        self.send_static("BOOT 3 ENCODERS")
 
-        self.pid_fl = _SpeedPI()
-        self.pid_fr = _SpeedPI()
-        self.pid_b = _SpeedPI()
-        self.pids = (self.pid_fl, self.pid_fr, self.pid_b)
+        self.pid_fl = SpeedPID()
+        self.pid_fr = SpeedPID()
+        self.pid_b = SpeedPID()
+        self.pid_fl.init_c()
+        self.pid_fr.init_c()
+        self.pid_b.init_c()
+        print("BOOT 4 CONTROL")
+        self.send_static("BOOT 4 CONTROL")
 
-        self.actual = [0.0, 0.0, 0.0]
-        self.pwm = [0, 0, 0]
-        self.sum_x100 = [0, 0, 0]
-        self.mae_x100 = [0, 0, 0]
-        self.min_x100 = [32767, 32767, 32767]
-        self.max_x100 = [-32768, -32768, -32768]
-        self.zero_count = [0, 0, 0]
-        self.wrong_count = [0, 0, 0]
-        self.sat_count = [0, 0, 0]
-        self.settle_count = [0, 0, 0]
-        self.settle_ms = [-1, -1, -1]
+        self.key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
+        self.key_start = Pin(cfg.BTN_START_PIN, Pin.IN, Pin.PULL_UP)
+        self.key_mode = Pin(cfg.BTN_MODE_PIN, Pin.IN, Pin.PULL_UP)
+        self.led = Pin(
+            cfg.LED_HB_PIN,
+            Pin.OUT,
+            pull=Pin.PULL_UP_47K,
+            value=True,
+        )
+        self.led_0 = Pin(cfg.LED_STRAIGHT_PIN, Pin.OUT, value=0)
+        self.led_1 = Pin(cfg.LED_TRANSLATE_PIN, Pin.OUT, value=0)
+        self.led_2 = Pin(cfg.LED_ROTATE_PIN, Pin.OUT, value=0)
 
         self.pit = ticker(1)
         self.pit.capture_list(self.enc_fl, self.enc_fr, self.enc_b)
         self.pit.callback(_pit_handler)
-        self.pit.start(_TICK_MS)
+        self.pit.start(cfg.TICK_PERIOD_MS)
+        print("BOOT 5 TICKER")
+        self.send_static("BOOT 5 TICKER")
 
-    def wait_ms(self, delay_ms):
-        end = utime.ticks_add(utime.ticks_ms(), delay_ms)
-        while utime.ticks_diff(end, utime.ticks_ms()) > 0:
-            utime.sleep_ms(1)
+        self.mode = _MODE_FF_ADAPTIVE
+        self.last_start = 1
+        self.last_mode = 1
+        self.last_encoder_ms = 0
+        self.encoder_dt_ms = cfg.TICK_PERIOD_MS
+        self.e_fl = 0.0
+        self.e_fr = 0.0
+        self.e_b = 0.0
+        self.last_pwm_fl = 0
+        self.last_pwm_fr = 0
+        self.last_pwm_b = 0
+        self.target_fl = 0
+        self.target_fr = 0
+        self.target_b = 0
+        self.running = False
+        self.exit_requested = False
+        self.update_leds()
 
-    def wait_tick(self):
-        while _pit_pending == 0:
-            utime.sleep_ms(1)
-        return _take_pending()
+    def send_static(self, value):
+        try:
+            self.wireless.send_str(value)
+            self.wireless.send_str("\r\n")
+        except Exception:
+            pass
 
-    def stop_motors(self):
-        self.motor_fl.pwm.duty_u16(0)
-        self.motor_fr.pwm.duty_u16(0)
-        self.motor_b.pwm.duty_u16(0)
-        self.pwm[0] = 0
-        self.pwm[1] = 0
-        self.pwm[2] = 0
+    def send_mode(self):
+        buf = self.log_buf
+        buf[0] = 77
+        buf[1] = 32
+        pos = _put_int(buf, 2, self.mode)
+        buf[pos - 1] = 13
+        buf[pos] = 10
+        try:
+            self.wireless.send_bytearray(buf, pos + 1)
+        except Exception:
+            pass
+
+    def send_log(self, profile, elapsed, t_fl, t_fr, t_b):
+        buf = self.log_buf
+        buf[0] = 84
+        buf[1] = 32
+        pos = _put_int(buf, 2, self.mode)
+        pos = _put_int(buf, pos, profile)
+        pos = _put_int(buf, pos, elapsed)
+        pos = _put_int(buf, pos, t_fl)
+        pos = _put_int(buf, pos, t_fr)
+        pos = _put_int(buf, pos, t_b)
+        pos = _put_int(buf, pos, self.e_fl * 10.0)
+        pos = _put_int(buf, pos, self.e_fr * 10.0)
+        pos = _put_int(buf, pos, self.e_b * 10.0)
+        pos = _put_int(buf, pos, self.last_pwm_fl)
+        pos = _put_int(buf, pos, self.last_pwm_fr)
+        pos = _put_int(buf, pos, self.last_pwm_b)
+        pos = _put_int(buf, pos, self.pid_fl.param_b)
+        pos = _put_int(buf, pos, self.pid_fr.param_b)
+        pos = _put_int(buf, pos, self.pid_b.param_b)
+        pos = _put_int(buf, pos, self.encoder_dt_ms)
+        buf[pos - 1] = 13
+        buf[pos] = 10
+        try:
+            self.wireless.send_bytearray(buf, pos + 1)
+        except Exception:
+            pass
+
+    def update_leds(self):
+        self.led_0.value(1 if self.mode == _MODE_PID else 0)
+        self.led_1.value(1 if self.mode == _MODE_FF_PI else 0)
+        self.led_2.value(1 if self.mode == _MODE_FF_ADAPTIVE else 0)
+
+    def stop_all(self):
+        self.motor_fl.duty(0)
+        self.motor_fr.duty(0)
+        self.motor_b.duty(0)
+        self.last_pwm_fl = 0
+        self.last_pwm_fr = 0
+        self.last_pwm_b = 0
 
     def reset_controllers(self):
-        self.pid_fl.reset()
-        self.pid_fr.reset()
-        self.pid_b.reset()
+        _reset_pid(self.pid_fl)
+        _reset_pid(self.pid_fr)
+        _reset_pid(self.pid_b)
 
-    def clear_encoder_counts(self):
-        self.enc_fl.get()
-        self.enc_fr.get()
-        self.enc_b.get()
-        _take_pending()
+    def check_exit(self):
+        return
+
+    def wait_tick(self):
+        global _pit_flag
+        while not _pit_flag:
+            self.check_exit()
+            utime.sleep_ms(1)
+        _pit_flag = False
+        self.read_encoders()
 
     def read_encoders(self):
-        self.actual[0] = int(self.enc_fl.get()) * 0.015625
-        self.actual[1] = int(self.enc_fr.get()) * 0.015625
-        self.actual[2] = int(self.enc_b.get()) * 0.015625
+        now = utime.ticks_ms()
+        raw_fl = self.enc_fl.get()
+        raw_fr = self.enc_fr.get()
+        raw_b = self.enc_b.get()
+        if self.last_encoder_ms:
+            dt_ms = utime.ticks_diff(now, self.last_encoder_ms)
+            if dt_ms <= 0:
+                dt_ms = cfg.TICK_PERIOD_MS
+        else:
+            dt_ms = cfg.TICK_PERIOD_MS
+        self.last_encoder_ms = now
+        self.encoder_dt_ms = dt_ms
+        scale = 0.015625
+        self.e_fl = int(raw_fl) * scale
+        self.e_fr = int(raw_fr) * scale
+        self.e_b = int(raw_b) * scale
 
-    def prepare_directions(self, targets):
-        self.stop_motors()
-        index = 0
-        while index < 3:
-            target = targets[index]
-            if target:
-                direction = 1 if target > 0 else 0
-                motor = self.motors[index]
-                if motor.invert:
-                    direction = 1 - direction
-                motor.ph.value(direction)
-            index += 1
-        self.wait_ms(_DIR_WAIT_MS)
-        self.clear_encoder_counts()
+    def controller_output(self, pid, actual, target):
+        return _candidate_ctrl(pid, actual, target, True)
 
-    def apply_pwm(self, targets):
-        index = 0
-        while index < 3:
-            target = targets[index]
-            if target == 0:
-                value = 0
-                self.pids[index].reset()
-            else:
-                value = self.pids[index].update(self.actual[index], target)
-                value = _smooth_pwm(value, self.pwm[index])
-            self.pwm[index] = value
-            self.motors[index].pwm.duty_u16(abs(value))
-            index += 1
+    def update_motors(self, t_fl, t_fr, t_b):
+        u_fl = self.controller_output(self.pid_fl, self.e_fl, t_fl)
+        u_fr = self.controller_output(self.pid_fr, self.e_fr, t_fr)
+        u_b = self.controller_output(self.pid_b, self.e_b, t_b)
 
-    def reset_stats(self):
-        index = 0
-        while index < 3:
-            self.sum_x100[index] = 0
-            self.mae_x100[index] = 0
-            self.min_x100[index] = 32767
-            self.max_x100[index] = -32768
-            self.zero_count[index] = 0
-            self.wrong_count[index] = 0
-            self.sat_count[index] = 0
-            self.settle_count[index] = 0
-            self.settle_ms[index] = -1
-            index += 1
+        self.last_pwm_fl = _smooth_pwm(u_fl, self.last_pwm_fl)
+        self.last_pwm_fr = _smooth_pwm(u_fr, self.last_pwm_fr)
+        self.last_pwm_b = _smooth_pwm(u_b, self.last_pwm_b)
+        self.motor_fl.duty(self.last_pwm_fl)
+        self.motor_fr.duty(self.last_pwm_fr)
+        self.motor_b.duty(self.last_pwm_b)
 
-    def update_stats(self, targets, elapsed):
-        index = 0
-        while index < 3:
-            target = targets[index]
-            actual = self.actual[index]
-            actual_x100 = int(actual * 100)
-            error_x100 = int(abs(target - actual) * 100)
-            self.sum_x100[index] += actual_x100
-            self.mae_x100[index] += error_x100
-            if actual_x100 < self.min_x100[index]:
-                self.min_x100[index] = actual_x100
-            if actual_x100 > self.max_x100[index]:
-                self.max_x100[index] = actual_x100
-            if actual_x100 == 0:
-                self.zero_count[index] += 1
-            elif target and actual * target < 0:
-                self.wrong_count[index] += 1
-            if self.pids[index].saturated:
-                self.sat_count[index] += 1
-
-            tolerance = 80
-            target_tol = abs(target) * 5
-            if target_tol > tolerance:
-                tolerance = target_tol
-            if error_x100 <= tolerance:
-                self.settle_count[index] += 1
-                if (
-                    self.settle_ms[index] < 0
-                    and self.settle_count[index] >= _SETTLE_SAMPLES
-                ):
-                    self.settle_ms[index] = elapsed - (_SETTLE_SAMPLES - 1) * _TICK_MS
-            else:
-                self.settle_count[index] = 0
-            index += 1
-
-    def trace(self, profile, elapsed, targets):
-        _log(
-            "S P=%d MS=%d T=%d,%d,%d E_X100=%d,%d,%d PWM=%d,%d,%d"
-            % (
-                profile,
-                elapsed,
-                targets[0],
-                targets[1],
-                targets[2],
-                int(self.actual[0] * 100),
-                int(self.actual[1] * 100),
-                int(self.actual[2] * 100),
-                self.pwm[0],
-                self.pwm[1],
-                self.pwm[2],
-            )
-        )
-
-    def report(self, profile, targets, samples, late_events, late_ticks):
-        index = 0
-        while index < 3:
-            average = self.sum_x100[index] // samples if samples else 0
-            mae = self.mae_x100[index] // samples if samples else 0
-            _log(
-                "R P=%d W=%d T=%d N=%d AVG_X100=%d MAE_X100=%d MIN_X100=%d MAX_X100=%d SET_MS=%d SAT=%d ZERO=%d WRONG=%d LATE=%d/%d"
-                % (
-                    profile,
-                    index,
-                    targets[index],
-                    samples,
-                    average,
-                    mae,
-                    self.min_x100[index],
-                    self.max_x100[index],
-                    self.settle_ms[index],
-                    self.sat_count[index],
-                    self.zero_count[index],
-                    self.wrong_count[index],
-                    late_events,
-                    late_ticks,
-                )
-            )
-            index += 1
-
-    def stop_test(self, profile):
-        self.stop_motors()
+    def wait_stopped(self):
+        self.stop_all()
         self.reset_controllers()
-        start = utime.ticks_ms()
-        stable = 0
-        stopped_ms = -1
-        late_events = 0
-        late_ticks = 0
-        while utime.ticks_diff(utime.ticks_ms(), start) < _STOP_TEST_MS:
-            pending = self.wait_tick()
-            if pending > 1:
-                late_events += 1
-                late_ticks += pending - 1
-            self.read_encoders()
-            elapsed = utime.ticks_diff(utime.ticks_ms(), start)
-            if (
-                -0.5 <= self.actual[0] <= 0.5
-                and -0.5 <= self.actual[1] <= 0.5
-                and -0.5 <= self.actual[2] <= 0.5
-            ):
-                stable += 1
-                if stopped_ms < 0 and stable >= 5:
-                    stopped_ms = elapsed - 20
-            else:
-                stable = 0
-        _log(
-            "Z P=%d STOP_MS=%d RES_X100=%d,%d,%d LATE=%d/%d"
-            % (
-                profile,
-                stopped_ms,
-                int(self.actual[0] * 100),
-                int(self.actual[1] * 100),
-                int(self.actual[2] * 100),
-                late_events,
-                late_ticks,
-            )
-        )
-
-    def run_profile(self, profile, targets):
-        self.prepare_directions(targets)
-        self.reset_controllers()
-        self.reset_stats()
-        start = utime.ticks_ms()
-        next_trace = start
-        samples = 0
-        late_events = 0
-        late_ticks = 0
-
-        while utime.ticks_diff(utime.ticks_ms(), start) < _RUN_MS:
-            pending = self.wait_tick()
-            if pending > 1:
-                late_events += 1
-                late_ticks += pending - 1
-            self.read_encoders()
-            now = utime.ticks_ms()
-            elapsed = utime.ticks_diff(now, start)
-            self.apply_pwm(targets)
-            if elapsed >= _MEASURE_START_MS:
-                self.update_stats(targets, elapsed)
-                samples += 1
-            if utime.ticks_diff(now, next_trace) >= 0:
-                next_trace = utime.ticks_add(now, _TRACE_MS)
-                self.trace(profile, elapsed, targets)
-
-        self.report(profile, targets, samples, late_events, late_ticks)
-        self.stop_test(profile)
+        self.last_encoder_ms = 0
+        end_ms = utime.ticks_add(utime.ticks_ms(), _STOP_MS)
+        while utime.ticks_diff(end_ms, utime.ticks_ms()) > 0:
+            self.wait_tick()
         gc.collect()
 
-    def run_all(self):
-        _log("=== FOLLOWER WHEEL SERVO 5MS TEST ===")
-        _log("ENC=RAW/64 CTRL=FF1450+P300+I8/20 PWM_LIMIT=50000")
-        _log("SMOOTH=0.4 STEP=4800 DIR_WAIT_MS=20 TICK_MS=5")
-        _log("W=0 FL,1 FR,2 B; NO KEY CONTROL; CTRL+C=STOP")
-        _log("P0..9=ALL +/-5,10,19,30,35 P10..17=COMPOUND")
-        profile = 0
-        while profile < len(_TARGETS):
-            targets = _TARGETS[profile]
-            _log("BEGIN P=%d T=%d,%d,%d" % (profile, targets[0], targets[1], targets[2]))
-            self.run_profile(profile, targets)
-            profile += 1
-        _log("=== TEST COMPLETE ===")
+    def set_targets(self, profile, elapsed):
+        if profile == 0:
+            self.target_fl = 19
+            self.target_fr = -19
+            self.target_b = 0
+        elif profile == 1:
+            self.target_fl = 10
+            self.target_fr = 10
+            self.target_b = 10
+        elif profile == 2:
+            self.target_fl = -4
+            self.target_fr = -4
+            self.target_b = -33
+        elif profile == 3:
+            self.target_fl = 3
+            self.target_fr = 3
+            self.target_b = -25
+        elif profile == 4:
+            self.target_fl = 7
+            self.target_fr = 7
+            self.target_b = -20
+        elif profile == 5 and elapsed < (_RUN_MS >> 1):
+            self.target_fl = 19
+            self.target_fr = -19
+            self.target_b = 0
+        elif profile == 5:
+            self.target_fl = -19
+            self.target_fr = 19
+            self.target_b = 0
+        elif elapsed < (_RUN_MS >> 1):
+            self.target_fl = 19
+            self.target_fr = -19
+            self.target_b = 0
+        else:
+            self.target_fl = 0
+            self.target_fr = 0
+            self.target_b = 0
+
+    def run_profile(self, profile):
+        self.stop_all()
+        self.reset_controllers()
+        self.last_encoder_ms = 0
+        start_ms = utime.ticks_ms()
+        next_log_ms = start_ms
+
+        while utime.ticks_diff(utime.ticks_ms(), start_ms) < _RUN_MS:
+            self.wait_tick()
+            now = utime.ticks_ms()
+            elapsed = utime.ticks_diff(now, start_ms)
+            self.set_targets(profile, elapsed)
+            self.update_motors(
+                self.target_fl,
+                self.target_fr,
+                self.target_b,
+            )
+            if utime.ticks_diff(now, next_log_ms) >= 0:
+                next_log_ms = utime.ticks_add(now, _LOG_MS)
+                self.send_log(
+                    profile,
+                    elapsed,
+                    self.target_fl,
+                    self.target_fr,
+                    self.target_b,
+                )
+
+        self.stop_all()
+
+    def run_selected(self):
+        self.running = True
+        self.send_static("RUN")
+        self.send_static("CLEAR GROUND")
+        try:
+            profile = 0
+            while profile < _PROFILE_COUNT:
+                self.run_profile(profile)
+                self.wait_stopped()
+                profile += 1
+            self.send_static("DONE")
+        finally:
+            self.stop_all()
+            self.reset_controllers()
+            self.running = False
+            gc.collect()
+
+    def poll_keys(self):
+        start = self.key_start.value()
+        mode = self.key_mode.value()
+
+        if self.last_mode == 1 and mode == 0 and not self.running:
+            utime.sleep_ms(20)
+            if self.key_mode.value() == 0:
+                self.mode = (self.mode + 1) % _MODE_COUNT
+                self.update_leds()
+                self.send_mode()
+
+        if self.last_start == 1 and start == 0 and not self.running:
+            utime.sleep_ms(20)
+            if self.key_start.value() == 0:
+                self.run_selected()
+
+        self.last_start = start
+        self.last_mode = mode
+
+    def run(self):
+        self.send_static("FOLLOWER WHEEL SERVO")
+        self.send_static("AUTO RUN NO KEY CTRL+C STOP")
+        self.send_static("P 0=F 1=SPIN 2=O1 3=O2 4=O3 5=REV 6=STOP")
+        self.send_static("K 1450 300 8 20 7 18000")
+        self.send_static("T M P MS T3 E10_3 PWM3 I3 DT")
+        self.send_mode()
+        self.run_selected()
+
 
 def main():
     tester = None
+    print("BOOT 0 START")
     try:
+        tester = WheelSpeedServoTest()
         gc.collect()
         try:
             gc.threshold(gc.mem_free() // 4 + gc.mem_alloc())
         except Exception:
             pass
-        tester = WheelServo5msTest()
-        tester.run_all()
+        tester.run()
     except KeyboardInterrupt:
-        _log("EMERGENCY STOP")
+        print("CTRL+C STOP")
+    except Exception as exc:
+        print("ERROR", exc)
+        if tester is not None:
+            tester.send_static("ERROR")
     finally:
         if tester is not None:
-            tester.stop_motors()
+            tester.stop_all()
             try:
                 tester.pit.stop()
             except Exception:
                 pass
-        _log("MOTORS STOPPED")
+            tester.send_static("EXIT")
+        print("MOTORS STOPPED")
 
 
 main()

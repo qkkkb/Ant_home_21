@@ -184,6 +184,10 @@ debug_log_last_ms = start_time
 last_pwm_fl = 0
 last_pwm_fr = 0
 last_pwm_b = 0
+last_enc_fl = 0.0
+last_enc_fr = 0.0
+last_enc_b = 0.0
+last_direction_pause_mask = 0
 last_turn_rate_cmd = 0.0
 last_follow_seen = False
 last_ff_vx = 0.0
@@ -905,26 +909,29 @@ def debug_send(text):
         pass
 
 
-def debug_send_state(log_id, vz_cmd, gyro_z):
+def debug_send_state(log_id, gyro_z):
+    global last_direction_pause_mask
+
     debug_send(
-        "S %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
+        "D %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
         % (
             log_id,
             master_flags,
             1 if last_follow_seen else 0,
-            last_follow_mode_key,
-            last_alloc_scale,
-            cam_error_x,
-            cam_error_y,
-            cam_error_angle,
-            int(last_ff_vx),
-            int(last_ff_vy),
-            int(cam_target_vx),
-            int(cam_target_vy),
-            int(vz_cmd),
+            last_direction_pause_mask,
+            int(move_cmd.speed_fl * 10.0),
+            int(move_cmd.speed_fr * 10.0),
+            int(move_cmd.speed_b * 10.0),
+            int(last_enc_fl * 10.0),
+            int(last_enc_fr * 10.0),
+            int(last_enc_b * 10.0),
+            int(last_pwm_fl),
+            int(last_pwm_fr),
+            int(last_pwm_b),
             int(gyro_z),
         )
     )
+    last_direction_pause_mask = 0
 
 
 def update_follow_targets(gyro_z):
@@ -1299,6 +1306,7 @@ def reset_speed_outputs(keep_orbit_state=False):
     global last_follow_mode_key
     global master_edge_until_ms
     global last_alloc_scale
+    global last_direction_pause_mask
 
     speed_reset(pid_fl)
     speed_reset(pid_fr)
@@ -1313,6 +1321,7 @@ def reset_speed_outputs(keep_orbit_state=False):
     last_cmd_wz = 0.0
     last_angle_priority_active = False
     last_alloc_scale = 100
+    last_direction_pause_mask = 0
     if not keep_orbit_state:
         orbit_follow_active = False
         orbit_follow_exit_since_ms = 0
@@ -1406,6 +1415,7 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
 
 def set_three_pwm_follow(u_fl, u_fr, u_b, t_fl, t_fr, t_b, stall_boost):
     global last_pwm_fl, last_pwm_fr, last_pwm_b
+    global last_direction_pause_mask
 
     s_fl = follow_channel_pwm(u_fl, t_fl, pid_fl.err, stall_boost, last_pwm_fl)
     s_fr = follow_channel_pwm(u_fr, t_fr, pid_fr.err, stall_boost, last_pwm_fr)
@@ -1413,17 +1423,33 @@ def set_three_pwm_follow(u_fl, u_fr, u_b, t_fl, t_fr, t_b, stall_boost):
     s_fl = clamp(s_fl, -follow_output_limit, follow_output_limit)
     s_fr = clamp(s_fr, -follow_output_limit, follow_output_limit)
     s_b = clamp(s_b, -follow_output_limit, follow_output_limit)
-    s_fl = motor_fl.duty(s_fl, MOTOR_DUTY_MIN)
-    s_fr = motor_fr.duty(s_fr, MOTOR_DUTY_MIN)
-    s_b = motor_b.duty(s_b, MOTOR_DUTY_MIN)
-    last_pwm_fl = s_fl
-    last_pwm_fr = s_fr
-    last_pwm_b = s_b
-    return s_fl, s_fr, s_b
+    u_fl = motor_fl.duty(s_fl, MOTOR_DUTY_MIN)
+    u_fr = motor_fr.duty(s_fr, MOTOR_DUTY_MIN)
+    u_b = motor_b.duty(s_b, MOTOR_DUTY_MIN)
+    wait_mask = 0
+    if s_fl and motor_fl.dir_wait_until:
+        wait_mask |= 1
+    if s_fr and motor_fr.dir_wait_until:
+        wait_mask |= 2
+    if s_b and motor_b.dir_wait_until:
+        wait_mask |= 4
+    if wait_mask:
+        motor_fl.duty(0)
+        motor_fr.duty(0)
+        motor_b.duty(0)
+        u_fl = 0
+        u_fr = 0
+        u_b = 0
+        last_direction_pause_mask |= wait_mask
+    last_pwm_fl = u_fl
+    last_pwm_fr = u_fr
+    last_pwm_b = u_b
+    return u_fl, u_fr, u_b
 
 
 def set_three_pwm_zero():
     global last_pwm_fl, last_pwm_fr, last_pwm_b
+    global last_direction_pause_mask
 
     motor_fl.duty(0)
     motor_fr.duty(0)
@@ -1431,6 +1457,7 @@ def set_three_pwm_zero():
     last_pwm_fl = 0
     last_pwm_fr = 0
     last_pwm_b = 0
+    last_direction_pause_mask = 0
     return 0, 0, 0
 
 
@@ -1529,6 +1556,7 @@ def calc_speed_closed_loop():
     global last_hard_stop
     global last_stall_count, last_stall_boost
     global cam_target_vx, cam_target_vy
+    global last_enc_fl, last_enc_fr, last_enc_b
 
     if not car_started:
         reset_speed_outputs()
@@ -1556,6 +1584,9 @@ def calc_speed_closed_loop():
     t_fl = move_cmd.speed_fl
     t_fr = move_cmd.speed_fr
     t_b = move_cmd.speed_b
+    last_enc_fl = e_fl
+    last_enc_fr = e_fr
+    last_enc_b = e_b
 
     if wheel_targets_zero(t_fl, t_fr, t_b):
         reset_speed_outputs(orbit_follow_active)
@@ -1589,7 +1620,7 @@ def calc_speed_closed_loop():
     now_log = utime.ticks_ms()
     if debug_due(now_log):
         log_id = now_log & 0x7FFF
-        debug_send_state(log_id, vz_cmd, gyro_z)
+        debug_send_state(log_id, gyro_z)
 
 key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
 key_start = Pin(cfg.BTN_START_PIN, Pin.IN, Pin.PULL_UP)

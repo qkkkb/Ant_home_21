@@ -164,6 +164,7 @@ Follow_Orbit_Settle_Hold_Ms = 160
 Follow_Orbit_Settle_Timeout_Ms = 1400
 Follow_Orbit_Mode_FfWz_Filter = 0.22
 Follow_Normal_Wz_Feedforward_Limit = 128.0
+Follow_Normal_Target_Point_Wz_Limit = 15.0
 Follow_Spin_Latch_Min_Wz = 26.0
 Follow_Spin_Command_Hold_Ms = 900
 Follow_Spin_Latch_Release_Angle = 3
@@ -706,8 +707,13 @@ def solve_follow_pose_twist(
                 Follow_Spin_Wz_Feedforward_Limit,
             )
         else:
-            target_ff_vx = ff_vx + ff_wz * Follow_Target_Point_Wz_To_Vx
-            target_ff_vy = ff_vy + ff_wz * Follow_Target_Point_Wz_To_Vy
+            point_wz = clamp(
+                ff_wz,
+                -Follow_Normal_Target_Point_Wz_Limit,
+                Follow_Normal_Target_Point_Wz_Limit,
+            )
+            target_ff_vx = ff_vx + point_wz * Follow_Target_Point_Wz_To_Vx
+            target_ff_vy = ff_vy + point_wz * Follow_Target_Point_Wz_To_Vy
             if master_flags & MASTER_MOTION_FLAG_BACK:
                 target_ff_vx *= 0.80
                 target_ff_vy *= 0.42

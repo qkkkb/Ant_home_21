@@ -225,7 +225,6 @@ orbit_follow_entry_until_ms = 0
 filtered_ff_wz = 0.0
 spin_latched_wz = 0.0
 spin_latch_until_ms = 0
-push_yaw_target = None
 last_follow_mode_key = -1
 master_edge_until_ms = 0
 last_hard_stop = False
@@ -360,7 +359,6 @@ def clear_cam_target_state():
     global orbit_follow_settle_since_ms, filtered_ff_wz
     global orbit_follow_entry_until_ms
     global spin_latched_wz, spin_latch_until_ms
-    global push_yaw_target
     global last_follow_mode_key
     global master_edge_until_ms
 
@@ -378,7 +376,6 @@ def clear_cam_target_state():
     filtered_ff_wz = 0.0
     spin_latched_wz = 0.0
     spin_latch_until_ms = 0
-    push_yaw_target = None
     last_follow_mode_key = -1
     master_edge_until_ms = 0
     cam_has_target = False
@@ -602,12 +599,15 @@ def solve_follow_pose_twist(
     orbit_mode,
     spin_mode,
     push_mode,
+    moving_visual_scale,
 ):
     vision_wz = (
-        0.0
+        calc_follow_angle(error_angle)
         if push_mode
         else calc_follow_angle(error_angle, orbit_mode, spin_mode)
     )
+    if orbit_mode or push_mode:
+        vision_wz *= moving_visual_scale
     if not orbit_mode and not spin_mode and not push_mode:
         vision_wz = clamp(
             vision_wz,
@@ -1061,7 +1061,6 @@ def update_follow_targets(gyro_z):
     global last_angle_priority_active
     global last_follow_mode_key, _orbit
     global master_edge_until_ms
-    global push_yaw_target
     global orbit_follow_entry_until_ms
 
     now = utime.ticks_ms()
@@ -1096,6 +1095,15 @@ def update_follow_targets(gyro_z):
         fresh_motion and (master_flags & MASTER_MOTION_FLAG_BACK),
     )
     orbit_settling = orbit_mode_active and orbit_follow_exit_since_ms != 0
+    moving_visual_scale = 1.0
+    if orbit_mode_active:
+        # Image-space angle and X error lag during fast yaw.  Keep commanded
+        # yaw feedforward intact and restore visual trim as body rate falls.
+        gyro_abs = abs(gyro_z)
+        if gyro_abs >= 120.0:
+            moving_visual_scale = 0.0
+        elif gyro_abs > 40.0:
+            moving_visual_scale = (120.0 - gyro_abs) / 80.0
     if orbit_mode_active:
         follow_ff_wz = 0.0 if orbit_settling else filtered_wz
     elif spin_mode_active:
@@ -1220,6 +1228,7 @@ def update_follow_targets(gyro_z):
             orbit_mode_active,
             spin_mode_active,
             push_follow_active,
+            moving_visual_scale,
         )
         if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
             vx -= body_vx * (1.0 - Follow_Static_Visual_Scale)
@@ -1253,7 +1262,7 @@ def update_follow_targets(gyro_z):
             vx = settle_ff_vx + body_vx
             vy = settle_ff_vy + body_vy
             turn_rate_cmd = clamp(
-                calc_follow_angle(cam_error_angle, True),
+                turn_rate_cmd,
                 -Follow_Orbit_Settle_Turn_Limit,
                 Follow_Orbit_Settle_Turn_Limit,
             )
@@ -1304,6 +1313,10 @@ def update_follow_targets(gyro_z):
                     body_vx *= correction_scale
             vx = alloc_base_vx + body_vx
             vy = alloc_base_vy + body_vy
+        if push_follow_active:
+            old_body_vx = body_vx
+            body_vx *= moving_visual_scale
+            vx += body_vx - old_body_vx
         if mode_key:
             position_priority_active = True
         last_angle_priority_active = angle_priority_active or angle_pose_mode_active
@@ -1356,32 +1369,31 @@ def update_follow_targets(gyro_z):
         body_vx = vx
 
     if push_follow_active and seen:
-        vx = add_feedforward_direct(
-            vx,
-            ff_vx,
-            Follow_Push_Feedforward_Forward_Gain,
+        # Keep the leader motion as the allocation base.  Visual correction
+        # may use the remaining wheel headroom but must not reduce that base.
+        alloc_base_vx = clamp(
+            ff_vx * Follow_Push_Feedforward_Forward_Gain,
+            -Follow_Push_Feedforward_Forward_Limit,
             Follow_Push_Feedforward_Forward_Limit,
-            0.66,
         )
-        vy = add_feedforward_direct(
+        alloc_base_vy = clamp(
             ff_vy * 1.20,
-            vy,
-            1.0,
+            -Follow_Lateral_Limit,
             Follow_Lateral_Limit,
-            0.0,
         )
-
-    if push_follow_active:
-        if push_yaw_target is None:
-            push_yaw_target = imu_runtime.yaw_deg
-            reset_turn_loop_state()
-        # Short PUSH stages use gyro-integrated relative yaw as the heading anchor.
-        turn_rate_cmd = (
-            imu_runtime.yaw_deg - push_yaw_target + 180.0
-        ) % 360.0 - 180.0
-        turn_rate_cmd = calc_follow_angle(turn_rate_cmd * 1.50)
-    else:
-        push_yaw_target = None
+        vx = alloc_base_vx + body_vx
+        vy = alloc_base_vy + body_vy
+        turn_rate_cmd = add_feedforward_direct(
+            turn_rate_cmd,
+            follow_ff_wz,
+            Follow_Orbit_Wz_Feedforward_Gain,
+            Follow_Orbit_Wz_Feedforward_Limit,
+        )
+        turn_rate_cmd = clamp(
+            turn_rate_cmd,
+            -Follow_Orbit_Turn_Rate_Limit,
+            Follow_Orbit_Turn_Rate_Limit,
+        )
 
     if not mode_key and seen and master_edge_until_ms and not ff_vx and not ff_vy:
         vx = last_cmd_vx
@@ -1507,13 +1519,19 @@ def update_follow_targets(gyro_z):
             else:
                 gyro_pid.gyro_ki = GYRO_KI
                 gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
-        elif gyro_brake_active and (orbit_settling or not mode_key):
+        elif gyro_brake_active and (
+            orbit_settling or push_follow_active or not mode_key
+        ):
             gyro_pid.gyro_kp = GYRO_KP
             gyro_pid.gyro_ki = 0.0
             gyro_pid.gyro_output_limit = (
                 GYRO_ORBIT_OUTPUT_LIMIT
                 if orbit_settling
-                else GYRO_OUTPUT_LIMIT
+                else (
+                    GYRO_PUSH_OUTPUT_LIMIT
+                    if push_follow_active
+                    else GYRO_OUTPUT_LIMIT
+                )
             )
         if turn_rate_cmd or gyro_brake_active:
             gyro_error = turn_rate_cmd - gyro_z
@@ -1522,6 +1540,7 @@ def update_follow_targets(gyro_z):
                     orbit_settling
                     or not mode_key
                     or (explicit_orbit and not explicit_push)
+                    or push_follow_active
                 )
                 and gyro_pid.err_last * gyro_error < 0.0
             ):
@@ -1547,7 +1566,12 @@ def update_follow_targets(gyro_z):
         alloc_base_vy,
         body_vx,
         body_vy,
-        seen and fresh_motion and 0 < master_flags < 8 and not mode_key,
+        seen
+        and fresh_motion
+        and (
+            (0 < master_flags < 8 and not mode_key)
+            or push_follow_active
+        ),
         explicit_orbit and not explicit_push,
     )
     last_cmd_vx = cam_target_vx

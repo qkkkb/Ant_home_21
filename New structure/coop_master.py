@@ -108,10 +108,12 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             flags |= _FLAG_ORBIT
             vx = cmd_vx
             vy = cmd_vy
+            wz = cmd_wz
         elif state_code == 7:
             flags |= _FLAG_PUSH
             vx = cmd_vx
             vy = cmd_vy
+            wz = cmd_wz
         elif state_code == 8 or state_code == 11 or state_code == 12 or state_code == 14:
             vx = cmd_vx * (0.90 if state_code == 12 else 1.0)
             vy = cmd_vy
@@ -125,6 +127,7 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             flags |= _FLAG_ORBIT
             vx = cmd_vx
             vy = cmd_vy
+            wz = cmd_wz
         elif state_code == 15:
             vx = 0.0
             vy = 0.0

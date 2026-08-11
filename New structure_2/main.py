@@ -1291,6 +1291,17 @@ def update_follow_targets(gyro_z):
                 damp_vy *= damping_scale
             body_vx += damp_vx
             body_vy += damp_vy
+            if normal_damping_active:
+                # Large yaw rate distorts the image-derived position axis.
+                # Let heading settle before trusting that correction again.
+                gyro_abs = abs(gyro_z)
+                if gyro_abs > 40.0:
+                    correction_scale = (
+                        0.0
+                        if gyro_abs >= 120.0
+                        else (120.0 - gyro_abs) / 80.0
+                    )
+                    body_vx *= correction_scale
             vx = alloc_base_vx + body_vx
             vy = alloc_base_vy + body_vy
         if mode_key:

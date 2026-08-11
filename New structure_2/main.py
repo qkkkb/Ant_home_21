@@ -47,7 +47,7 @@ GYRO_KI = 0.004
 GYRO_TURN_KI = 0.002
 GYRO_OUTPUT_LIMIT = 12.0
 GYRO_PUSH_OUTPUT_LIMIT = 16.0
-GYRO_ORBIT_OUTPUT_LIMIT = 8.0
+GYRO_ORBIT_OUTPUT_LIMIT = 10.0
 GYRO_SPIN_OUTPUT_LIMIT = 18.0
 GYRO_STOP_RATE = 4.0
 GYRO_NORMAL_STOP_RATE = 12.0
@@ -102,7 +102,7 @@ Follow_Feedforward_Forward_Limit = 35.0
 Follow_Feedforward_Lateral_Limit = 42.0
 Follow_Push_Feedforward_Forward_Gain = 1.25
 Follow_Push_Feedforward_Forward_Limit = 30.0
-Follow_Normal_Visual_Forward_Scale = 0.72
+Follow_Normal_Visual_Forward_Scale = 1.00
 Follow_Static_Visual_Scale = 0.60
 Follow_Close_Feedforward_Min_Scale = 0.25
 Follow_Hold_Feedforward_Gain = 1.70
@@ -124,8 +124,8 @@ Follow_Orbit_Feedforward_Close_Scale = 0.78
 Follow_Orbit_Close_Feedforward_Full_Error = 6
 Follow_Pose_Angle_Gain = -0.68
 Follow_Pose_Angle_Limit = 40.0
-Follow_Orbit_Pose_Angle_Gain = -0.55
-Follow_Orbit_Pose_Angle_Limit = 24.0
+Follow_Orbit_Pose_Angle_Gain = -0.75
+Follow_Orbit_Pose_Angle_Limit = 32.0
 Follow_Normal_Pose_Angle_Deadband = 8
 Follow_Normal_Pose_Angle_Active_Error = 18
 Follow_Spin_Target_Point_Wz_To_Vy = -0.08
@@ -135,6 +135,7 @@ Follow_Spin_Turn_Rate_Limit = 128.0
 Follow_Pose_Angle_Deadband = 4
 Follow_Pose_Angle_Active_Error = 6
 Follow_Pose_Wheel_Target_Limit = 33.0
+Follow_Normal_Wheel_Target_Limit = 38.0
 Follow_Normal_Correction_Reserve = 6.0
 Follow_Normal_Conflict_Start_Error = 4
 Follow_Normal_Conflict_Stop_Error = 16
@@ -824,14 +825,52 @@ def limit_pose_twist_for_wheels(
     feedback_vx,
     feedback_vy,
     preserve_feedforward,
+    preserve_rotation,
 ):
     global last_alloc_scale
 
-    if Follow_Pose_Wheel_Target_Limit <= 0.0:
+    limit = (
+        Follow_Normal_Wheel_Target_Limit
+        if preserve_feedforward
+        else Follow_Pose_Wheel_Target_Limit
+    )
+    if limit <= 0.0:
         last_alloc_scale = 100
         return vx, vy, vz
 
-    limit = Follow_Pose_Wheel_Target_Limit
+    if preserve_rotation:
+        # Relative heading is the orbit constraint.  Keep the gyro-loop yaw
+        # output and fit translation into the wheel headroom that remains.
+        vz = clamp(vz, -limit, limit)
+        wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
+        scale = 1.0
+        if wheel_fr > 0.001:
+            scale = (limit - vz) / wheel_fr
+        elif wheel_fr < -0.001:
+            scale = (-limit - vz) / wheel_fr
+        if wheel_fl > 0.001:
+            tmp = (limit - vz) / wheel_fl
+            if tmp < scale:
+                scale = tmp
+        elif wheel_fl < -0.001:
+            tmp = (-limit - vz) / wheel_fl
+            if tmp < scale:
+                scale = tmp
+        if wheel_b > 0.001:
+            tmp = (limit - vz) / wheel_b
+            if tmp < scale:
+                scale = tmp
+        elif wheel_b < -0.001:
+            tmp = (-limit - vz) / wheel_b
+            if tmp < scale:
+                scale = tmp
+        if scale < 0.0:
+            scale = 0.0
+        elif scale > 1.0:
+            scale = 1.0
+        last_alloc_scale = int(scale * 100.0)
+        return vx * scale, vy * scale, vz
+
     if not preserve_feedforward:
         wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, vz)
         target_max = max_wheel_abs(wheel_fr, wheel_fl, wheel_b)
@@ -1283,22 +1322,6 @@ def update_follow_targets(gyro_z):
                 damp_vy *= damping_scale
             body_vx += damp_vx
             body_vy += damp_vy
-            if normal_damping_active:
-                # Rotation corrupts image-horizontal correction first.  Keep
-                # distance correction so the follower cannot coast inward.
-                gyro_abs = abs(gyro_z)
-                if gyro_abs > 40.0:
-                    correction_scale = (
-                        0.40
-                        if gyro_abs >= 120.0
-                        else 0.40 + (120.0 - gyro_abs) * 0.60 / 80.0
-                    )
-                    if (
-                        (cam_error_x >= 40 or cam_error_x <= -40)
-                        and correction_scale < 0.50
-                    ):
-                        correction_scale = 0.50
-                    body_vx *= correction_scale
             vx = alloc_base_vx + body_vx
             vy = alloc_base_vy + body_vy
         if mode_key:
@@ -1541,6 +1564,7 @@ def update_follow_targets(gyro_z):
         body_vx,
         body_vy,
         seen and fresh_motion and 0 < master_flags < 8 and not mode_key,
+        explicit_orbit and not explicit_push,
     )
     last_cmd_vx = cam_target_vx
     last_cmd_vy = cam_target_vy

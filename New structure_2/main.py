@@ -46,6 +46,7 @@ GYRO_KP = 0.04
 GYRO_KI = 0.004
 GYRO_TURN_KI = 0.002
 GYRO_OUTPUT_LIMIT = 12.0
+GYRO_NORMAL_POSE_OUTPUT_LIMIT = 16.0
 GYRO_PUSH_OUTPUT_LIMIT = 16.0
 GYRO_ORBIT_OUTPUT_LIMIT = 10.0
 GYRO_SPIN_OUTPUT_LIMIT = 18.0
@@ -102,7 +103,7 @@ Follow_Feedforward_Forward_Limit = 35.0
 Follow_Feedforward_Lateral_Limit = 42.0
 Follow_Push_Feedforward_Forward_Gain = 1.25
 Follow_Push_Feedforward_Forward_Limit = 30.0
-Follow_Normal_Visual_Forward_Scale = 1.00
+Follow_Normal_Visual_Forward_Scale = 0.72
 Follow_Static_Visual_Scale = 0.60
 Follow_Close_Feedforward_Min_Scale = 0.25
 Follow_Hold_Feedforward_Gain = 1.70
@@ -135,7 +136,6 @@ Follow_Spin_Turn_Rate_Limit = 128.0
 Follow_Pose_Angle_Deadband = 4
 Follow_Pose_Angle_Active_Error = 6
 Follow_Pose_Wheel_Target_Limit = 33.0
-Follow_Normal_Wheel_Target_Limit = 38.0
 Follow_Normal_Correction_Reserve = 6.0
 Follow_Normal_Conflict_Start_Error = 4
 Follow_Normal_Conflict_Stop_Error = 16
@@ -829,15 +829,11 @@ def limit_pose_twist_for_wheels(
 ):
     global last_alloc_scale
 
-    limit = (
-        Follow_Normal_Wheel_Target_Limit
-        if preserve_feedforward
-        else Follow_Pose_Wheel_Target_Limit
-    )
-    if limit <= 0.0:
+    if Follow_Pose_Wheel_Target_Limit <= 0.0:
         last_alloc_scale = 100
         return vx, vy, vz
 
+    limit = Follow_Pose_Wheel_Target_Limit
     if preserve_rotation:
         # Relative heading is the orbit constraint.  Keep the gyro-loop yaw
         # output and fit translation into the wheel headroom that remains.
@@ -1322,6 +1318,17 @@ def update_follow_targets(gyro_z):
                 damp_vy *= damping_scale
             body_vx += damp_vx
             body_vy += damp_vy
+            if normal_damping_active:
+                # Large yaw rate distorts the image-derived position axis.
+                # Let heading settle before trusting that correction again.
+                gyro_abs = abs(gyro_z)
+                if gyro_abs > 40.0:
+                    correction_scale = (
+                        0.0
+                        if gyro_abs >= 120.0
+                        else (120.0 - gyro_abs) / 80.0
+                    )
+                    body_vx *= correction_scale
             vx = alloc_base_vx + body_vx
             vy = alloc_base_vy + body_vy
         if mode_key:
@@ -1523,7 +1530,7 @@ def update_follow_targets(gyro_z):
                 gyro_pid.gyro_output_limit = GYRO_ORBIT_OUTPUT_LIMIT
             elif angle_pose_mode_active:
                 gyro_pid.gyro_ki = GYRO_KI
-                gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
+                gyro_pid.gyro_output_limit = GYRO_NORMAL_POSE_OUTPUT_LIMIT
             else:
                 gyro_pid.gyro_ki = GYRO_KI
                 gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT

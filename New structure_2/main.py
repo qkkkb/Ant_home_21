@@ -1434,12 +1434,6 @@ def set_three_pwm_follow(u_fl, u_fr, u_b, t_fl, t_fr, t_b, stall_boost):
     if s_b and motor_b.dir_wait_until:
         wait_mask |= 4
     if wait_mask:
-        motor_fl.duty(0)
-        motor_fr.duty(0)
-        motor_b.duty(0)
-        u_fl = 0
-        u_fr = 0
-        u_b = 0
         last_direction_pause_mask |= wait_mask
     last_pwm_fl = u_fl
     last_pwm_fr = u_fr

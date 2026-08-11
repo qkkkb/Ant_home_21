@@ -48,7 +48,7 @@ GYRO_TURN_KI = 0.002
 GYRO_OUTPUT_LIMIT = 12.0
 GYRO_NORMAL_POSE_OUTPUT_LIMIT = 16.0
 GYRO_PUSH_OUTPUT_LIMIT = 16.0
-GYRO_ORBIT_OUTPUT_LIMIT = 10.0
+GYRO_ORBIT_OUTPUT_LIMIT = 16.0
 GYRO_SPIN_OUTPUT_LIMIT = 18.0
 GYRO_STOP_RATE = 4.0
 GYRO_NORMAL_STOP_RATE = 12.0
@@ -157,9 +157,6 @@ Follow_Target_Lost_Hold_Ms = 450
 Follow_Orbit_Settle_Position_Error = 6
 Follow_Orbit_Settle_Angle_Error = 6
 Follow_Orbit_Settle_Gyro_Rate = 5.0
-Follow_Orbit_Settle_Brake_Gyro_Rate = 30.0
-Follow_Orbit_Settle_Recovery_Gyro_Rate = 20.0
-Follow_Orbit_Settle_Brake_Hold_Ms = 100
 Follow_Orbit_Settle_XY_Limit = 14.0
 Follow_Orbit_Settle_Turn_Limit = 32.0
 Follow_Orbit_Settle_Hold_Ms = 160
@@ -222,7 +219,6 @@ last_angle_priority_active = False
 orbit_follow_active = False
 orbit_follow_exit_since_ms = 0
 orbit_follow_settle_since_ms = 0
-orbit_follow_brake_done = False
 orbit_follow_entry_until_ms = 0
 filtered_ff_wz = 0.0
 spin_latched_wz = 0.0
@@ -360,7 +356,6 @@ def clear_cam_target_state():
     global last_angle_priority_active
     global orbit_follow_active, orbit_follow_exit_since_ms
     global orbit_follow_settle_since_ms, filtered_ff_wz
-    global orbit_follow_brake_done
     global orbit_follow_entry_until_ms
     global spin_latched_wz, spin_latch_until_ms
     global push_yaw_target
@@ -377,7 +372,6 @@ def clear_cam_target_state():
     orbit_follow_active = False
     orbit_follow_exit_since_ms = 0
     orbit_follow_settle_since_ms = 0
-    orbit_follow_brake_done = False
     orbit_follow_entry_until_ms = 0
     filtered_ff_wz = 0.0
     spin_latched_wz = 0.0
@@ -455,57 +449,27 @@ def update_orbit_follow_mode(
 ):
     global orbit_follow_active, orbit_follow_exit_since_ms
     global orbit_follow_settle_since_ms
-    global orbit_follow_brake_done
 
     if explicit_spin or explicit_back:
         orbit_follow_active = False
         orbit_follow_exit_since_ms = orbit_follow_settle_since_ms = 0
-        orbit_follow_brake_done = False
         return False
     if explicit_push or explicit_orbit:
         orbit_follow_active = True
         orbit_follow_exit_since_ms = orbit_follow_settle_since_ms = 0
-        orbit_follow_brake_done = False
         return True
 
     if not orbit_follow_active:
         orbit_follow_exit_since_ms = orbit_follow_settle_since_ms = 0
-        orbit_follow_brake_done = False
         return False
 
     if orbit_follow_exit_since_ms == 0:
         orbit_follow_exit_since_ms = now
         orbit_follow_settle_since_ms = 0
-        orbit_follow_brake_done = False
         reset_turn_loop_state()
 
-    # Do not reopen position control on a single gyro zero crossing.
-    if orbit_follow_brake_done:
-        if (
-            gyro_z >= Follow_Orbit_Settle_Brake_Gyro_Rate
-            or gyro_z <= -Follow_Orbit_Settle_Brake_Gyro_Rate
-        ):
-            orbit_follow_brake_done = False
-            orbit_follow_settle_since_ms = 0
-    elif (
-        -Follow_Orbit_Settle_Recovery_Gyro_Rate
-        <= gyro_z
-        <= Follow_Orbit_Settle_Recovery_Gyro_Rate
-    ):
-        if orbit_follow_settle_since_ms == 0:
-            orbit_follow_settle_since_ms = now
-        elif (
-            utime.ticks_diff(now, orbit_follow_settle_since_ms)
-            >= Follow_Orbit_Settle_Brake_Hold_Ms
-        ):
-            orbit_follow_brake_done = True
-            orbit_follow_settle_since_ms = 0
-    else:
-        orbit_follow_settle_since_ms = 0
-
     settled = (
-        orbit_follow_brake_done
-        and cam_target_seen()
+        cam_target_seen()
         and -Follow_Orbit_Settle_Position_Error
         <= cam_error_x
         <= Follow_Orbit_Settle_Position_Error
@@ -527,7 +491,7 @@ def update_orbit_follow_mode(
             >= Follow_Orbit_Settle_Hold_Ms
         ):
             orbit_follow_active = False
-    elif orbit_follow_brake_done:
+    else:
         orbit_follow_settle_since_ms = 0
 
     if (
@@ -539,7 +503,6 @@ def update_orbit_follow_mode(
 
     if not orbit_follow_active:
         orbit_follow_exit_since_ms = orbit_follow_settle_since_ms = 0
-        orbit_follow_brake_done = False
     return orbit_follow_active
 
 
@@ -1251,8 +1214,9 @@ def update_follow_targets(gyro_z):
             body_vx *= Follow_Static_Visual_Scale
             body_vy *= Follow_Static_Visual_Scale
         if orbit_settling:
-            # Keep the master's translation while the orbit yaw is being
-            # braked; otherwise the follower waits in place and falls behind.
+            # Converge translation, relative angle and yaw rate together.
+            # Waiting for a low-rate pre-phase can repeatedly reset on an
+            # overshoot and leave the relative pose uncontrolled.
             settle_ff_vx = clamp(
                 ff_vx * Follow_Feedforward_Forward_Gain,
                 -Follow_Feedforward_Forward_Limit,
@@ -1263,29 +1227,23 @@ def update_follow_targets(gyro_z):
                 -Follow_Feedforward_Lateral_Limit,
                 Follow_Feedforward_Lateral_Limit,
             )
-            if not orbit_follow_brake_done:
-                body_vx = body_vy = 0.0
-                vx = settle_ff_vx
-                vy = settle_ff_vy
-                turn_rate_cmd = 0.0
-            else:
-                body_vx = clamp(
-                    vx,
-                    -Follow_Orbit_Settle_XY_Limit,
-                    Follow_Orbit_Settle_XY_Limit,
-                )
-                body_vy = clamp(
-                    vy,
-                    -Follow_Orbit_Settle_XY_Limit,
-                    Follow_Orbit_Settle_XY_Limit,
-                )
-                vx = settle_ff_vx + body_vx
-                vy = settle_ff_vy + body_vy
-                turn_rate_cmd = clamp(
-                    calc_follow_angle(cam_error_angle, True),
-                    -Follow_Orbit_Settle_Turn_Limit,
-                    Follow_Orbit_Settle_Turn_Limit,
-                )
+            body_vx = clamp(
+                vx,
+                -Follow_Orbit_Settle_XY_Limit,
+                Follow_Orbit_Settle_XY_Limit,
+            )
+            body_vy = clamp(
+                vy,
+                -Follow_Orbit_Settle_XY_Limit,
+                Follow_Orbit_Settle_XY_Limit,
+            )
+            vx = settle_ff_vx + body_vx
+            vy = settle_ff_vy + body_vy
+            turn_rate_cmd = clamp(
+                calc_follow_angle(cam_error_angle, True),
+                -Follow_Orbit_Settle_Turn_Limit,
+                Follow_Orbit_Settle_Turn_Limit,
+            )
         alloc_base_vx = vx - body_vx
         alloc_base_vy = vy - body_vy
         normal_damping_active = (
@@ -1605,7 +1563,6 @@ def reset_speed_outputs(keep_orbit_state=False):
     global last_angle_priority_active
     global orbit_follow_active, orbit_follow_exit_since_ms
     global orbit_follow_settle_since_ms, filtered_ff_wz
-    global orbit_follow_brake_done
     global orbit_follow_entry_until_ms
     global spin_latched_wz, spin_latch_until_ms
     global last_follow_mode_key
@@ -1631,7 +1588,6 @@ def reset_speed_outputs(keep_orbit_state=False):
         orbit_follow_active = False
         orbit_follow_exit_since_ms = 0
         orbit_follow_settle_since_ms = 0
-        orbit_follow_brake_done = False
         orbit_follow_entry_until_ms = 0
         filtered_ff_wz = 0.0
         last_follow_mode_key = -1

@@ -50,6 +50,7 @@ GYRO_PUSH_OUTPUT_LIMIT = 16.0
 GYRO_ORBIT_OUTPUT_LIMIT = 28.0
 GYRO_SPIN_OUTPUT_LIMIT = 18.0
 GYRO_STOP_RATE = 4.0
+GYRO_NORMAL_STOP_RATE = 12.0
 GYRO_ANGLE_PRIORITY_MIN_CMD = 6.5
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True
 GYRO_CALIBRATE_SAMPLES = 1000
@@ -139,6 +140,8 @@ Follow_Pose_Wheel_Target_Limit = 33.0
 Follow_Normal_Correction_Reserve = 6.0
 Follow_Normal_Conflict_Start_Error = 4
 Follow_Normal_Conflict_Stop_Error = 16
+Follow_Normal_Reverse_Brake_Target = 8.0
+Follow_Normal_Reverse_Release_Speed = 3.0
 Follow_Command_Ramp_Vx = 2.0
 Follow_Command_Ramp_Vy = 3.0
 Follow_Orbit_Command_Ramp_Vx = 2.0
@@ -1247,6 +1250,29 @@ def update_follow_targets(gyro_z):
         vy_limit = follow_limit(vy_limit, ff_vy)
     vx = clamp(vx, -vx_limit, vx_limit)
     vy = clamp(vy, -vy_limit, vy_limit)
+    if seen and fresh_motion and 0 < master_flags < MASTER_MOTION_FLAG_ORBIT:
+        actual_body_vx = (last_enc_fl - last_enc_fr) * 0.5773503
+        actual_body_vy = (
+            last_enc_fl + last_enc_fr - 2.0 * last_enc_b
+        ) / 3.0
+        if (
+            vx * actual_body_vx < -0.001
+            and abs(actual_body_vx) > Follow_Normal_Reverse_Release_Speed
+        ):
+            vx = clamp(
+                vx,
+                -Follow_Normal_Reverse_Brake_Target,
+                Follow_Normal_Reverse_Brake_Target,
+            )
+        if (
+            vy * actual_body_vy < -0.001
+            and abs(actual_body_vy) > Follow_Normal_Reverse_Release_Speed
+        ):
+            vy = clamp(
+                vy,
+                -Follow_Normal_Reverse_Brake_Target,
+                Follow_Normal_Reverse_Brake_Target,
+            )
     if master_edge_until_ms and not mode_key:
         vx_ramp = 14.0
         vy_ramp = 20.0
@@ -1282,18 +1308,18 @@ def update_follow_targets(gyro_z):
     gyro_brake_active = False
     if -0.001 < turn_rate_cmd < 0.001:
         turn_rate_cmd = 0.0
+        gyro_stop_rate = (
+            GYRO_STOP_RATE
+            if priority_turn_mode
+            else GYRO_NORMAL_STOP_RATE
+        )
         if (
             ENABLE_GYRO_LOOP
             and gyro_pid is not None
-            and gyro_pid.gyro_output_limit != GYRO_OUTPUT_LIMIT
+            and (priority_turn_mode or seen)
             and (
-                last_turn_rate_cmd
-                or gyro_pid.output
-                or gyro_pid.err_last
-            )
-            and (
-                gyro_z >= GYRO_STOP_RATE
-                or gyro_z <= -GYRO_STOP_RATE
+                gyro_z >= gyro_stop_rate
+                or gyro_z <= -gyro_stop_rate
             )
         ):
             gyro_brake_active = True
@@ -1333,8 +1359,19 @@ def update_follow_targets(gyro_z):
             else:
                 gyro_pid.gyro_ki = GYRO_KI
                 gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
+        elif gyro_brake_active and not mode_key:
+            gyro_pid.gyro_kp = GYRO_KP
+            gyro_pid.gyro_ki = 0.0
+            gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
         if turn_rate_cmd or gyro_brake_active:
-            vz_cmd = gyro_ctrl(gyro_pid, turn_rate_cmd - gyro_z)
+            gyro_error = turn_rate_cmd - gyro_z
+            if (
+                not mode_key
+                and gyro_pid.err_last * gyro_error < 0.0
+            ):
+                gyro_pid.output = 0.0
+                gyro_pid.err_last = 0.0
+            vz_cmd = gyro_ctrl(gyro_pid, gyro_error)
         else:
             gyro_pid.gyro_kp = GYRO_KP
             gyro_pid.gyro_ki = GYRO_KI
@@ -1456,11 +1493,11 @@ def follow_start_pwm_for_target(target, stall_boost):
 
 def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
     fast_reverse = (
-        (not _orbit or (master_flags & MASTER_MOTION_FLAG_PUSH))
-        and (
-            master_edge_until_ms
-            or last_ff_wz >= Follow_Spin_Latch_Min_Wz
-            or last_ff_wz <= -Follow_Spin_Latch_Min_Wz
+        last_follow_mode_key == 3
+        or (
+            _orbit
+            and (master_flags & MASTER_MOTION_FLAG_PUSH)
+            and master_edge_until_ms
         )
     )
     min_pwm = follow_start_pwm_for_target(target, stall_boost)

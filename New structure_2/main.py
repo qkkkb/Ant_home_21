@@ -124,10 +124,8 @@ Follow_Orbit_Feedforward_Close_Scale = 0.78
 Follow_Orbit_Close_Feedforward_Full_Error = 6
 Follow_Pose_Angle_Gain = -0.68
 Follow_Pose_Angle_Limit = 40.0
-Follow_Orbit_Pose_Angle_Gain = -1.35
-Follow_Orbit_Pose_Angle_Limit = 74.0
-Follow_Orbit_Pose_Angle_Min_Error = 14
-Follow_Orbit_Pose_Angle_Min_Turn = 30.0
+Follow_Orbit_Pose_Angle_Gain = -0.35
+Follow_Orbit_Pose_Angle_Limit = 18.0
 Follow_Normal_Pose_Angle_Deadband = 8
 Follow_Normal_Pose_Angle_Active_Error = 18
 Follow_Spin_Target_Point_Wz_To_Vy = -0.08
@@ -141,6 +139,8 @@ Follow_Normal_Correction_Reserve = 6.0
 Follow_Normal_Conflict_Start_Error = 4
 Follow_Normal_Conflict_Stop_Error = 16
 Follow_Normal_Velocity_Damping = 0.35
+Follow_Static_Velocity_Damping = 0.85
+Follow_Orbit_Velocity_Damping = 0.55
 Follow_Normal_Reverse_Release_Speed = 3.0
 Follow_Command_Ramp_Vx = 2.0
 Follow_Command_Ramp_Vy = 3.0
@@ -597,20 +597,11 @@ def calc_follow_angle(error_angle, orbit_mode=False, spin_mode=False):
     if error_angle == 0.0:
         return 0.0
     if orbit_mode:
-        out = clamp(
+        return clamp(
             error_angle * Follow_Orbit_Pose_Angle_Gain,
             -Follow_Orbit_Pose_Angle_Limit,
             Follow_Orbit_Pose_Angle_Limit,
         )
-        if (
-            error_angle >= Follow_Orbit_Pose_Angle_Min_Error
-            or error_angle <= -Follow_Orbit_Pose_Angle_Min_Error
-        ):
-            if 0.0 < out < Follow_Orbit_Pose_Angle_Min_Turn:
-                out = Follow_Orbit_Pose_Angle_Min_Turn
-            elif -Follow_Orbit_Pose_Angle_Min_Turn < out < 0.0:
-                out = -Follow_Orbit_Pose_Angle_Min_Turn
-        return out
     if spin_mode:
         error_angle *= 0.35 if last_ff_wz else 0.60
     return clamp(
@@ -1260,16 +1251,26 @@ def update_follow_targets(gyro_z):
                 )
         alloc_base_vx = vx - body_vx
         alloc_base_vy = vy - body_vy
-        if not mode_key and master_flags < MASTER_MOTION_FLAG_ORBIT:
+        normal_damping_active = (
+            not mode_key and master_flags < MASTER_MOTION_FLAG_ORBIT
+        )
+        orbit_damping_active = explicit_orbit and not explicit_push
+        if normal_damping_active or orbit_damping_active:
             # Dampen motion relative to the preserved master feedforward.
             actual_body_vx = (last_enc_fl - last_enc_fr) * 0.5773503
             actual_body_vy = (
                 last_enc_fl + last_enc_fr - 2.0 * last_enc_b
             ) / 3.0
-            damp_vx = -Follow_Normal_Velocity_Damping * (
+            if orbit_damping_active:
+                velocity_damping = Follow_Orbit_Velocity_Damping
+            elif follow_output_limit < FOLLOW_RUN_PWM_LIMIT:
+                velocity_damping = Follow_Static_Velocity_Damping
+            else:
+                velocity_damping = Follow_Normal_Velocity_Damping
+            damp_vx = -velocity_damping * (
                 actual_body_vx - alloc_base_vx
             )
-            damp_vy = -Follow_Normal_Velocity_Damping * (
+            damp_vy = -velocity_damping * (
                 actual_body_vy - alloc_base_vy
             )
             damping_max = abs(damp_vx)
@@ -1282,17 +1283,17 @@ def update_follow_targets(gyro_z):
                 damp_vy *= damping_scale
             body_vx += damp_vx
             body_vy += damp_vy
-            # Rotation corrupts image-horizontal correction first.  Keep the
-            # independent distance correction so the follower cannot coast
-            # into the master while yaw rate is high.
-            gyro_abs = abs(gyro_z)
-            if gyro_abs > 40.0:
-                correction_scale = (
-                    0.0
-                    if gyro_abs >= 120.0
-                    else (120.0 - gyro_abs) / 80.0
-                )
-                body_vx *= correction_scale
+            if normal_damping_active:
+                # Rotation corrupts image-horizontal correction first.  Keep
+                # distance correction so the follower cannot coast inward.
+                gyro_abs = abs(gyro_z)
+                if gyro_abs > 40.0:
+                    correction_scale = (
+                        0.0
+                        if gyro_abs >= 120.0
+                        else (120.0 - gyro_abs) / 80.0
+                    )
+                    body_vx *= correction_scale
             vx = alloc_base_vx + body_vx
             vy = alloc_base_vy + body_vy
         if mode_key:
@@ -1502,7 +1503,11 @@ def update_follow_targets(gyro_z):
         if turn_rate_cmd or gyro_brake_active:
             gyro_error = turn_rate_cmd - gyro_z
             if (
-                (orbit_settling or not mode_key)
+                (
+                    orbit_settling
+                    or not mode_key
+                    or (explicit_orbit and not explicit_push)
+                )
                 and gyro_pid.err_last * gyro_error < 0.0
             ):
                 gyro_pid.output = 0.0
@@ -1624,8 +1629,7 @@ def follow_start_pwm_for_target(target, stall_boost):
         return 8800
     if (
         follow_output_limit < FOLLOW_RUN_PWM_LIMIT
-        and -0.001 < cam_target_vx < 0.001
-        and -0.001 < cam_target_vy < 0.001
+        and target_abs < 2.8
     ):
         return 2600
     return 3600 if target_abs < 2.8 else 6200
@@ -1643,6 +1647,10 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
     min_pwm = follow_start_pwm_for_target(target, stall_boost)
     if min_pwm <= 0:
         if not _orbit:
+            if follow_output_limit < FOLLOW_RUN_PWM_LIMIT and cmd:
+                if last_pwm * cmd < 0:
+                    return 0
+                return smooth_value(cmd, last_pwm)
             return 0
         return follow_low_pwm(
             cmd,
@@ -1742,6 +1750,18 @@ def speed_ctrl_follow(pid, actual_speed, target_speed):
     if wheel_target_idle(target_speed):
         if not _orbit:
             speed_reset(pid)
+            if (
+                follow_output_limit < FOLLOW_RUN_PWM_LIMIT
+                and (
+                    actual_speed > WHEEL_TARGET_NORMAL_IDLE_EPS
+                    or actual_speed < -WHEEL_TARGET_NORMAL_IDLE_EPS
+                )
+            ):
+                return clamp(
+                    -actual_speed * 1450.0,
+                    -6000.0,
+                    6000.0,
+                )
             return 0.0
     return speed_ctrl(pid, actual_speed, target_speed)
 

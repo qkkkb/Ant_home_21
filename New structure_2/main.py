@@ -150,8 +150,11 @@ Follow_Target_Lost_Hold_Ms = 450
 Follow_Orbit_Settle_Position_Error = 6
 Follow_Orbit_Settle_Angle_Error = 6
 Follow_Orbit_Settle_Gyro_Rate = 5.0
+Follow_Orbit_Settle_Brake_Gyro_Rate = 30.0
+Follow_Orbit_Settle_XY_Limit = 14.0
+Follow_Orbit_Settle_Turn_Limit = 20.0
 Follow_Orbit_Settle_Hold_Ms = 160
-Follow_Orbit_Settle_Timeout_Ms = 700
+Follow_Orbit_Settle_Timeout_Ms = 1000
 Follow_Orbit_Mode_FfWz_Filter = 0.22
 Follow_Normal_Wz_Feedforward_Limit = 15.0
 Follow_Spin_Latch_Min_Wz = 26.0
@@ -454,6 +457,7 @@ def update_orbit_follow_mode(
     if orbit_follow_exit_since_ms == 0:
         orbit_follow_exit_since_ms = now
         orbit_follow_settle_since_ms = 0
+        reset_turn_loop_state()
 
     settled = (
         cam_target_seen()
@@ -1153,6 +1157,35 @@ def update_follow_targets(gyro_z):
             vy -= body_vy * (1.0 - Follow_Static_Visual_Scale)
             body_vx *= Follow_Static_Visual_Scale
             body_vy *= Follow_Static_Visual_Scale
+        if orbit_settling:
+            if (
+                gyro_z >= Follow_Orbit_Settle_Brake_Gyro_Rate
+                or gyro_z <= -Follow_Orbit_Settle_Brake_Gyro_Rate
+            ):
+                vx = vy = body_vx = body_vy = 0.0
+                turn_rate_cmd = 0.0
+            else:
+                vx = clamp(
+                    vx,
+                    -Follow_Orbit_Settle_XY_Limit,
+                    Follow_Orbit_Settle_XY_Limit,
+                )
+                vy = clamp(
+                    vy,
+                    -Follow_Orbit_Settle_XY_Limit,
+                    Follow_Orbit_Settle_XY_Limit,
+                )
+                body_vx = vx
+                body_vy = vy
+                turn_rate_cmd = clamp(
+                    soft_deadband(
+                        cam_error_angle,
+                        Follow_Pose_Angle_Deadband,
+                        Follow_Normal_Pose_Angle_Active_Error,
+                    ) * Follow_Pose_Angle_Gain,
+                    -Follow_Orbit_Settle_Turn_Limit,
+                    Follow_Orbit_Settle_Turn_Limit,
+                )
         alloc_base_vx = vx - body_vx
         alloc_base_vy = vy - body_vy
         if mode_key:
@@ -1347,7 +1380,10 @@ def update_follow_targets(gyro_z):
     if ENABLE_GYRO_LOOP and gyro_pid is not None:
         if turn_rate_cmd:
             gyro_pid.gyro_kp = GYRO_KP
-            if spin_mode_active:
+            if orbit_settling:
+                gyro_pid.gyro_ki = 0.0
+                gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
+            elif spin_mode_active:
                 gyro_pid.gyro_ki = GYRO_TURN_KI
                 gyro_pid.gyro_output_limit = GYRO_SPIN_OUTPUT_LIMIT
             elif push_follow_active or angle_pose_mode_active:
@@ -1359,14 +1395,14 @@ def update_follow_targets(gyro_z):
             else:
                 gyro_pid.gyro_ki = GYRO_KI
                 gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
-        elif gyro_brake_active and not mode_key:
+        elif gyro_brake_active and (orbit_settling or not mode_key):
             gyro_pid.gyro_kp = GYRO_KP
             gyro_pid.gyro_ki = 0.0
             gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
         if turn_rate_cmd or gyro_brake_active:
             gyro_error = turn_rate_cmd - gyro_z
             if (
-                not mode_key
+                (orbit_settling or not mode_key)
                 and gyro_pid.err_last * gyro_error < 0.0
             ):
                 gyro_pid.output = 0.0

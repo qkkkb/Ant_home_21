@@ -125,8 +125,8 @@ Follow_Orbit_Feedforward_Close_Scale = 0.78
 Follow_Orbit_Close_Feedforward_Full_Error = 6
 Follow_Pose_Angle_Gain = -0.68
 Follow_Pose_Angle_Limit = 40.0
-Follow_Orbit_Pose_Angle_Gain = -0.75
-Follow_Orbit_Pose_Angle_Limit = 32.0
+Follow_Orbit_Pose_Angle_Gain = -1.20
+Follow_Orbit_Pose_Angle_Limit = 48.0
 Follow_Normal_Pose_Angle_Deadband = 8
 Follow_Normal_Pose_Angle_Active_Error = 18
 Follow_Spin_Target_Point_Wz_To_Vy = -0.08
@@ -136,6 +136,8 @@ Follow_Spin_Turn_Rate_Limit = 128.0
 Follow_Pose_Angle_Deadband = 4
 Follow_Pose_Angle_Active_Error = 6
 Follow_Pose_Wheel_Target_Limit = 33.0
+Follow_Normal_Wheel_Target_Limit = 38.0
+Follow_Normal_Allocation_Reserve = 8.0
 Follow_Normal_Correction_Reserve = 6.0
 Follow_Normal_Conflict_Start_Error = 4
 Follow_Normal_Conflict_Stop_Error = 16
@@ -159,9 +161,9 @@ Follow_Orbit_Settle_Brake_Gyro_Rate = 30.0
 Follow_Orbit_Settle_Recovery_Gyro_Rate = 20.0
 Follow_Orbit_Settle_Brake_Hold_Ms = 100
 Follow_Orbit_Settle_XY_Limit = 14.0
-Follow_Orbit_Settle_Turn_Limit = 20.0
+Follow_Orbit_Settle_Turn_Limit = 32.0
 Follow_Orbit_Settle_Hold_Ms = 160
-Follow_Orbit_Settle_Timeout_Ms = 1000
+Follow_Orbit_Settle_Timeout_Ms = 1400
 Follow_Orbit_Mode_FfWz_Filter = 0.22
 Follow_Normal_Wz_Feedforward_Limit = 15.0
 Follow_Spin_Latch_Min_Wz = 26.0
@@ -829,11 +831,15 @@ def limit_pose_twist_for_wheels(
 ):
     global last_alloc_scale
 
-    if Follow_Pose_Wheel_Target_Limit <= 0.0:
+    limit = (
+        Follow_Normal_Wheel_Target_Limit
+        if preserve_feedforward
+        else Follow_Pose_Wheel_Target_Limit
+    )
+    if limit <= 0.0:
         last_alloc_scale = 100
         return vx, vy, vz
 
-    limit = Follow_Pose_Wheel_Target_Limit
     if preserve_rotation:
         # Relative heading is the orbit constraint.  Keep the gyro-loop yaw
         # output and fit translation into the wheel headroom that remains.
@@ -894,8 +900,8 @@ def limit_pose_twist_for_wheels(
         vz,
     )
     reserve = max_wheel_abs(reserve_fr, reserve_fl, reserve_b)
-    if reserve > Follow_Normal_Correction_Reserve:
-        reserve = Follow_Normal_Correction_Reserve
+    if reserve > Follow_Normal_Allocation_Reserve:
+        reserve = Follow_Normal_Allocation_Reserve
     base_limit = limit - reserve
     base_scale = 1.0
     if base_max > base_limit:
@@ -1276,11 +1282,7 @@ def update_follow_targets(gyro_z):
                 vx = settle_ff_vx + body_vx
                 vy = settle_ff_vy + body_vy
                 turn_rate_cmd = clamp(
-                    soft_deadband(
-                        cam_error_angle,
-                        Follow_Pose_Angle_Deadband,
-                        Follow_Normal_Pose_Angle_Active_Error,
-                    ) * Follow_Pose_Angle_Gain,
+                    calc_follow_angle(cam_error_angle, True),
                     -Follow_Orbit_Settle_Turn_Limit,
                     Follow_Orbit_Settle_Turn_Limit,
                 )
@@ -1517,8 +1519,8 @@ def update_follow_targets(gyro_z):
         if turn_rate_cmd:
             gyro_pid.gyro_kp = GYRO_KP
             if orbit_settling:
-                gyro_pid.gyro_ki = 0.0
-                gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
+                gyro_pid.gyro_ki = GYRO_TURN_KI
+                gyro_pid.gyro_output_limit = GYRO_ORBIT_OUTPUT_LIMIT
             elif spin_mode_active:
                 gyro_pid.gyro_ki = GYRO_TURN_KI
                 gyro_pid.gyro_output_limit = GYRO_SPIN_OUTPUT_LIMIT
@@ -1537,7 +1539,11 @@ def update_follow_targets(gyro_z):
         elif gyro_brake_active and (orbit_settling or not mode_key):
             gyro_pid.gyro_kp = GYRO_KP
             gyro_pid.gyro_ki = 0.0
-            gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
+            gyro_pid.gyro_output_limit = (
+                GYRO_ORBIT_OUTPUT_LIMIT
+                if orbit_settling
+                else GYRO_OUTPUT_LIMIT
+            )
         if turn_rate_cmd or gyro_brake_active:
             gyro_error = turn_rate_cmd - gyro_z
             if (

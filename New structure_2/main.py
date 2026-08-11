@@ -48,7 +48,7 @@ GYRO_TURN_KI = 0.002
 GYRO_OUTPUT_LIMIT = 12.0
 GYRO_NORMAL_POSE_OUTPUT_LIMIT = 16.0
 GYRO_PUSH_OUTPUT_LIMIT = 16.0
-GYRO_ORBIT_OUTPUT_LIMIT = 16.0
+GYRO_ORBIT_OUTPUT_LIMIT = 18.0
 GYRO_SPIN_OUTPUT_LIMIT = 18.0
 GYRO_STOP_RATE = 4.0
 GYRO_NORMAL_STOP_RATE = 12.0
@@ -110,7 +110,7 @@ Follow_Hold_Feedforward_Gain = 1.70
 Follow_Normal_Wz_Feedforward_Gain = 1.00
 Follow_Orbit_Wz_Feedforward_Gain = 1.00
 Follow_Orbit_Wz_Feedforward_Limit = 128.0
-Follow_Orbit_Turn_Rate_Limit = 128.0
+Follow_Orbit_Turn_Rate_Limit = 160.0
 Follow_Target_Point_Wz_To_Vx = -0.18
 Follow_Target_Point_Wz_To_Vy = -0.45
 Follow_Orbit_Target_Point_Wz_To_Vx = -0.17
@@ -125,8 +125,9 @@ Follow_Orbit_Feedforward_Close_Scale = 0.78
 Follow_Orbit_Close_Feedforward_Full_Error = 6
 Follow_Pose_Angle_Gain = -0.68
 Follow_Pose_Angle_Limit = 40.0
+Follow_Normal_Pose_Angle_Limit = 24.0
 Follow_Orbit_Pose_Angle_Gain = -1.20
-Follow_Orbit_Pose_Angle_Limit = 48.0
+Follow_Orbit_Pose_Angle_Limit = 32.0
 Follow_Normal_Pose_Angle_Deadband = 8
 Follow_Normal_Pose_Angle_Active_Error = 18
 Follow_Spin_Target_Point_Wz_To_Vy = -0.08
@@ -137,7 +138,7 @@ Follow_Pose_Angle_Deadband = 4
 Follow_Pose_Angle_Active_Error = 6
 Follow_Pose_Wheel_Target_Limit = 33.0
 Follow_Normal_Wheel_Target_Limit = 38.0
-Follow_Normal_Allocation_Reserve = 8.0
+Follow_Normal_Allocation_Reserve = 16.0
 Follow_Normal_Correction_Reserve = 6.0
 Follow_Normal_Conflict_Start_Error = 4
 Follow_Normal_Conflict_Stop_Error = 16
@@ -162,7 +163,7 @@ Follow_Orbit_Settle_Turn_Limit = 32.0
 Follow_Orbit_Settle_Hold_Ms = 160
 Follow_Orbit_Settle_Timeout_Ms = 1400
 Follow_Orbit_Mode_FfWz_Filter = 0.22
-Follow_Normal_Wz_Feedforward_Limit = 15.0
+Follow_Normal_Wz_Feedforward_Limit = 128.0
 Follow_Spin_Latch_Min_Wz = 26.0
 Follow_Spin_Command_Hold_Ms = 900
 Follow_Spin_Latch_Release_Angle = 3
@@ -606,6 +607,12 @@ def solve_follow_pose_twist(
         if push_mode
         else calc_follow_angle(error_angle, orbit_mode, spin_mode)
     )
+    if not orbit_mode and not spin_mode and not push_mode:
+        vision_wz = clamp(
+            vision_wz,
+            -Follow_Normal_Pose_Angle_Limit,
+            Follow_Normal_Pose_Angle_Limit,
+        )
     active_error = (
         Follow_Pose_Angle_Active_Error
         if (orbit_mode or spin_mode)

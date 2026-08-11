@@ -91,19 +91,16 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
     wz = 0.0
     if car_started:
         flags = _FLAG_STARTED | _FLAG_CLOSED_LOOP
-        # Linear command is the trajectory preview used by the follower.
-        # Actual yaw rate remains the rigid-body rotation feedforward.
-        vx = cmd_vx
-        vy = cmd_vy
+        vx = _vx
+        vy = _vy
         wz = _wz
         if state_code == 5:
             flags |= _FLAG_ORBIT
             vx = cmd_vx
             vy = cmd_vy
+            wz = cmd_wz
         elif state_code == 6:
             flags |= _FLAG_PUSH
-            vx = _vx
-            vy = _vy
         elif state_code == 7:
             flags |= _FLAG_PUSH
             vx = cmd_vx

@@ -138,8 +138,8 @@ Follow_Pose_Angle_Active_Error = 6
 Follow_Pose_Wheel_Target_Limit = 33.0
 Follow_Command_Ramp_Vx = 2.0
 Follow_Command_Ramp_Vy = 3.0
-Follow_Orbit_Command_Ramp_Vx = 20.0
-Follow_Orbit_Command_Ramp_Vy = 14.0
+Follow_Orbit_Command_Ramp_Vx = 2.0
+Follow_Orbit_Command_Ramp_Vy = 3.0
 Follow_Target_Lost_Hold_Ms = 450
 Follow_Orbit_Mode_Exit_Ms = 100
 Follow_Orbit_Mode_FfWz_Filter = 0.22
@@ -995,6 +995,11 @@ def update_follow_targets(gyro_z):
         if last_follow_mode_key > 0 and not mode_key:
             reset_speed_outputs()
             follow_ff_wz = 0.0
+        elif last_follow_mode_key == 0 and mode_key == 1:
+            speed_reset(pid_fl)
+            speed_reset(pid_fr)
+            speed_reset(pid_b)
+            reset_turn_loop_state()
         elif last_follow_mode_key < 0:
             reset_speed_outputs(True)
             reset_turn_loop_state()

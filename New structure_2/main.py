@@ -47,7 +47,7 @@ GYRO_KI = 0.004
 GYRO_TURN_KI = 0.002
 GYRO_OUTPUT_LIMIT = 12.0
 GYRO_PUSH_OUTPUT_LIMIT = 16.0
-GYRO_ORBIT_OUTPUT_LIMIT = 28.0
+GYRO_ORBIT_OUTPUT_LIMIT = 8.0
 GYRO_SPIN_OUTPUT_LIMIT = 18.0
 GYRO_STOP_RATE = 4.0
 GYRO_NORMAL_STOP_RATE = 12.0
@@ -124,8 +124,8 @@ Follow_Orbit_Feedforward_Close_Scale = 0.78
 Follow_Orbit_Close_Feedforward_Full_Error = 6
 Follow_Pose_Angle_Gain = -0.68
 Follow_Pose_Angle_Limit = 40.0
-Follow_Orbit_Pose_Angle_Gain = -0.35
-Follow_Orbit_Pose_Angle_Limit = 18.0
+Follow_Orbit_Pose_Angle_Gain = -0.55
+Follow_Orbit_Pose_Angle_Limit = 24.0
 Follow_Normal_Pose_Angle_Deadband = 8
 Follow_Normal_Pose_Angle_Active_Error = 18
 Follow_Spin_Target_Point_Wz_To_Vy = -0.08
@@ -1289,10 +1289,15 @@ def update_follow_targets(gyro_z):
                 gyro_abs = abs(gyro_z)
                 if gyro_abs > 40.0:
                     correction_scale = (
-                        0.0
+                        0.40
                         if gyro_abs >= 120.0
-                        else (120.0 - gyro_abs) / 80.0
+                        else 0.40 + (120.0 - gyro_abs) * 0.60 / 80.0
                     )
+                    if (
+                        (cam_error_x >= 40 or cam_error_x <= -40)
+                        and correction_scale < 0.50
+                    ):
+                        correction_scale = 0.50
                     body_vx *= correction_scale
             vx = alloc_base_vx + body_vx
             vy = alloc_base_vy + body_vy
@@ -1487,12 +1492,15 @@ def update_follow_targets(gyro_z):
             elif spin_mode_active:
                 gyro_pid.gyro_ki = GYRO_TURN_KI
                 gyro_pid.gyro_output_limit = GYRO_SPIN_OUTPUT_LIMIT
-            elif push_follow_active or angle_pose_mode_active:
+            elif push_follow_active:
                 gyro_pid.gyro_ki = GYRO_KI
                 gyro_pid.gyro_output_limit = GYRO_PUSH_OUTPUT_LIMIT
             elif orbit_mode_active:
                 gyro_pid.gyro_ki = GYRO_TURN_KI
                 gyro_pid.gyro_output_limit = GYRO_ORBIT_OUTPUT_LIMIT
+            elif angle_pose_mode_active:
+                gyro_pid.gyro_ki = GYRO_KI
+                gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
             else:
                 gyro_pid.gyro_ki = GYRO_KI
                 gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT

@@ -70,7 +70,7 @@ ROI_MISS_RESET = 2
 
 EMA_ALPHA_NUM = 3
 EMA_ALPHA_DEN = 4
-SEND_NO_TARGET_WHEN_EMPTY = False
+SEND_NO_TARGET_WHEN_EMPTY = True
 DRAW_DEBUG = False
 DRAW_ROI_DEBUG = False
 CALIB_LOG_ENABLE = False
@@ -344,8 +344,8 @@ def process_frame(img):
         roi_miss_count += 1
         if roi_miss_count >= ROI_MISS_RESET:
             track_roi = None
-        if SEND_NO_TARGET_WHEN_EMPTY:
-            send_no_target()
+            if SEND_NO_TARGET_WHEN_EMPTY:
+                send_no_target()
         if should_calib_log():
             print(
                 "IR CALIB MISS roi=%s threshold=%s exposure_us=%d target_dx=%d"

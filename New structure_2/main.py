@@ -397,6 +397,16 @@ def cam_target_seen():
     return cam_has_target and utime.ticks_diff(utime.ticks_ms(), cam_last_rx_ms) <= Cam_Packet_Timeout_Ms
 
 
+def cam_target_state():
+    if (
+        not cam_last_rx_ms
+        or utime.ticks_diff(utime.ticks_ms(), cam_last_rx_ms)
+        > Cam_Packet_Timeout_Ms
+    ):
+        return -1
+    return 1 if cam_has_target else 0
+
+
 def master_motion_fresh():
     return utime.ticks_diff(utime.ticks_ms(), master_last_rx_ms) <= Master_Motion_Timeout_Ms
 
@@ -1064,7 +1074,7 @@ def debug_send_state(log_id, gyro_z):
         % (
             log_id,
             master_flags,
-            1 if last_follow_seen else 0,
+            cam_target_state(),
             last_alloc_scale,
             int(move_cmd.speed_fl * 10.0),
             int(move_cmd.speed_fr * 10.0),

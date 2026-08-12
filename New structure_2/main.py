@@ -800,35 +800,6 @@ def max_wheel_abs(wheel_fr, wheel_fl, wheel_b):
     return max_abs
 
 
-def fit_wheel_delta_scale(wfr, wfl, wb, dfr, dfl, db, limit):
-    scale = 1.0
-    if dfr > 0.0:
-        tmp = (limit - wfr) / dfr
-    elif dfr < 0.0:
-        tmp = (-limit - wfr) / dfr
-    else:
-        tmp = 1.0
-    if tmp < scale:
-        scale = tmp
-    if dfl > 0.0:
-        tmp = (limit - wfl) / dfl
-    elif dfl < 0.0:
-        tmp = (-limit - wfl) / dfl
-    else:
-        tmp = 1.0
-    if tmp < scale:
-        scale = tmp
-    if db > 0.0:
-        tmp = (limit - wb) / db
-    elif db < 0.0:
-        tmp = (-limit - wb) / db
-    else:
-        tmp = 1.0
-    if tmp < scale:
-        scale = tmp
-    return clamp(scale, 0.0, 1.0)
-
-
 def limit_pose_twist_for_wheels(
     vx,
     vy,
@@ -839,8 +810,6 @@ def limit_pose_twist_for_wheels(
     feedback_vy,
     preserve_feedforward,
     preserve_rotation,
-    normal_priority,
-    protect_distance,
 ):
     global last_alloc_scale
 
@@ -852,56 +821,6 @@ def limit_pose_twist_for_wheels(
     if limit <= 0.0:
         last_alloc_scale = 100
         return vx, vy, vz
-
-    if normal_priority:
-        wfr = -vx * 0.866025 + vy * 0.5 + vz
-        wfl = vx * 0.866025 + vy * 0.5 + vz
-        wb = -vy + vz
-        if max_wheel_abs(wfr, wfl, wb) <= limit:
-            last_alloc_scale = 100
-            return vx, vy, vz
-        cvx = vx - base_vx
-        cvy = vy - base_vy
-        ox = oy = oz = 0.0
-        wfr = wfl = wb = 0.0
-        if protect_distance:
-            dfr = -cvx * 0.866025
-            dfl = cvx * 0.866025
-            s = fit_wheel_delta_scale(wfr, wfl, wb, dfr, dfl, 0.0, limit)
-            ox = cvx * s
-            wfr = dfr * s
-            wfl = dfl * s
-            cvx = 0.0
-        yaw = clamp(vz, -Follow_Normal_Allocation_Reserve, Follow_Normal_Allocation_Reserve)
-        s = fit_wheel_delta_scale(wfr, wfl, wb, yaw, yaw, yaw, limit)
-        oz = yaw * s
-        wfr += oz
-        wfl += oz
-        wb += oz
-        dfr = -base_vx * 0.866025 + base_vy * 0.5
-        dfl = base_vx * 0.866025 + base_vy * 0.5
-        db = -base_vy
-        s = fit_wheel_delta_scale(wfr, wfl, wb, dfr, dfl, db, limit)
-        ox += base_vx * s
-        oy += base_vy * s
-        wfr += dfr * s
-        wfl += dfl * s
-        wb += db * s
-        rem = vz - oz
-        s = fit_wheel_delta_scale(wfr, wfl, wb, rem, rem, rem, limit)
-        rem *= s
-        oz += rem
-        wfr += rem
-        wfl += rem
-        wb += rem
-        dfr = -cvx * 0.866025 + cvy * 0.5
-        dfl = cvx * 0.866025 + cvy * 0.5
-        db = -cvy
-        s = fit_wheel_delta_scale(wfr, wfl, wb, dfr, dfl, db, limit)
-        ox += cvx * s
-        oy += cvy * s
-        last_alloc_scale = int(s * 100.0)
-        return ox, oy, oz
 
     if preserve_rotation:
         # Relative heading is the orbit constraint.  Keep the gyro-loop yaw
@@ -1676,11 +1595,6 @@ def update_follow_targets(gyro_z):
             or push_follow_active
         ),
         explicit_orbit and not explicit_push,
-        seen
-        and fresh_motion
-        and 0 < master_flags < MASTER_MOTION_FLAG_ORBIT
-        and not mode_key,
-        cam_error_x < -Follow_Forward_Deadband,
     )
     last_cmd_vx = cam_target_vx
     last_cmd_vy = cam_target_vy

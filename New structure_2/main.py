@@ -800,141 +800,33 @@ def max_wheel_abs(wheel_fr, wheel_fl, wheel_b):
     return max_abs
 
 
-def fit_wheel_delta_scale(
-    wheel_fr, wheel_fl, wheel_b,
-    delta_fr, delta_fl, delta_b, limit,
-):
+def fit_wheel_delta_scale(wfr, wfl, wb, dfr, dfl, db, limit):
     scale = 1.0
-    if delta_fr > 0.0:
-        scale = (limit - wheel_fr) / delta_fr
-    elif delta_fr < 0.0:
-        scale = (-limit - wheel_fr) / delta_fr
-    if delta_fl > 0.0:
-        tmp = (limit - wheel_fl) / delta_fl
-        if tmp < scale:
-            scale = tmp
-    elif delta_fl < 0.0:
-        tmp = (-limit - wheel_fl) / delta_fl
-        if tmp < scale:
-            scale = tmp
-    if delta_b > 0.0:
-        tmp = (limit - wheel_b) / delta_b
-        if tmp < scale:
-            scale = tmp
-    elif delta_b < 0.0:
-        tmp = (-limit - wheel_b) / delta_b
-        if tmp < scale:
-            scale = tmp
-    if scale < 0.0:
-        return 0.0
-    if scale > 1.0:
-        return 1.0
-    return scale
-
-
-def limit_normal_follow_twist(
-    vx, vy, vz, base_vx, base_vy, protect_distance, limit,
-):
-    global last_alloc_scale
-
-    wheel_fr = -vx * 0.866025 + vy * 0.5 + vz
-    wheel_fl = vx * 0.866025 + vy * 0.5 + vz
-    wheel_b = -vy + vz
-    if max_wheel_abs(wheel_fr, wheel_fl, wheel_b) <= limit:
-        last_alloc_scale = 100
-        return vx, vy, vz
-
-    corr_vx = vx - base_vx
-    corr_vy = vy - base_vy
-    out_vx = 0.0
-    out_vy = 0.0
-    out_vz = 0.0
-    wheel_fr = 0.0
-    wheel_fl = 0.0
-    wheel_b = 0.0
-    min_scale = 1.0
-
-    if protect_distance:
-        # A negative forward-distance error means the follower is already too
-        # close.  Allocate that escape correction before motion matching.
-        delta_fr = -corr_vx * 0.866025
-        delta_fl = corr_vx * 0.866025
-        delta_b = 0.0
-        scale = fit_wheel_delta_scale(
-            wheel_fr, wheel_fl, wheel_b,
-            delta_fr, delta_fl, delta_b, limit,
-        )
-        out_vx = corr_vx * scale
-        wheel_fr = delta_fr * scale
-        wheel_fl = delta_fl * scale
-        wheel_b = delta_b * scale
-        min_scale = scale
-        corr_vx = 0.0
-
-    # Reserve a bounded part of the yaw correction while fitting the leader's
-    # translation.  This prevents high-speed translation from starving the
-    # relative-heading loop, without giving yaw the whole wheel budget.
-    yaw_reserve = clamp(
-        vz,
-        -Follow_Normal_Allocation_Reserve,
-        Follow_Normal_Allocation_Reserve,
-    )
-    scale = fit_wheel_delta_scale(
-        wheel_fr, wheel_fl, wheel_b,
-        yaw_reserve, yaw_reserve, yaw_reserve, limit,
-    )
-    out_vz = yaw_reserve * scale
-    wheel_fr += out_vz
-    wheel_fl += out_vz
-    wheel_b += out_vz
-    if scale < min_scale:
-        min_scale = scale
-
-    delta_fr = -base_vx * 0.866025 + base_vy * 0.5
-    delta_fl = base_vx * 0.866025 + base_vy * 0.5
-    delta_b = -base_vy
-    scale = fit_wheel_delta_scale(
-        wheel_fr, wheel_fl, wheel_b,
-        delta_fr, delta_fl, delta_b, limit,
-    )
-    out_vx += base_vx * scale
-    out_vy += base_vy * scale
-    wheel_fr += delta_fr * scale
-    wheel_fl += delta_fl * scale
-    wheel_b += delta_b * scale
-    if scale < min_scale:
-        min_scale = scale
-
-    remaining_vz = vz - out_vz
-    scale = fit_wheel_delta_scale(
-        wheel_fr, wheel_fl, wheel_b,
-        remaining_vz, remaining_vz, remaining_vz, limit,
-    )
-    remaining_vz *= scale
-    out_vz += remaining_vz
-    wheel_fr += remaining_vz
-    wheel_fl += remaining_vz
-    wheel_b += remaining_vz
-    if scale < min_scale:
-        min_scale = scale
-
-    # Position catch-up uses whatever wheel headroom remains.  Keep both axes
-    # together when there is no close-distance hazard so saturation cannot
-    # rotate the visual correction vector.
-    delta_fr = -corr_vx * 0.866025 + corr_vy * 0.5
-    delta_fl = corr_vx * 0.866025 + corr_vy * 0.5
-    delta_b = -corr_vy
-    scale = fit_wheel_delta_scale(
-        wheel_fr, wheel_fl, wheel_b,
-        delta_fr, delta_fl, delta_b, limit,
-    )
-    out_vx += corr_vx * scale
-    out_vy += corr_vy * scale
-    if scale < min_scale:
-        min_scale = scale
-
-    last_alloc_scale = int(min_scale * 100.0)
-    return out_vx, out_vy, out_vz
+    if dfr > 0.0:
+        tmp = (limit - wfr) / dfr
+    elif dfr < 0.0:
+        tmp = (-limit - wfr) / dfr
+    else:
+        tmp = 1.0
+    if tmp < scale:
+        scale = tmp
+    if dfl > 0.0:
+        tmp = (limit - wfl) / dfl
+    elif dfl < 0.0:
+        tmp = (-limit - wfl) / dfl
+    else:
+        tmp = 1.0
+    if tmp < scale:
+        scale = tmp
+    if db > 0.0:
+        tmp = (limit - wb) / db
+    elif db < 0.0:
+        tmp = (-limit - wb) / db
+    else:
+        tmp = 1.0
+    if tmp < scale:
+        scale = tmp
+    return clamp(scale, 0.0, 1.0)
 
 
 def limit_pose_twist_for_wheels(
@@ -962,15 +854,54 @@ def limit_pose_twist_for_wheels(
         return vx, vy, vz
 
     if normal_priority:
-        return limit_normal_follow_twist(
-            vx,
-            vy,
-            vz,
-            base_vx,
-            base_vy,
-            protect_distance,
-            limit,
-        )
+        wfr = -vx * 0.866025 + vy * 0.5 + vz
+        wfl = vx * 0.866025 + vy * 0.5 + vz
+        wb = -vy + vz
+        if max_wheel_abs(wfr, wfl, wb) <= limit:
+            last_alloc_scale = 100
+            return vx, vy, vz
+        cvx = vx - base_vx
+        cvy = vy - base_vy
+        ox = oy = oz = 0.0
+        wfr = wfl = wb = 0.0
+        if protect_distance:
+            dfr = -cvx * 0.866025
+            dfl = cvx * 0.866025
+            s = fit_wheel_delta_scale(wfr, wfl, wb, dfr, dfl, 0.0, limit)
+            ox = cvx * s
+            wfr = dfr * s
+            wfl = dfl * s
+            cvx = 0.0
+        yaw = clamp(vz, -Follow_Normal_Allocation_Reserve, Follow_Normal_Allocation_Reserve)
+        s = fit_wheel_delta_scale(wfr, wfl, wb, yaw, yaw, yaw, limit)
+        oz = yaw * s
+        wfr += oz
+        wfl += oz
+        wb += oz
+        dfr = -base_vx * 0.866025 + base_vy * 0.5
+        dfl = base_vx * 0.866025 + base_vy * 0.5
+        db = -base_vy
+        s = fit_wheel_delta_scale(wfr, wfl, wb, dfr, dfl, db, limit)
+        ox += base_vx * s
+        oy += base_vy * s
+        wfr += dfr * s
+        wfl += dfl * s
+        wb += db * s
+        rem = vz - oz
+        s = fit_wheel_delta_scale(wfr, wfl, wb, rem, rem, rem, limit)
+        rem *= s
+        oz += rem
+        wfr += rem
+        wfl += rem
+        wb += rem
+        dfr = -cvx * 0.866025 + cvy * 0.5
+        dfl = cvx * 0.866025 + cvy * 0.5
+        db = -cvy
+        s = fit_wheel_delta_scale(wfr, wfl, wb, dfr, dfl, db, limit)
+        ox += cvx * s
+        oy += cvy * s
+        last_alloc_scale = int(s * 100.0)
+        return ox, oy, oz
 
     if preserve_rotation:
         # Relative heading is the orbit constraint.  Keep the gyro-loop yaw

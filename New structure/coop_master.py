@@ -4,7 +4,7 @@ from models import MoveBase
 from move_base import get_car_spd
 from seekfree import WIRELESS_UART
 
-_FRAME_LEN = 15
+_FRAME_LEN = 16
 _TX_PERIOD_MS = cfg.MASTER_MOTION_TX_PERIOD_MS
 _FLAG_STARTED = 0x01
 _FLAG_TARGET = 0x02
@@ -104,6 +104,12 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             vy = cmd_vy
             vx = cmd_vx
             wz = cmd_wz
+        elif state_code == 4:
+            # Classification stops only the leader feedforward.  The state is
+            # sent explicitly so the follower can keep converging by vision.
+            vx = 0.0
+            vy = 0.0
+            wz = cmd_wz
         elif state_code == 5:
             flags |= _FLAG_ORBIT
             vx = cmd_vx
@@ -140,7 +146,7 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
         flags |= _FLAG_TARGET
     _put_u8(0, 0xA5)
     _put_u8(1, 0x5A)
-    _put_u8(2, 11)
+    _put_u8(2, 12)
     _put_u8(3, 0x19)
     _put_u8(4, _next_seq())
     _put_i16(5, vx * 10)
@@ -148,12 +154,13 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
     _put_i16(9, wz * 10)
     _put_i16(11, yaw_deg * 10)
     _put_u8(13, flags)
+    _put_u8(14, state_code)
     checksum = 0
     i = 2
-    while i < 14:
+    while i < 15:
         checksum = (checksum + _tx_buf[i]) & 0xFF
         i += 1
-    _put_u8(14, checksum)
+    _put_u8(15, checksum)
     try:
         _wireless.send_bytearray(_tx_buf, _FRAME_LEN)
         _last_tx_ms = now

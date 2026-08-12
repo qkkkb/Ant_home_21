@@ -109,8 +109,10 @@ Follow_Close_Feedforward_Min_Scale = 0.25
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Normal_Wz_Feedforward_Gain = 1.00
 Follow_Orbit_Wz_Feedforward_Gain = 1.00
-Follow_Orbit_Wz_Feedforward_Limit = 128.0
-Follow_Orbit_Turn_Rate_Limit = 160.0
+Follow_Orbit_Wz_Feedforward_Limit = 150.0
+Follow_Orbit_Turn_Rate_Limit = 180.0
+Follow_Push_Wz_Feedforward_Limit = 128.0
+Follow_Push_Turn_Rate_Limit = 160.0
 Follow_Target_Point_Wz_To_Vx = -0.18
 Follow_Target_Point_Wz_To_Vy = -0.45
 Follow_Orbit_Target_Point_Wz_To_Vx = -0.17
@@ -193,6 +195,7 @@ master_vx = 0.0
 master_vy = 0.0
 master_wz = 0.0
 master_flags = 0
+master_state_code = -1
 master_last_rx_ms = 0
 
 coop_parser = CoopFrameParser()
@@ -226,6 +229,7 @@ filtered_ff_wz = 0.0
 spin_latched_wz = 0.0
 spin_latch_until_ms = 0
 last_follow_mode_key = -1
+last_control_master_state = -1
 master_edge_until_ms = 0
 last_hard_stop = False
 last_stall_count = 0
@@ -360,6 +364,7 @@ def clear_cam_target_state():
     global orbit_follow_entry_until_ms
     global spin_latched_wz, spin_latch_until_ms
     global last_follow_mode_key
+    global last_control_master_state
     global master_edge_until_ms
 
     cam_error_x = 0
@@ -377,6 +382,7 @@ def clear_cam_target_state():
     spin_latched_wz = 0.0
     spin_latch_until_ms = 0
     last_follow_mode_key = -1
+    last_control_master_state = -1
     master_edge_until_ms = 0
     cam_has_target = False
     target_lost_since_ms = 0
@@ -988,7 +994,7 @@ def poll_art_uart():
 
 def handle_coop_frame(msg_type, seq, payload, payload_len):
     global master_vx, master_vy, master_wz
-    global master_flags, master_last_rx_ms
+    global master_flags, master_state_code, master_last_rx_ms
 
     if msg_type != MSG_MASTER_MOTION or payload_len < 9:
         return
@@ -996,6 +1002,7 @@ def handle_coop_frame(msg_type, seq, payload, payload_len):
     master_vy = decode_i16(payload, 2) / 10.0
     master_wz = decode_i16(payload, 4) / 10.0
     master_flags = payload[8]
+    master_state_code = payload[9] if payload_len >= 10 else -1
     master_last_rx_ms = utime.ticks_ms()
 
 
@@ -1028,7 +1035,7 @@ def debug_send_state(log_id, gyro_z):
     global last_direction_pause_mask
 
     debug_send(
-        "D %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
+        "D %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
         % (
             log_id,
             master_flags,
@@ -1044,6 +1051,8 @@ def debug_send_state(log_id, gyro_z):
             cam_error_y,
             cam_error_angle,
             int(gyro_z),
+            master_state_code,
+            int(last_ff_wz),
         )
     )
     last_direction_pause_mask = 0
@@ -1060,6 +1069,7 @@ def update_follow_targets(gyro_z):
     global follow_output_limit
     global last_angle_priority_active
     global last_follow_mode_key, _orbit
+    global last_control_master_state
     global master_edge_until_ms
     global orbit_follow_entry_until_ms
 
@@ -1096,9 +1106,10 @@ def update_follow_targets(gyro_z):
     )
     orbit_settling = orbit_mode_active and orbit_follow_exit_since_ms != 0
     moving_visual_scale = 1.0
-    if orbit_mode_active:
-        # Image-space angle and X error lag during fast yaw.  Keep commanded
-        # yaw feedforward intact and restore visual trim as body rate falls.
+    if orbit_mode_active and explicit_push:
+        # PUSH remains on its previous protection until it is retuned for the
+        # new encoder.  ORBIT must keep relative heading feedback active at
+        # high rate; otherwise the rate mismatch integrates into yaw error.
         gyro_abs = abs(gyro_z)
         if gyro_abs >= 120.0:
             moving_visual_scale = 0.0
@@ -1115,6 +1126,12 @@ def update_follow_targets(gyro_z):
             Follow_Normal_Wz_Feedforward_Limit,
         )
     push_follow_active = explicit_push and orbit_mode_active
+    classification_active = fresh_motion and master_state_code == 4
+    classification_exit = (
+        fresh_motion
+        and last_control_master_state == 4
+        and master_state_code != 4
+    )
     mode_key = 3 if spin_mode_active else (1 if orbit_mode_active else 0)
     _orbit = mode_key == 1
     if last_follow_mode_key != mode_key:
@@ -1164,7 +1181,9 @@ def update_follow_targets(gyro_z):
         )
     ):
         follow_output_limit = FOLLOW_STATIC_LOCK_PWM_LIMIT
-    if (
+    if classification_active or classification_exit:
+        master_edge_until_ms = 0
+    elif (
         (mode_key and (not push_follow_active))
         or (not seen)
         or (not fresh_motion)
@@ -1387,12 +1406,12 @@ def update_follow_targets(gyro_z):
             turn_rate_cmd,
             follow_ff_wz,
             Follow_Orbit_Wz_Feedforward_Gain,
-            Follow_Orbit_Wz_Feedforward_Limit,
+            Follow_Push_Wz_Feedforward_Limit,
         )
         turn_rate_cmd = clamp(
             turn_rate_cmd,
-            -Follow_Orbit_Turn_Rate_Limit,
-            Follow_Orbit_Turn_Rate_Limit,
+            -Follow_Push_Turn_Rate_Limit,
+            Follow_Push_Turn_Rate_Limit,
         )
 
     if not mode_key and seen and master_edge_until_ms and not ff_vx and not ff_vy:
@@ -1434,8 +1453,12 @@ def update_follow_targets(gyro_z):
     else:
         vx_ramp = Follow_Command_Ramp_Vx
         vy_ramp = Follow_Command_Ramp_Vy
-    vx = ramp_value(vx, last_cmd_vx, vx_ramp)
-    vy = ramp_value(vy, last_cmd_vy, vy_ramp)
+    if not (classification_exit and not mode_key):
+        vx = ramp_value(vx, last_cmd_vx, vx_ramp)
+        vy = ramp_value(vy, last_cmd_vy, vy_ramp)
+    # A normal state-4 exit can apply the new leader feedforward immediately,
+    # because vision correction stayed continuous.  ORBIT keeps its dedicated
+    # entry ramp so the first high-rate command cannot kick the follower.
     last_cmd_vx = vx
     last_cmd_vy = vy
     cam_target_vx = vx
@@ -1443,10 +1466,15 @@ def update_follow_targets(gyro_z):
 
     if (not seen) and use_motion_feedforward:
         if orbit_mode_active:
+            wz_limit = (
+                Follow_Push_Wz_Feedforward_Limit
+                if push_follow_active
+                else Follow_Orbit_Wz_Feedforward_Limit
+            )
             turn_rate_cmd = clamp(
                 follow_ff_wz * Follow_Orbit_Wz_Feedforward_Gain,
-                -Follow_Orbit_Wz_Feedforward_Limit,
-                Follow_Orbit_Wz_Feedforward_Limit,
+                -wz_limit,
+                wz_limit,
             )
         elif spin_mode_active:
             turn_rate_cmd = clamp(
@@ -1584,6 +1612,7 @@ def update_follow_targets(gyro_z):
     last_ff_vx = ff_vx
     last_ff_vy = ff_vy
     last_ff_wz = follow_ff_wz
+    last_control_master_state = master_state_code
     return vz_cmd
 
 
@@ -1603,6 +1632,7 @@ def reset_speed_outputs(keep_orbit_state=False):
     global orbit_follow_entry_until_ms
     global spin_latched_wz, spin_latch_until_ms
     global last_follow_mode_key
+    global last_control_master_state
     global master_edge_until_ms
     global last_alloc_scale
     global last_direction_pause_mask
@@ -1628,6 +1658,7 @@ def reset_speed_outputs(keep_orbit_state=False):
         orbit_follow_entry_until_ms = 0
         filtered_ff_wz = 0.0
         last_follow_mode_key = -1
+        last_control_master_state = -1
     spin_latched_wz = 0.0
     spin_latch_until_ms = 0
     master_edge_until_ms = 0

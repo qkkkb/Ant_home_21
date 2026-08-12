@@ -100,7 +100,15 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
         if state_code == 1:
             # 普通发车转向传递受控角速度指令，避免实测瞬态直接冲击从车。
             wz = cmd_wz
-        elif state_code == 2 or state_code == 3 or state_code == 6 or state_code == 10:
+        elif state_code == 2 or state_code == 3:
+            vy = cmd_vy
+            vx = cmd_vx
+            # Translation keeps the command feedforward so the follower can
+            # react before the leader accelerates.  Heading must use measured
+            # rate: at high speed the yaw controller output no longer matches
+            # the leader's actual rigid-body rotation closely enough.
+            wz = _wz
+        elif state_code == 6 or state_code == 10:
             vy = cmd_vy
             vx = cmd_vx
             wz = cmd_wz

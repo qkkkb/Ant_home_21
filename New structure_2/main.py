@@ -800,6 +800,143 @@ def max_wheel_abs(wheel_fr, wheel_fl, wheel_b):
     return max_abs
 
 
+def fit_wheel_delta_scale(
+    wheel_fr, wheel_fl, wheel_b,
+    delta_fr, delta_fl, delta_b, limit,
+):
+    scale = 1.0
+    if delta_fr > 0.0:
+        scale = (limit - wheel_fr) / delta_fr
+    elif delta_fr < 0.0:
+        scale = (-limit - wheel_fr) / delta_fr
+    if delta_fl > 0.0:
+        tmp = (limit - wheel_fl) / delta_fl
+        if tmp < scale:
+            scale = tmp
+    elif delta_fl < 0.0:
+        tmp = (-limit - wheel_fl) / delta_fl
+        if tmp < scale:
+            scale = tmp
+    if delta_b > 0.0:
+        tmp = (limit - wheel_b) / delta_b
+        if tmp < scale:
+            scale = tmp
+    elif delta_b < 0.0:
+        tmp = (-limit - wheel_b) / delta_b
+        if tmp < scale:
+            scale = tmp
+    if scale < 0.0:
+        return 0.0
+    if scale > 1.0:
+        return 1.0
+    return scale
+
+
+def limit_normal_follow_twist(
+    vx, vy, vz, base_vx, base_vy, protect_distance, limit,
+):
+    global last_alloc_scale
+
+    wheel_fr = -vx * 0.866025 + vy * 0.5 + vz
+    wheel_fl = vx * 0.866025 + vy * 0.5 + vz
+    wheel_b = -vy + vz
+    if max_wheel_abs(wheel_fr, wheel_fl, wheel_b) <= limit:
+        last_alloc_scale = 100
+        return vx, vy, vz
+
+    corr_vx = vx - base_vx
+    corr_vy = vy - base_vy
+    out_vx = 0.0
+    out_vy = 0.0
+    out_vz = 0.0
+    wheel_fr = 0.0
+    wheel_fl = 0.0
+    wheel_b = 0.0
+    min_scale = 1.0
+
+    if protect_distance:
+        # A negative forward-distance error means the follower is already too
+        # close.  Allocate that escape correction before motion matching.
+        delta_fr = -corr_vx * 0.866025
+        delta_fl = corr_vx * 0.866025
+        delta_b = 0.0
+        scale = fit_wheel_delta_scale(
+            wheel_fr, wheel_fl, wheel_b,
+            delta_fr, delta_fl, delta_b, limit,
+        )
+        out_vx = corr_vx * scale
+        wheel_fr = delta_fr * scale
+        wheel_fl = delta_fl * scale
+        wheel_b = delta_b * scale
+        min_scale = scale
+        corr_vx = 0.0
+
+    # Reserve a bounded part of the yaw correction while fitting the leader's
+    # translation.  This prevents high-speed translation from starving the
+    # relative-heading loop, without giving yaw the whole wheel budget.
+    yaw_reserve = clamp(
+        vz,
+        -Follow_Normal_Allocation_Reserve,
+        Follow_Normal_Allocation_Reserve,
+    )
+    scale = fit_wheel_delta_scale(
+        wheel_fr, wheel_fl, wheel_b,
+        yaw_reserve, yaw_reserve, yaw_reserve, limit,
+    )
+    out_vz = yaw_reserve * scale
+    wheel_fr += out_vz
+    wheel_fl += out_vz
+    wheel_b += out_vz
+    if scale < min_scale:
+        min_scale = scale
+
+    delta_fr = -base_vx * 0.866025 + base_vy * 0.5
+    delta_fl = base_vx * 0.866025 + base_vy * 0.5
+    delta_b = -base_vy
+    scale = fit_wheel_delta_scale(
+        wheel_fr, wheel_fl, wheel_b,
+        delta_fr, delta_fl, delta_b, limit,
+    )
+    out_vx += base_vx * scale
+    out_vy += base_vy * scale
+    wheel_fr += delta_fr * scale
+    wheel_fl += delta_fl * scale
+    wheel_b += delta_b * scale
+    if scale < min_scale:
+        min_scale = scale
+
+    remaining_vz = vz - out_vz
+    scale = fit_wheel_delta_scale(
+        wheel_fr, wheel_fl, wheel_b,
+        remaining_vz, remaining_vz, remaining_vz, limit,
+    )
+    remaining_vz *= scale
+    out_vz += remaining_vz
+    wheel_fr += remaining_vz
+    wheel_fl += remaining_vz
+    wheel_b += remaining_vz
+    if scale < min_scale:
+        min_scale = scale
+
+    # Position catch-up uses whatever wheel headroom remains.  Keep both axes
+    # together when there is no close-distance hazard so saturation cannot
+    # rotate the visual correction vector.
+    delta_fr = -corr_vx * 0.866025 + corr_vy * 0.5
+    delta_fl = corr_vx * 0.866025 + corr_vy * 0.5
+    delta_b = -corr_vy
+    scale = fit_wheel_delta_scale(
+        wheel_fr, wheel_fl, wheel_b,
+        delta_fr, delta_fl, delta_b, limit,
+    )
+    out_vx += corr_vx * scale
+    out_vy += corr_vy * scale
+    if scale < min_scale:
+        min_scale = scale
+
+    last_alloc_scale = int(min_scale * 100.0)
+    return out_vx, out_vy, out_vz
+
+
 def limit_pose_twist_for_wheels(
     vx,
     vy,
@@ -810,6 +947,8 @@ def limit_pose_twist_for_wheels(
     feedback_vy,
     preserve_feedforward,
     preserve_rotation,
+    normal_priority,
+    protect_distance,
 ):
     global last_alloc_scale
 
@@ -821,6 +960,17 @@ def limit_pose_twist_for_wheels(
     if limit <= 0.0:
         last_alloc_scale = 100
         return vx, vy, vz
+
+    if normal_priority:
+        return limit_normal_follow_twist(
+            vx,
+            vy,
+            vz,
+            base_vx,
+            base_vy,
+            protect_distance,
+            limit,
+        )
 
     if preserve_rotation:
         # Relative heading is the orbit constraint.  Keep the gyro-loop yaw
@@ -1321,17 +1471,9 @@ def update_follow_targets(gyro_z):
                 damp_vy *= damping_scale
             body_vx += damp_vx
             body_vy += damp_vy
-            if normal_damping_active:
-                # Large yaw rate distorts the image-derived position axis.
-                # Let heading settle before trusting that correction again.
-                gyro_abs = abs(gyro_z)
-                if gyro_abs > 40.0:
-                    correction_scale = (
-                        0.0
-                        if gyro_abs >= 120.0
-                        else (120.0 - gyro_abs) / 80.0
-                    )
-                    body_vx *= correction_scale
+            # Do not open the distance loop during a fast turn.  The final
+            # command ramp already limits how quickly this correction changes;
+            # suppressing it here lets a real close-distance error accumulate.
             vx = alloc_base_vx + body_vx
             vy = alloc_base_vy + body_vy
         if push_follow_active:
@@ -1603,6 +1745,11 @@ def update_follow_targets(gyro_z):
             or push_follow_active
         ),
         explicit_orbit and not explicit_push,
+        seen
+        and fresh_motion
+        and 0 < master_flags < MASTER_MOTION_FLAG_ORBIT
+        and not mode_key,
+        cam_error_x < -Follow_Forward_Deadband,
     )
     last_cmd_vx = cam_target_vx
     last_cmd_vy = cam_target_vy

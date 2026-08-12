@@ -1258,6 +1258,8 @@ def update_follow_targets(gyro_z):
             )
         else:
             orbit_follow_entry_until_ms = 0
+        if not mode_key:
+            master_edge_until_ms = 0
     if (
         orbit_follow_entry_until_ms
         and utime.ticks_diff(orbit_follow_entry_until_ms, now) <= 0

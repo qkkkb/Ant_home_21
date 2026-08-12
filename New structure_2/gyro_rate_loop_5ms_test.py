@@ -76,7 +76,6 @@ def _put_int(buf, pos, value):
 def _reset_speed_pid(pid):
     pid.output = 0.0
     pid.err = 0.0
-    pid.err_last = 0.0
     pid.tar_spd_last = 0.0
 
 
@@ -168,9 +167,6 @@ class GyroRateLoopTest:
         self.pid_fl = SpeedPID()
         self.pid_fr = SpeedPID()
         self.pid_b = SpeedPID()
-        self.pid_fl.init_c()
-        self.pid_fr.init_c()
-        self.pid_b.init_c()
         self.gyro_pid = AnglePID()
         self.move = MoveBase()
 

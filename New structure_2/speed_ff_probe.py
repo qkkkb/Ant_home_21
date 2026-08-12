@@ -531,9 +531,6 @@ def init_hardware():
     pid_fl = SpeedPID()
     pid_fr = SpeedPID()
     pid_b = SpeedPID()
-    pid_fl.init_c()
-    pid_fr.init_c()
-    pid_b.init_c()
     try:
         wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
     except Exception:

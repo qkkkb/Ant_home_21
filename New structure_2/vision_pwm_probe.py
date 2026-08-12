@@ -62,7 +62,6 @@ FOLLOW_ORBIT_COMMAND_RAMP_VX = 22.0
 FOLLOW_ORBIT_COMMAND_RAMP_VY = 18.0
 FOLLOW_ORBIT_COMMAND_RAMP_WZ = 12.0
 
-WHEEL_TARGET_STOP_EPS = 0.05
 WHEEL_TARGET_IDLE_EPS = 0.35
 FOLLOW_START_PWM = 6200
 FOLLOW_START_PWM_MID = 3600
@@ -501,9 +500,6 @@ move_cmd = MoveBase()
 pid_fl = SpeedPID()
 pid_fr = SpeedPID()
 pid_b = SpeedPID()
-pid_fl.init_c()
-pid_fr.init_c()
-pid_b.init_c()
 
 last_log_ms = utime.ticks_ms()
 send_line("PROBE vision_pwm")

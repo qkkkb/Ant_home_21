@@ -13,6 +13,18 @@ class Motor:
         self.direction = 0
         self.dir_wait_until = 0
 
+    def direction_waiting(self, value):
+        if self.dir_wait_until:
+            if utime.ticks_diff(utime.ticks_ms(), self.dir_wait_until) < 0:
+                return True
+            self.dir_wait_until = 0
+        if not value:
+            return False
+        dir_val = 1 if value > 0 else 0
+        if self.invert:
+            dir_val = 1 - dir_val
+        return dir_val != self.direction
+
     def duty(self, value, min_duty=0):
         value = int(value)
         if 0 < abs(value) < min_duty:

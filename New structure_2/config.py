@@ -18,13 +18,10 @@ MOTOR_DUTY_MAX = 60000
 MOTOR_DUTY_MIN = 300
 # Control
 TICK_PERIOD_MS    = 5
-PWM_SMOOTH_FACTOR = 0.4
-MAX_PWM_CHANGE    = 4800
+PWM_SMOOTH_FACTOR = 0.5
+MAX_PWM_CHANGE    = 7200
 # Camera UART
 CAM_UART_ID   = 0
 CAM_UART_BAUD = 9600
 # Follower uses the SeekFree wireless UART to receive master motion feed.
 COOP_WIRELESS_BAUD = 460800
-# Vision navigation
-NAV_LOW_SPD_TH  = 30
-NAV_CORRECT_DIV = 6

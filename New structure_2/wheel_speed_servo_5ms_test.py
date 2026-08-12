@@ -71,11 +71,7 @@ def _put_int(buf, pos, value):
 def _reset_pid(pid):
     pid.output = 0.0
     pid.err = 0.0
-    pid.err_last = 0.0
     pid.tar_spd_last = 0.0
-    pid.delta_tar = 0.0
-    pid.delta_tar_last = 0.0
-    pid.delta_ud = 0.0
     pid.param_a = 0.0
     pid.param_b = 0.0
 
@@ -103,11 +99,6 @@ def _smooth_pwm(target, last):
     if -cfg.MOTOR_DUTY_MIN < value < 0:
         return -cfg.MOTOR_DUTY_MIN
     return value
-
-
-def _production_ctrl(pid, actual, target):
-    pid.param_b = 0.0
-    return pid_mod.speed_ctrl(pid, actual, target)
 
 
 def _candidate_ctrl(pid, actual, target, adaptive_ki):
@@ -150,7 +141,6 @@ def _candidate_ctrl(pid, actual, target, adaptive_ki):
         integral = 0.0
 
     pid.err = error
-    pid.err_last = error
     pid.tar_spd_last = target
     pid.output = integral
     pid.param_b = integral
@@ -203,9 +193,6 @@ class WheelSpeedServoTest:
         self.pid_fl = SpeedPID()
         self.pid_fr = SpeedPID()
         self.pid_b = SpeedPID()
-        self.pid_fl.init_c()
-        self.pid_fr.init_c()
-        self.pid_b.init_c()
         print("BOOT 4 CONTROL")
         self.send_static("BOOT 4 CONTROL")
 

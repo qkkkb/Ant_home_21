@@ -10,27 +10,11 @@ class AnglePID:
 
 class SpeedPID:
     def __init__(self):
-        self.temp = 0.0
-        self.c1 = 0.0
-        self.c2 = 0.0
-        self.c3 = 0.0
         self.err = 0.0
-        self.err_last = 0.0
         self.tar_spd_last = 0.0
         self.output = 0.0
-        self.delta_tar_last = 0.0
-        self.delta_tar = 0.0
-        self.delta_ud = 0.0
-        self.kd = 30.0
-        self.gama = 0.25
         self.kp = 300.0
         self.ki = 8.0
-
-    def init_c(self):
-        self.temp = 1.0 / (self.gama * self.kd + self.kp)
-        self.c3 = self.kd * self.temp
-        self.c2 = (self.kd + self.kp) * self.temp
-        self.c1 = self.c3 * self.gama
 
 
 class MoveBase:

@@ -147,6 +147,11 @@ Follow_Normal_Conflict_Stop_Error = 16
 Follow_Normal_Velocity_Damping = 0.35
 Follow_Static_Velocity_Damping = 0.85
 Follow_Orbit_Velocity_Damping = 0.55
+Follow_Normal_Turn_Correction_Start_Rate = 40.0
+Follow_Normal_Turn_Correction_Full_Rate = 120.0
+Follow_Normal_Turn_Correction_Min_Scale = 0.35
+Follow_Normal_Turn_Correction_Restore_Start_Error = 12
+Follow_Normal_Turn_Correction_Restore_Full_Error = 48
 Follow_Normal_Reverse_Release_Speed = 3.0
 Follow_Command_Ramp_Vx = 2.0
 Follow_Command_Ramp_Vy = 3.0
@@ -1035,7 +1040,7 @@ def debug_send_state(log_id, gyro_z):
     global last_direction_pause_mask
 
     debug_send(
-        "D %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
+        "D %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
         % (
             log_id,
             master_flags,
@@ -1053,6 +1058,8 @@ def debug_send_state(log_id, gyro_z):
             int(gyro_z),
             master_state_code,
             int(last_ff_wz),
+            int(last_ff_vx),
+            int(last_ff_vy),
         )
     )
     last_direction_pause_mask = 0
@@ -1320,15 +1327,38 @@ def update_follow_targets(gyro_z):
             body_vx += damp_vx
             body_vy += damp_vy
             if normal_damping_active:
-                # Large yaw rate distorts the image-derived position axis.
-                # Let heading settle before trusting that correction again.
+                # A fast yaw distorts the image-derived distance axis near the
+                # target, but suppressing that axis unconditionally creates an
+                # open-loop window and lets a real following error accumulate.
+                # Keep a correction floor and restore the full position loop as
+                # the measured error grows.
                 gyro_abs = abs(gyro_z)
-                if gyro_abs > 40.0:
-                    correction_scale = (
-                        0.0
-                        if gyro_abs >= 120.0
-                        else (120.0 - gyro_abs) / 80.0
-                    )
+                if gyro_abs > Follow_Normal_Turn_Correction_Start_Rate:
+                    if gyro_abs >= Follow_Normal_Turn_Correction_Full_Rate:
+                        correction_scale = Follow_Normal_Turn_Correction_Min_Scale
+                    else:
+                        correction_scale = (
+                            Follow_Normal_Turn_Correction_Full_Rate - gyro_abs
+                        ) / (
+                            Follow_Normal_Turn_Correction_Full_Rate
+                            - Follow_Normal_Turn_Correction_Start_Rate
+                        )
+                        if correction_scale < Follow_Normal_Turn_Correction_Min_Scale:
+                            correction_scale = Follow_Normal_Turn_Correction_Min_Scale
+                    position_error = abs(cam_error_x)
+                    if position_error >= Follow_Normal_Turn_Correction_Restore_Full_Error:
+                        correction_scale = 1.0
+                    elif position_error > Follow_Normal_Turn_Correction_Restore_Start_Error:
+                        restore_scale = (
+                            position_error
+                            - Follow_Normal_Turn_Correction_Restore_Start_Error
+                        ) / (
+                            Follow_Normal_Turn_Correction_Restore_Full_Error
+                            - Follow_Normal_Turn_Correction_Restore_Start_Error
+                        )
+                        correction_scale += (
+                            1.0 - correction_scale
+                        ) * restore_scale
                     body_vx *= correction_scale
             vx = alloc_base_vx + body_vx
             vy = alloc_base_vy + body_vy

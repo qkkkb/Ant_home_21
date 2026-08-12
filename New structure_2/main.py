@@ -393,10 +393,6 @@ def clear_cam_target_state():
     cam_parse_state = 0
 
 
-def cam_target_seen():
-    return cam_has_target and utime.ticks_diff(utime.ticks_ms(), cam_last_rx_ms) <= Cam_Packet_Timeout_Ms
-
-
 def cam_target_state():
     if (
         not cam_last_rx_ms
@@ -509,7 +505,9 @@ def update_orbit_follow_mode(
         reset_turn_loop_state()
 
     settled = (
-        cam_target_seen()
+        cam_has_target
+        and utime.ticks_diff(utime.ticks_ms(), cam_last_rx_ms)
+        <= Cam_Packet_Timeout_Ms
         and -Follow_Orbit_Settle_Position_Error
         <= cam_error_x
         <= Follow_Orbit_Settle_Position_Error
@@ -1153,6 +1151,122 @@ def debug_send_state(log_id, gyro_z):
     )
 
 
+def calc_follow_yaw_output(
+    gyro_z,
+    turn_rate_cmd,
+    mode_key,
+    seen,
+    orbit_settling,
+    spin_mode_active,
+    orbit_entry_active,
+    push_follow_active,
+    orbit_mode_active,
+    angle_pose_mode_active,
+    explicit_orbit,
+    explicit_push,
+):
+    global last_cmd_wz, last_angle_priority_active
+
+    priority_turn_mode = mode_key or angle_pose_mode_active
+    gyro_brake_active = False
+    if -0.001 < turn_rate_cmd < 0.001:
+        turn_rate_cmd = 0.0
+        gyro_stop_rate = (
+            GYRO_STOP_RATE
+            if priority_turn_mode
+            else GYRO_NORMAL_STOP_RATE
+        )
+        if (
+            ENABLE_GYRO_LOOP
+            and gyro_pid is not None
+            and (priority_turn_mode or seen)
+            and (
+                gyro_z >= gyro_stop_rate
+                or gyro_z <= -gyro_stop_rate
+            )
+        ):
+            gyro_brake_active = True
+            last_cmd_wz = 0.0
+        else:
+            reset_turn_loop_state()
+    else:
+        if spin_mode_active:
+            output_ramp = 36.0
+        elif orbit_entry_active:
+            output_ramp = Follow_Orbit_Entry_Ramp_Wz
+        elif priority_turn_mode:
+            output_ramp = 18.0
+        else:
+            output_ramp = 11.0
+        turn_rate_cmd = ramp_value(turn_rate_cmd, last_cmd_wz, output_ramp)
+        last_cmd_wz = turn_rate_cmd
+    if (
+        priority_turn_mode
+        and (
+            turn_rate_cmd >= GYRO_ANGLE_PRIORITY_MIN_CMD
+            or turn_rate_cmd <= -GYRO_ANGLE_PRIORITY_MIN_CMD
+        )
+    ):
+        last_angle_priority_active = True
+    if ENABLE_GYRO_LOOP and gyro_pid is not None:
+        if turn_rate_cmd:
+            gyro_pid.gyro_kp = GYRO_KP
+            if orbit_settling:
+                gyro_pid.gyro_ki = GYRO_TURN_KI
+                gyro_pid.gyro_output_limit = GYRO_ORBIT_OUTPUT_LIMIT
+            elif spin_mode_active:
+                gyro_pid.gyro_ki = GYRO_TURN_KI
+                gyro_pid.gyro_output_limit = GYRO_SPIN_OUTPUT_LIMIT
+            elif push_follow_active:
+                gyro_pid.gyro_ki = GYRO_KI
+                gyro_pid.gyro_output_limit = GYRO_PUSH_OUTPUT_LIMIT
+            elif orbit_mode_active:
+                gyro_pid.gyro_ki = GYRO_TURN_KI
+                gyro_pid.gyro_output_limit = GYRO_ORBIT_OUTPUT_LIMIT
+            elif angle_pose_mode_active:
+                gyro_pid.gyro_ki = GYRO_KI
+                gyro_pid.gyro_output_limit = GYRO_NORMAL_POSE_OUTPUT_LIMIT
+            else:
+                gyro_pid.gyro_ki = GYRO_KI
+                gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
+        elif gyro_brake_active and (
+            orbit_settling or push_follow_active or not mode_key
+        ):
+            gyro_pid.gyro_kp = GYRO_KP
+            gyro_pid.gyro_ki = 0.0
+            gyro_pid.gyro_output_limit = (
+                GYRO_ORBIT_OUTPUT_LIMIT
+                if orbit_settling
+                else (
+                    GYRO_PUSH_OUTPUT_LIMIT
+                    if push_follow_active
+                    else GYRO_OUTPUT_LIMIT
+                )
+            )
+        if turn_rate_cmd or gyro_brake_active:
+            gyro_error = turn_rate_cmd - gyro_z
+            if (
+                (
+                    orbit_settling
+                    or not mode_key
+                    or (explicit_orbit and not explicit_push)
+                    or push_follow_active
+                )
+                and gyro_pid.err_last * gyro_error < 0.0
+            ):
+                gyro_pid.output = 0.0
+                gyro_pid.err_last = 0.0
+            return gyro_ctrl(gyro_pid, gyro_error)
+        gyro_pid.gyro_kp = GYRO_KP
+        gyro_pid.gyro_ki = GYRO_KI
+        gyro_pid.output = 0.0
+        gyro_pid.err = 0.0
+        gyro_pid.err_last = 0.0
+        last_cmd_wz = 0.0
+        return 0.0
+    return turn_rate_cmd
+
+
 def update_follow_targets(gyro_z):
     global cam_target_vx, cam_target_vy, target_lost_since_ms
     global last_turn_rate_cmd
@@ -1608,107 +1722,20 @@ def update_follow_targets(gyro_z):
         else:
             turn_rate_cmd = follow_ff_wz * Follow_Normal_Wz_Feedforward_Gain
             turn_rate_cmd *= lost_scale
-    priority_turn_mode = mode_key or angle_pose_mode_active
-    gyro_brake_active = False
-    if -0.001 < turn_rate_cmd < 0.001:
-        turn_rate_cmd = 0.0
-        gyro_stop_rate = (
-            GYRO_STOP_RATE
-            if priority_turn_mode
-            else GYRO_NORMAL_STOP_RATE
-        )
-        if (
-            ENABLE_GYRO_LOOP
-            and gyro_pid is not None
-            and (priority_turn_mode or seen)
-            and (
-                gyro_z >= gyro_stop_rate
-                or gyro_z <= -gyro_stop_rate
-            )
-        ):
-            gyro_brake_active = True
-            last_cmd_wz = 0.0
-        else:
-            reset_turn_loop_state()
-    else:
-        if spin_mode_active:
-            output_ramp = 36.0
-        elif orbit_entry_active:
-            output_ramp = Follow_Orbit_Entry_Ramp_Wz
-        elif priority_turn_mode:
-            output_ramp = 18.0
-        else:
-            output_ramp = 11.0
-        turn_rate_cmd = ramp_value(turn_rate_cmd, last_cmd_wz, output_ramp)
-        last_cmd_wz = turn_rate_cmd
-    if (
-        priority_turn_mode
-        and (
-            turn_rate_cmd >= GYRO_ANGLE_PRIORITY_MIN_CMD
-            or turn_rate_cmd <= -GYRO_ANGLE_PRIORITY_MIN_CMD
-        )
-    ):
-        angle_priority_active = True
-        last_angle_priority_active = True
-    if ENABLE_GYRO_LOOP and gyro_pid is not None:
-        if turn_rate_cmd:
-            gyro_pid.gyro_kp = GYRO_KP
-            if orbit_settling:
-                gyro_pid.gyro_ki = GYRO_TURN_KI
-                gyro_pid.gyro_output_limit = GYRO_ORBIT_OUTPUT_LIMIT
-            elif spin_mode_active:
-                gyro_pid.gyro_ki = GYRO_TURN_KI
-                gyro_pid.gyro_output_limit = GYRO_SPIN_OUTPUT_LIMIT
-            elif push_follow_active:
-                gyro_pid.gyro_ki = GYRO_KI
-                gyro_pid.gyro_output_limit = GYRO_PUSH_OUTPUT_LIMIT
-            elif orbit_mode_active:
-                gyro_pid.gyro_ki = GYRO_TURN_KI
-                gyro_pid.gyro_output_limit = GYRO_ORBIT_OUTPUT_LIMIT
-            elif angle_pose_mode_active:
-                gyro_pid.gyro_ki = GYRO_KI
-                gyro_pid.gyro_output_limit = GYRO_NORMAL_POSE_OUTPUT_LIMIT
-            else:
-                gyro_pid.gyro_ki = GYRO_KI
-                gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
-        elif gyro_brake_active and (
-            orbit_settling or push_follow_active or not mode_key
-        ):
-            gyro_pid.gyro_kp = GYRO_KP
-            gyro_pid.gyro_ki = 0.0
-            gyro_pid.gyro_output_limit = (
-                GYRO_ORBIT_OUTPUT_LIMIT
-                if orbit_settling
-                else (
-                    GYRO_PUSH_OUTPUT_LIMIT
-                    if push_follow_active
-                    else GYRO_OUTPUT_LIMIT
-                )
-            )
-        if turn_rate_cmd or gyro_brake_active:
-            gyro_error = turn_rate_cmd - gyro_z
-            if (
-                (
-                    orbit_settling
-                    or not mode_key
-                    or (explicit_orbit and not explicit_push)
-                    or push_follow_active
-                )
-                and gyro_pid.err_last * gyro_error < 0.0
-            ):
-                gyro_pid.output = 0.0
-                gyro_pid.err_last = 0.0
-            vz_cmd = gyro_ctrl(gyro_pid, gyro_error)
-        else:
-            gyro_pid.gyro_kp = GYRO_KP
-            gyro_pid.gyro_ki = GYRO_KI
-            gyro_pid.output = 0.0
-            gyro_pid.err = 0.0
-            gyro_pid.err_last = 0.0
-            vz_cmd = 0.0
-            last_cmd_wz = 0.0
-    else:
-        vz_cmd = turn_rate_cmd
+    vz_cmd = calc_follow_yaw_output(
+        gyro_z,
+        turn_rate_cmd,
+        mode_key,
+        seen,
+        orbit_settling,
+        spin_mode_active,
+        orbit_entry_active,
+        push_follow_active,
+        orbit_mode_active,
+        angle_pose_mode_active,
+        explicit_orbit,
+        explicit_push,
+    )
 
     cam_target_vx, cam_target_vy, vz_cmd = limit_pose_twist_for_wheels(
         cam_target_vx,
@@ -1788,21 +1815,12 @@ def reset_speed_outputs(keep_orbit_state=False):
     master_edge_until_ms = 0
 
 
-def clamp_duty(value):
-    value = int(value)
-    if value > MOTOR_DUTY_MAX:
-        return MOTOR_DUTY_MAX
-    if value < -MOTOR_DUTY_MAX:
-        return -MOTOR_DUTY_MAX
-    return value
-
-
 def smooth_value(target, last):
     delta = target - last
     if abs(delta) > MAX_PWM_CHANGE:
         target = last + MAX_PWM_CHANGE * (1 if delta > 0 else -1)
     target = int(last * (1.0 - PWM_SMOOTH_FACTOR) + target * PWM_SMOOTH_FACTOR)
-    return clamp_duty(target)
+    return clamp(int(target), -MOTOR_DUTY_MAX, MOTOR_DUTY_MAX)
 
 
 def apply_start_pwm(cmd, min_pwm):
@@ -1896,18 +1914,6 @@ def set_three_pwm_zero():
     last_pwm_fl = 0
     last_pwm_fr = 0
     last_pwm_b = 0
-
-
-def wheel_targets_zero(t_fl, t_fr, t_b):
-    return (
-        -WHEEL_TARGET_STOP_EPS <= t_fl <= WHEEL_TARGET_STOP_EPS
-        and -WHEEL_TARGET_STOP_EPS <= t_fr <= WHEEL_TARGET_STOP_EPS
-        and -WHEEL_TARGET_STOP_EPS <= t_b <= WHEEL_TARGET_STOP_EPS
-    )
-
-
-def encoders_stalled(e_fl, e_fr, e_b):
-    return e_fl == 0 and e_fr == 0 and e_b == 0
 
 
 def wheel_target_idle(target):
@@ -2038,7 +2044,11 @@ def calc_speed_closed_loop():
     last_enc_fr = e_fr
     last_enc_b = e_b
 
-    if wheel_targets_zero(t_fl, t_fr, t_b):
+    if (
+        -WHEEL_TARGET_STOP_EPS <= t_fl <= WHEEL_TARGET_STOP_EPS
+        and -WHEEL_TARGET_STOP_EPS <= t_fr <= WHEEL_TARGET_STOP_EPS
+        and -WHEEL_TARGET_STOP_EPS <= t_b <= WHEEL_TARGET_STOP_EPS
+    ):
         reset_speed_outputs(orbit_follow_active)
         set_three_pwm_zero()
     else:
@@ -2048,7 +2058,7 @@ def calc_speed_closed_loop():
             and wheel_target_idle(t_b)
         ):
             last_stall_count = 0
-        elif encoders_stalled(e_fl, e_fr, e_b):
+        elif e_fl == 0 and e_fr == 0 and e_b == 0:
             last_stall_count += 1
         else:
             last_stall_count = 0
@@ -2126,7 +2136,12 @@ try:
         poll_art_uart()
         poll_coop_uart()
 
-        if (not car_started) and cam_target_seen():
+        if (
+            not car_started
+            and cam_has_target
+            and utime.ticks_diff(utime.ticks_ms(), cam_last_rx_ms)
+            <= Cam_Packet_Timeout_Ms
+        ):
             start_follow()
 
         if pit_flag:

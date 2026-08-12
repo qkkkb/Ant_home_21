@@ -6,6 +6,8 @@ from seekfree import WIRELESS_UART
 
 _FRAME_LEN = 16
 _TX_PERIOD_MS = cfg.MASTER_MOTION_TX_PERIOD_MS
+_PREVIEW_SCALE = 2.0
+_STATE_PREVIEW = 0x80
 _FLAG_STARTED = 0x01
 _FLAG_TARGET = 0x02
 _FLAG_CLOSED_LOOP = 0x04
@@ -81,6 +83,15 @@ def _put_i16(idx, value):
     _tx_buf[idx + 1] = (value >> 8) & 0xFF
 
 
+def _put_i8(idx, value):
+    value = int(value)
+    if value > 127:
+        value = 127
+    elif value < -128:
+        value = -128
+    _tx_buf[idx] = value & 0xFF
+
+
 def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_vy, cmd_wz):
     global _last_tx_ms
     if _wireless is None:
@@ -91,6 +102,8 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
     vx = 0.0
     vy = 0.0
     wz = 0.0
+    preview_vx = 0.0
+    preview_vy = 0.0
     hard_stop = state_code == 17
     if car_started and not hard_stop:
         flags = _FLAG_STARTED | _FLAG_CLOSED_LOOP
@@ -101,12 +114,13 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             # 普通发车转向传递受控角速度指令，避免实测瞬态直接冲击从车。
             wz = cmd_wz
         elif state_code == 2 or state_code == 3:
-            vy = cmd_vy
-            vx = cmd_vx
-            # Translation keeps the command feedforward so the follower can
-            # react before the leader accelerates.  Heading must use measured
-            # rate: at high speed the yaw controller output no longer matches
-            # the leader's actual rigid-body rotation closely enough.
+            # Measured translation is the rigid-motion base.  The compact
+            # command delta gives the follower acceleration preview without
+            # making it chase a speed the leader has not reached yet.
+            preview_vx = cmd_vx - _vx
+            preview_vy = cmd_vy - _vy
+            vx = _vx
+            vy = _vy
             wz = _wz
         elif state_code == 6 or state_code == 10:
             vy = cmd_vy
@@ -160,7 +174,12 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
     _put_i16(5, vx * 10)
     _put_i16(7, vy * 10)
     _put_i16(9, wz * 10)
-    _put_i16(11, yaw_deg * 10)
+    if state_code == 2 or state_code == 3:
+        _put_i8(11, preview_vx * _PREVIEW_SCALE)
+        _put_i8(12, preview_vy * _PREVIEW_SCALE)
+        state_code |= _STATE_PREVIEW
+    else:
+        _put_i16(11, yaw_deg * 10)
     _put_u8(13, flags)
     _put_u8(14, state_code)
     checksum = 0

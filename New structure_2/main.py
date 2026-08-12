@@ -145,7 +145,10 @@ Follow_Normal_Allocation_Reserve = 8.0
 Follow_Normal_Correction_Reserve = 6.0
 Follow_Normal_Conflict_Start_Error = 4
 Follow_Normal_Conflict_Stop_Error = 16
-Follow_Normal_Velocity_Damping = 0.35
+Follow_Normal_Preview_Gain = 0.50
+Follow_Normal_Velocity_Damping = 0.55
+Follow_Safety_Speed_Margin = 0.12
+Master_State_Preview_Flag = 0x80
 Follow_Static_Velocity_Damping = 0.85
 Follow_Orbit_Velocity_Damping = 0.55
 Follow_Normal_Reverse_Release_Speed = 3.0
@@ -195,6 +198,8 @@ cam_parse_b2 = 0
 master_vx = 0.0
 master_vy = 0.0
 master_wz = 0.0
+master_preview_vx = 0.0
+master_preview_vy = 0.0
 master_flags = 0
 master_state_code = -1
 master_last_rx_ms = 0
@@ -583,12 +588,7 @@ def calc_follow_angle(error_angle, orbit_mode=False, spin_mode=False):
 def add_feedforward_direct(base, feedforward, gain, limit, conflict_scale=1.0):
     assist = clamp(feedforward * gain, -limit, limit)
     if base * assist < -0.001 and conflict_scale < 1.0:
-        if (
-            not master_edge_until_ms
-            or last_follow_mode_key != 0
-            or conflict_scale <= 0.0
-        ):
-            assist *= conflict_scale
+        assist *= conflict_scale
     return base + assist
 
 
@@ -806,6 +806,7 @@ def limit_pose_twist_for_wheels(
     base_vy,
     feedback_vx,
     feedback_vy,
+    safety_vx,
     preserve_feedforward,
     preserve_rotation,
 ):
@@ -834,22 +835,22 @@ def limit_pose_twist_for_wheels(
             return vx, vy, vz
         cvx = vx - base_vx
         cvy = vy - base_vy
-        ox = oy = oz = 0.0
-        wfr = wfl = wb = 0.0
-        if cam_error_x < -Follow_Forward_Deadband:
-            dfr = -cvx * 0.866025
-            dfl = cvx * 0.866025
-            scale = fit_wheel_delta_scale(wfr, wfl, wb, dfr, dfl, 0.0, limit)
-            ox = cvx * scale
-            wfr = dfr * scale
-            wfl = dfl * scale
-            cvx = 0.0
-        yaw = clamp(vz, -Follow_Normal_Allocation_Reserve, Follow_Normal_Allocation_Reserve)
-        scale = fit_wheel_delta_scale(wfr, wfl, wb, yaw, yaw, yaw, limit)
-        oz = yaw * scale
-        wfr += oz
-        wfl += oz
-        wb += oz
+        safety_vx = clamp(safety_vx, 0.0, cvx if cvx > 0.0 else 0.0)
+        core_vy = clamp(
+            cvy,
+            -Follow_Normal_Correction_Reserve,
+            Follow_Normal_Correction_Reserve,
+        )
+        core_wz = clamp(
+            vz,
+            -Follow_Normal_Allocation_Reserve,
+            Follow_Normal_Allocation_Reserve,
+        )
+        core_vx = safety_vx
+        ox = core_vx
+        oy = core_vy
+        oz = core_wz
+        wfr, wfl, wb = pose_wheel_targets(ox, oy, oz)
         dfr = -base_vx * 0.866025 + base_vy * 0.5
         dfl = base_vx * 0.866025 + base_vy * 0.5
         db = -base_vy
@@ -859,19 +860,18 @@ def limit_pose_twist_for_wheels(
         wfr += dfr * scale
         wfl += dfl * scale
         wb += db * scale
+        base_scale = scale
         yaw = vz - oz
-        scale = fit_wheel_delta_scale(wfr, wfl, wb, yaw, yaw, yaw, limit)
-        yaw *= scale
-        oz += yaw
-        wfr += yaw
-        wfl += yaw
-        wb += yaw
-        dfr = -cvx * 0.866025 + cvy * 0.5
-        dfl = cvx * 0.866025 + cvy * 0.5
-        db = -cvy
+        cvx -= core_vx
+        cvy -= core_vy
+        dfr = -cvx * 0.866025 + cvy * 0.5 + yaw
+        dfl = cvx * 0.866025 + cvy * 0.5 + yaw
+        db = -cvy + yaw
         scale = fit_wheel_delta_scale(wfr, wfl, wb, dfr, dfl, db, limit)
-        last_alloc_scale = int(scale * 100.0)
-        return ox + cvx * scale, oy + cvy * scale, oz
+        last_alloc_scale = int(
+            (scale if scale < base_scale else base_scale) * 100.0
+        )
+        return ox + cvx * scale, oy + cvy * scale, oz + yaw * scale
 
     if preserve_rotation:
         # Relative heading is the orbit constraint.  Keep the gyro-loop yaw
@@ -1001,15 +1001,35 @@ def poll_art_uart():
 
 def handle_coop_frame(msg_type, seq, payload, payload_len):
     global master_vx, master_vy, master_wz
+    global master_preview_vx, master_preview_vy
     global master_flags, master_state_code, master_last_rx_ms
 
     if msg_type != MSG_MASTER_MOTION or payload_len < 9:
         return
-    master_vx = decode_i16(payload, 0) / 10.0
-    master_vy = decode_i16(payload, 2) / 10.0
+    measured_vx = decode_i16(payload, 0) / 10.0
+    measured_vy = decode_i16(payload, 2) / 10.0
+    master_vx = measured_vx * 0.5 + measured_vy * 0.8660254
+    master_vy = measured_vy * 0.5 - measured_vx * 0.8660254
     master_wz = decode_i16(payload, 4) / 10.0
-    master_flags = payload[8]
     master_state_code = payload[9] if payload_len >= 10 else -1
+    if master_state_code >= Master_State_Preview_Flag:
+        preview_vx = payload[6]
+        preview_vy = payload[7]
+        if preview_vx >= 128:
+            preview_vx -= 256
+        if preview_vy >= 128:
+            preview_vy -= 256
+        master_preview_vx = Follow_Normal_Preview_Gain * (
+            preview_vx * 0.25 + preview_vy * 0.4330127
+        )
+        master_preview_vy = Follow_Normal_Preview_Gain * (
+            preview_vy * 0.25 - preview_vx * 0.4330127
+        )
+        master_state_code -= Master_State_Preview_Flag
+    else:
+        master_preview_vx = 0.0
+        master_preview_vy = 0.0
+    master_flags = payload[8]
     master_last_rx_ms = utime.ticks_ms()
 
 
@@ -1083,9 +1103,13 @@ def update_follow_targets(gyro_z):
     seen = cam_target_seen()
     fresh_motion = master_motion_fresh()
     if fresh_motion:
-        ff_vx = master_vx * 0.5 + master_vy * 0.8660254
-        ff_vy = master_vy * 0.5 - master_vx * 0.8660254
+        measured_ff_vx = master_vx
+        measured_ff_vy = master_vy
+        ff_vx = measured_ff_vx + master_preview_vx
+        ff_vy = measured_ff_vy + master_preview_vy
     else:
+        measured_ff_vx = 0.0
+        measured_ff_vy = 0.0
         ff_vx = 0.0
         ff_vy = 0.0
     ff_wz = master_wz if fresh_motion else 0.0
@@ -1132,7 +1156,6 @@ def update_follow_targets(gyro_z):
             Follow_Normal_Wz_Feedforward_Limit,
         )
     push_follow_active = explicit_push and orbit_mode_active
-    classification_active = fresh_motion and master_state_code == 4
     classification_exit = (
         fresh_motion
         and last_control_master_state == 4
@@ -1187,24 +1210,10 @@ def update_follow_targets(gyro_z):
         )
     ):
         follow_output_limit = FOLLOW_STATIC_LOCK_PWM_LIMIT
-    if classification_active or classification_exit:
-        master_edge_until_ms = 0
-    elif (
-        (mode_key and (not push_follow_active))
-        or (not seen)
-        or (not fresh_motion)
-        or (last_follow_mode_key != mode_key and not mode_key)
-    ):
-        master_edge_until_ms = 0
-    elif (not push_follow_active) and (
-        abs(ff_vx - last_ff_vx) >= Follow_Master_Edge_Delta
-        or abs(ff_vy - last_ff_vy) >= Follow_Master_Edge_Delta
-    ):
-        master_edge_until_ms = utime.ticks_add(now, Follow_Master_Edge_Hold_Ms)
-    elif master_edge_until_ms and utime.ticks_diff(master_edge_until_ms, now) <= 0:
-        master_edge_until_ms = 0
     if push_follow_active:
         update_push_reacquire(now, seen)
+    else:
+        master_edge_until_ms = 0
     last_follow_mode_key = mode_key
     if (
         spin_mode_active
@@ -1226,6 +1235,7 @@ def update_follow_targets(gyro_z):
     prev_angle_priority_active = last_angle_priority_active
     alloc_base_vx = 0.0
     alloc_base_vy = 0.0
+    safety_vx = 0.0
 
     if seen:
         target_lost_since_ms = 0
@@ -1291,12 +1301,18 @@ def update_follow_targets(gyro_z):
                 -Follow_Orbit_Settle_Turn_Limit,
                 Follow_Orbit_Settle_Turn_Limit,
             )
-        alloc_base_vx = vx - body_vx
-        alloc_base_vy = vy - body_vy
         normal_damping_active = (
             not mode_key and master_flags < MASTER_MOTION_FLAG_ORBIT
         )
         orbit_damping_active = explicit_orbit and not explicit_push
+        if normal_damping_active:
+            alloc_base_vx = measured_ff_vx
+            alloc_base_vy = measured_ff_vy
+            body_vx = vx - alloc_base_vx
+            body_vy = vy - alloc_base_vy
+        else:
+            alloc_base_vx = vx - body_vx
+            alloc_base_vy = vy - body_vy
         if normal_damping_active or orbit_damping_active:
             # Dampen motion relative to the preserved master feedforward.
             actual_body_vx = (last_enc_fl - last_enc_fr) * 0.5773503
@@ -1330,6 +1346,27 @@ def update_follow_targets(gyro_z):
             # suppressing it here lets a real close-distance error accumulate.
             vx = alloc_base_vx + body_vx
             vy = alloc_base_vy + body_vy
+            if normal_damping_active:
+                speed_ref = abs(measured_ff_vx)
+                if abs(measured_ff_vy) > speed_ref:
+                    speed_ref = abs(measured_ff_vy)
+                safety_trigger = (
+                    -Follow_Distance_Far_Boost_Error
+                    + speed_ref * Follow_Safety_Speed_Margin
+                )
+                if cam_error_x < safety_trigger:
+                    safety_vx = clamp(
+                        (safety_trigger - cam_error_x)
+                        * Follow_Distance_Close_Gain
+                        + max(0.0, measured_ff_vx - actual_body_vx)
+                        * Follow_Normal_Velocity_Damping,
+                        0.0,
+                        Follow_Normal_Allocation_Reserve
+                        + Follow_Normal_Correction_Reserve,
+                    )
+                    if body_vx < safety_vx:
+                        body_vx = safety_vx
+                        vx = alloc_base_vx + body_vx
         if push_follow_active:
             old_body_vx = body_vx
             body_vx *= moving_visual_scale
@@ -1412,10 +1449,6 @@ def update_follow_targets(gyro_z):
             Follow_Push_Turn_Rate_Limit,
         )
 
-    if not mode_key and seen and master_edge_until_ms and not ff_vx and not ff_vy:
-        vx = last_cmd_vx
-        vy = last_cmd_vy
-
     vx_limit = Follow_Forward_Limit
     if master_flags & MASTER_MOTION_FLAG_RETURN:
         vy_limit = Follow_Return_Lateral_Limit
@@ -1442,9 +1475,6 @@ def update_follow_targets(gyro_z):
     if orbit_entry_active:
         vx_ramp = Follow_Orbit_Entry_Ramp_Vx
         vy_ramp = Follow_Orbit_Entry_Ramp_Vy
-    elif master_edge_until_ms and not mode_key:
-        vx_ramp = 14.0
-        vy_ramp = 20.0
     elif position_priority_active:
         vx_ramp = Follow_Orbit_Command_Ramp_Vx
         vy_ramp = Follow_Orbit_Command_Ramp_Vy
@@ -1592,6 +1622,7 @@ def update_follow_targets(gyro_z):
         alloc_base_vy,
         body_vx,
         body_vy,
+        safety_vx,
         seen
         and fresh_motion
         and (
@@ -1736,8 +1767,6 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
             return 8800 if target > 0.0 else -8800
     cmd = apply_start_pwm(cmd, min_pwm)
     if not fast_reverse and last_follow_mode_key == 0 and last_pwm * cmd < 0:
-        return smooth_value(cmd, smooth_value(cmd, last_pwm))
-    if master_edge_until_ms and last_follow_mode_key == 0:
         return smooth_value(cmd, smooth_value(cmd, last_pwm))
     if last_follow_mode_key == 3:
         return smooth_value(cmd, smooth_value(cmd, last_pwm))

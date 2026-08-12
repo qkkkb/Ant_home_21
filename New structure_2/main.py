@@ -1,4 +1,5 @@
 from machine import Pin, UART
+from micropython import const
 import gc
 import utime
 from smartcar import ticker, encoder
@@ -22,10 +23,7 @@ from coop_protocol import (
 )
 
 
-speed_ctrl = _pid_mod.speed_ctrl
-gyro_ctrl = _pid_mod.gyro_ctrl
 speed_reset = _pid_mod.speed_reset
-follow_low_pwm = _pid_mod.follow_low_pwm
 fit_wheel_delta_scale = _pid_mod.fit_wheel_delta_scale
 
 
@@ -55,27 +53,27 @@ GYRO_STOP_RATE = 4.0
 GYRO_NORMAL_STOP_RATE = 12.0
 GYRO_ANGLE_PRIORITY_MIN_CMD = 6.5
 AUTO_CALIBRATE_GYRO_ON_LAUNCH = True
-GYRO_CALIBRATE_SAMPLES = 1000
-GYRO_CALIBRATE_DELAY_MS = 2
+_GYRO_CALIBRATE_SAMPLES = const(1000)
+_GYRO_CALIBRATE_DELAY_MS = const(2)
 
-GC_DIV = 50
-DEBUG_LOG_PERIOD_MS = 100
+_GC_DIV = const(50)
+_DEBUG_LOG_PERIOD_MS = const(100)
 WHEEL_TARGET_STOP_EPS = 0.05
 WHEEL_TARGET_IDLE_EPS = 1.2
 WHEEL_TARGET_NORMAL_IDLE_EPS = 0.35
-FOLLOW_STATIC_LOCK_PWM_LIMIT = 12000
-FOLLOW_RUN_PWM_LIMIT = 60000
-_pid_mod.PWM_MAX = FOLLOW_RUN_PWM_LIMIT
+_FOLLOW_STATIC_LOCK_PWM_LIMIT = const(12000)
+_FOLLOW_RUN_PWM_LIMIT = const(60000)
+_pid_mod.PWM_MAX = _FOLLOW_RUN_PWM_LIMIT
 
 
 # ====================== Camera protocol ======================
-Cam_Error_Offset = 120
-Cam_Error_Scale = 2
-Cam_Packet_Timeout_Ms = 300
-Cam_Frame_Head = 0xFF
-No_Target_Marker = 0xFE
-Line_Packet_Tag = 0xFC
-Classify_Packet_Tag = 0xFD
+_Cam_Error_Offset = const(120)
+_Cam_Error_Scale = const(2)
+_Cam_Packet_Timeout_Ms = const(300)
+_Cam_Frame_Head = const(0xFF)
+_No_Target_Marker = const(0xFE)
+_Line_Packet_Tag = const(0xFC)
+_Classify_Packet_Tag = const(0xFD)
 ART_MODE_TRACK_CMD = b"TRACK\n"
 ART_MODE_IDLE_CMD = b"IDLE\n"
 
@@ -88,13 +86,13 @@ Follow_Orbit_Lateral_Gain = 0.92
 Follow_Forward_Limit = 38.0
 Follow_Lateral_Limit = 30.0
 Follow_Return_Lateral_Limit = 32.0
-Follow_Forward_Deadband = 2
-Follow_Lateral_Deadband = 2
-Follow_Orbit_Forward_Deadband = 2
-Follow_Orbit_Lateral_Deadband = 2
-Follow_Orbit_Position_X_Error = 4
-Follow_Orbit_Position_Y_Error = 4
-Follow_Distance_Far_Boost_Error = 6
+_Follow_Forward_Deadband = const(2)
+_Follow_Lateral_Deadband = const(2)
+_Follow_Orbit_Forward_Deadband = const(2)
+_Follow_Orbit_Lateral_Deadband = const(2)
+_Follow_Orbit_Position_X_Error = const(4)
+_Follow_Orbit_Position_Y_Error = const(4)
+_Follow_Distance_Far_Boost_Error = const(6)
 Follow_Distance_Far_Boost_Gain = 0.70
 Follow_Distance_Close_Gain = 0.70
 Follow_Distance_Close_Limit = 22.0
@@ -122,23 +120,23 @@ Follow_Orbit_Feedforward_Forward_Gain = 1.30
 Follow_Orbit_Feedforward_Lateral_Gain = 0.76
 Follow_Orbit_Feedforward_Forward_Limit = 22.0
 Follow_Orbit_Feedforward_Lateral_Limit = 20.0
-Follow_Orbit_Feedforward_Close_Error = 6
-Follow_Orbit_Feedforward_Full_Error = 22
+_Follow_Orbit_Feedforward_Close_Error = const(6)
+_Follow_Orbit_Feedforward_Full_Error = const(22)
 Follow_Orbit_Feedforward_Close_Scale = 0.78
-Follow_Orbit_Close_Feedforward_Full_Error = 6
+_Follow_Orbit_Close_Feedforward_Full_Error = const(6)
 Follow_Pose_Angle_Gain = -0.68
 Follow_Pose_Angle_Limit = 40.0
 Follow_Normal_Pose_Angle_Limit = 24.0
 Follow_Orbit_Pose_Angle_Gain = -1.20
 Follow_Orbit_Pose_Angle_Limit = 32.0
-Follow_Normal_Pose_Angle_Deadband = 8
-Follow_Normal_Pose_Angle_Active_Error = 18
+_Follow_Normal_Pose_Angle_Deadband = const(8)
+_Follow_Normal_Pose_Angle_Active_Error = const(18)
 Follow_Spin_Target_Point_Wz_To_Vy = -0.08
 Follow_Spin_Wz_Feedforward_Gain = 0.95
 Follow_Spin_Wz_Feedforward_Limit = 120.0
 Follow_Spin_Turn_Rate_Limit = 128.0
-Follow_Pose_Angle_Deadband = 4
-Follow_Pose_Angle_Active_Error = 6
+_Follow_Pose_Angle_Deadband = const(4)
+_Follow_Pose_Angle_Active_Error = const(6)
 Follow_Pose_Wheel_Target_Limit = 33.0
 Follow_Normal_Wheel_Target_Limit = 38.0
 Follow_Normal_Allocation_Reserve = 8.0
@@ -148,7 +146,7 @@ Follow_Normal_Conflict_Stop_Error = 16
 Follow_Normal_Preview_Gain = 0.50
 Follow_Normal_Velocity_Damping = 0.55
 Follow_Safety_Speed_Margin = 0.12
-Master_State_Preview_Flag = 0x80
+_Master_State_Preview_Flag = const(0x80)
 Follow_Static_Velocity_Damping = 0.85
 Follow_Orbit_Velocity_Damping = 0.55
 Follow_Normal_Reverse_Release_Speed = 3.0
@@ -159,24 +157,24 @@ Follow_Orbit_Command_Ramp_Vy = 3.0
 Follow_Orbit_Entry_Ramp_Vx = 0.25
 Follow_Orbit_Entry_Ramp_Vy = 0.35
 Follow_Orbit_Entry_Ramp_Wz = 3.0
-Follow_Orbit_Entry_Hold_Ms = 250
-Follow_Target_Lost_Hold_Ms = 450
-Follow_Orbit_Settle_Position_Error = 6
-Follow_Orbit_Settle_Angle_Error = 6
+_Follow_Orbit_Entry_Hold_Ms = const(250)
+_Follow_Target_Lost_Hold_Ms = const(450)
+_Follow_Orbit_Settle_Position_Error = const(6)
+_Follow_Orbit_Settle_Angle_Error = const(6)
 Follow_Orbit_Settle_Gyro_Rate = 5.0
 Follow_Orbit_Settle_XY_Limit = 14.0
 Follow_Orbit_Settle_Turn_Limit = 32.0
-Follow_Orbit_Settle_Hold_Ms = 160
-Follow_Orbit_Settle_Timeout_Ms = 1400
+_Follow_Orbit_Settle_Hold_Ms = const(160)
+_Follow_Orbit_Settle_Timeout_Ms = const(1400)
 Follow_Orbit_Mode_FfWz_Filter = 0.22
 Follow_Normal_Wz_Feedforward_Limit = 15.0
 Follow_Normal_Target_Point_Wz_Limit = 15.0
 Follow_Spin_Latch_Min_Wz = 26.0
-Follow_Spin_Command_Hold_Ms = 900
-Follow_Spin_Latch_Release_Angle = 3
-Master_Motion_Timeout_Ms = 250
+_Follow_Spin_Command_Hold_Ms = const(900)
+_Follow_Spin_Latch_Release_Angle = const(3)
+_Master_Motion_Timeout_Ms = const(250)
 Follow_Master_Edge_Delta = 4.0
-Follow_Master_Edge_Hold_Ms = 120
+_Follow_Master_Edge_Hold_Ms = const(120)
 # ====================== Runtime state ======================
 car_started = False
 last_c9_state = 1
@@ -238,7 +236,7 @@ master_edge_until_ms = 0
 last_stall_count = 0
 last_stall_boost = False
 last_alloc_scale = 100
-follow_output_limit = FOLLOW_RUN_PWM_LIMIT
+follow_output_limit = _FOLLOW_RUN_PWM_LIMIT
 
 
 def clamp(value, low, high):
@@ -256,7 +254,7 @@ def update_push_reacquire(now, seen):
     elif not last_follow_seen:
         master_edge_until_ms = utime.ticks_add(
             now,
-            Follow_Master_Edge_Hold_Ms,
+            _Follow_Master_Edge_Hold_Ms,
         )
 
 
@@ -297,12 +295,12 @@ def angle_pose_mode_needed(error_angle, orbit_mode=False, spin_mode=False):
         return True
     if last_angle_priority_active:
         return (
-            error_angle > Follow_Normal_Pose_Angle_Deadband
-            or error_angle < -Follow_Normal_Pose_Angle_Deadband
+            error_angle > _Follow_Normal_Pose_Angle_Deadband
+            or error_angle < -_Follow_Normal_Pose_Angle_Deadband
         )
     return (
-        error_angle >= Follow_Normal_Pose_Angle_Active_Error
-        or error_angle <= -Follow_Normal_Pose_Angle_Active_Error
+        error_angle >= _Follow_Normal_Pose_Angle_Active_Error
+        or error_angle <= -_Follow_Normal_Pose_Angle_Active_Error
     )
 
 
@@ -311,26 +309,26 @@ def orbit_feedforward_position_scale(error_x, error_y):
     tmp = error_y if error_y >= 0 else -error_y
     if tmp > err_abs:
         err_abs = tmp
-    if err_abs <= Follow_Orbit_Feedforward_Close_Error:
+    if err_abs <= _Follow_Orbit_Feedforward_Close_Error:
         scale = Follow_Orbit_Feedforward_Close_Scale
-    elif err_abs >= Follow_Orbit_Feedforward_Full_Error:
+    elif err_abs >= _Follow_Orbit_Feedforward_Full_Error:
         scale = 1.0
     else:
-        span = Follow_Orbit_Feedforward_Full_Error - Follow_Orbit_Feedforward_Close_Error
+        span = _Follow_Orbit_Feedforward_Full_Error - _Follow_Orbit_Feedforward_Close_Error
         scale = Follow_Orbit_Feedforward_Close_Scale + (
-            (err_abs - Follow_Orbit_Feedforward_Close_Error)
+            (err_abs - _Follow_Orbit_Feedforward_Close_Error)
             * (1.0 - Follow_Orbit_Feedforward_Close_Scale)
             / span
         )
     depth = orbit_close_depth(error_y)
     if depth <= 0.0:
         return scale
-    if depth >= Follow_Orbit_Close_Feedforward_Full_Error:
+    if depth >= _Follow_Orbit_Close_Feedforward_Full_Error:
         return Follow_Close_Feedforward_Min_Scale
     close_scale = 1.0 - (
         (1.0 - Follow_Close_Feedforward_Min_Scale)
         * depth
-        / Follow_Orbit_Close_Feedforward_Full_Error
+        / _Follow_Orbit_Close_Feedforward_Full_Error
     )
     if close_scale < scale:
         return close_scale
@@ -338,7 +336,7 @@ def orbit_feedforward_position_scale(error_x, error_y):
 
 
 def orbit_close_depth(error_y):
-    depth = error_y - Follow_Forward_Deadband
+    depth = error_y - _Follow_Forward_Deadband
     if depth < 0:
         return 0.0
     return depth
@@ -397,7 +395,7 @@ def cam_target_state():
     if (
         not cam_last_rx_ms
         or utime.ticks_diff(utime.ticks_ms(), cam_last_rx_ms)
-        > Cam_Packet_Timeout_Ms
+        > _Cam_Packet_Timeout_Ms
     ):
         return -1
     return 1 if cam_has_target else 0
@@ -426,7 +424,7 @@ def normal_visual_scale(now, seen):
 
 
 def master_motion_fresh():
-    return utime.ticks_diff(utime.ticks_ms(), master_last_rx_ms) <= Master_Motion_Timeout_Ms
+    return utime.ticks_diff(utime.ticks_ms(), master_last_rx_ms) <= _Master_Motion_Timeout_Ms
 
 
 def update_spin_feedforward_latch(now, fresh_motion, explicit_spin, ff_wz, seen, error_angle):
@@ -439,7 +437,7 @@ def update_spin_feedforward_latch(now, fresh_motion, explicit_spin, ff_wz, seen,
         if last_follow_mode_key == 0:
             reset_speed_outputs(True)
         spin_latched_wz = ff_wz
-        spin_latch_until_ms = utime.ticks_add(now, Follow_Spin_Command_Hold_Ms)
+        spin_latch_until_ms = utime.ticks_add(now, _Follow_Spin_Command_Hold_Ms)
         return ff_wz
 
     if spin_latched_wz != 0.0:
@@ -447,9 +445,9 @@ def update_spin_feedforward_latch(now, fresh_motion, explicit_spin, ff_wz, seen,
             seen
             and -10 < cam_error_x < 10
             and -10 < cam_error_y < 10
-            and -Follow_Spin_Latch_Release_Angle
+            and -_Follow_Spin_Latch_Release_Angle
             <= error_angle
-            <= Follow_Spin_Latch_Release_Angle
+            <= _Follow_Spin_Latch_Release_Angle
         ):
             spin_latched_wz = 0.0
             spin_latch_until_ms = 0
@@ -507,16 +505,16 @@ def update_orbit_follow_mode(
     settled = (
         cam_has_target
         and utime.ticks_diff(utime.ticks_ms(), cam_last_rx_ms)
-        <= Cam_Packet_Timeout_Ms
-        and -Follow_Orbit_Settle_Position_Error
+        <= _Cam_Packet_Timeout_Ms
+        and -_Follow_Orbit_Settle_Position_Error
         <= cam_error_x
-        <= Follow_Orbit_Settle_Position_Error
-        and -Follow_Orbit_Settle_Position_Error
+        <= _Follow_Orbit_Settle_Position_Error
+        and -_Follow_Orbit_Settle_Position_Error
         <= cam_error_y
-        <= Follow_Orbit_Settle_Position_Error
-        and -Follow_Orbit_Settle_Angle_Error
+        <= _Follow_Orbit_Settle_Position_Error
+        and -_Follow_Orbit_Settle_Angle_Error
         <= cam_error_angle
-        <= Follow_Orbit_Settle_Angle_Error
+        <= _Follow_Orbit_Settle_Angle_Error
         and -Follow_Orbit_Settle_Gyro_Rate
         <= gyro_z
         <= Follow_Orbit_Settle_Gyro_Rate
@@ -526,7 +524,7 @@ def update_orbit_follow_mode(
             orbit_follow_settle_since_ms = now
         elif (
             utime.ticks_diff(now, orbit_follow_settle_since_ms)
-            >= Follow_Orbit_Settle_Hold_Ms
+            >= _Follow_Orbit_Settle_Hold_Ms
         ):
             orbit_follow_active = False
     else:
@@ -535,7 +533,7 @@ def update_orbit_follow_mode(
     if (
         orbit_follow_active
         and utime.ticks_diff(now, orbit_follow_exit_since_ms)
-        >= Follow_Orbit_Settle_Timeout_Ms
+        >= _Follow_Orbit_Settle_Timeout_Ms
     ):
         orbit_follow_active = False
 
@@ -553,8 +551,8 @@ def follow_limit(base_limit, master_value):
 
 
 def calc_follow_forward(error_y, position_priority=False):
-    deadband = Follow_Orbit_Forward_Deadband if position_priority else Follow_Forward_Deadband
-    if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
+    deadband = _Follow_Orbit_Forward_Deadband if position_priority else _Follow_Forward_Deadband
+    if follow_output_limit == _FOLLOW_STATIC_LOCK_PWM_LIMIT:
         deadband = 1
     error_y = soft_deadband(error_y, deadband, deadband * 2)
     if error_y == 0.0:
@@ -563,9 +561,9 @@ def calc_follow_forward(error_y, position_priority=False):
     if error_y > 0:
         gain = Follow_Orbit_Forward_Gain if position_priority else Follow_Forward_Gain
         out = error_y * gain
-        if error_y > Follow_Distance_Far_Boost_Error:
+        if error_y > _Follow_Distance_Far_Boost_Error:
             out += (
-                error_y - Follow_Distance_Far_Boost_Error
+                error_y - _Follow_Distance_Far_Boost_Error
             ) * Follow_Distance_Far_Boost_Gain
         return clamp(out, 0.0, Follow_Forward_Limit)
 
@@ -574,8 +572,8 @@ def calc_follow_forward(error_y, position_priority=False):
 
 
 def calc_follow_lateral(error_x, position_priority=False):
-    deadband = Follow_Orbit_Lateral_Deadband if position_priority else Follow_Lateral_Deadband
-    if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
+    deadband = _Follow_Orbit_Lateral_Deadband if position_priority else _Follow_Lateral_Deadband
+    if follow_output_limit == _FOLLOW_STATIC_LOCK_PWM_LIMIT:
         deadband = 1
     error_x = soft_deadband(error_x, deadband, deadband * 2)
     if error_x == 0.0:
@@ -587,16 +585,16 @@ def calc_follow_lateral(error_x, position_priority=False):
 
 def calc_follow_angle(error_angle, orbit_mode=False, spin_mode=False):
     if orbit_mode or spin_mode:
-        deadband = Follow_Pose_Angle_Deadband
-        full_error = Follow_Pose_Angle_Active_Error
+        deadband = _Follow_Pose_Angle_Deadband
+        full_error = _Follow_Pose_Angle_Active_Error
     else:
         deadband = (
             10
-            if follow_output_limit < FOLLOW_RUN_PWM_LIMIT
+            if follow_output_limit < _FOLLOW_RUN_PWM_LIMIT
             and -0.001 < last_turn_rate_cmd < 0.001
-            else Follow_Normal_Pose_Angle_Deadband
+            else _Follow_Normal_Pose_Angle_Deadband
         )
-        full_error = Follow_Normal_Pose_Angle_Active_Error
+        full_error = _Follow_Normal_Pose_Angle_Active_Error
     error_angle = soft_deadband(error_angle, deadband, full_error)
     if error_angle == 0.0:
         return 0.0
@@ -649,9 +647,9 @@ def solve_follow_pose_twist(
             Follow_Normal_Pose_Angle_Limit,
         )
     active_error = (
-        Follow_Pose_Angle_Active_Error
+        _Follow_Pose_Angle_Active_Error
         if (orbit_mode or spin_mode)
-        else Follow_Normal_Pose_Angle_Active_Error
+        else _Follow_Normal_Pose_Angle_Active_Error
     )
     angle_active = (
         error_angle >= active_error
@@ -663,10 +661,10 @@ def solve_follow_pose_twist(
     if orbit_mode or spin_mode:
         position_priority = (
             (angle_active and (not spin_mode))
-            or cam_vy >= Follow_Orbit_Position_X_Error
-            or cam_vy <= -Follow_Orbit_Position_X_Error
-            or cam_vx >= Follow_Orbit_Position_Y_Error
-            or cam_vx <= -Follow_Orbit_Position_Y_Error
+            or cam_vy >= _Follow_Orbit_Position_X_Error
+            or cam_vy <= -_Follow_Orbit_Position_X_Error
+            or cam_vx >= _Follow_Orbit_Position_Y_Error
+            or cam_vx <= -_Follow_Orbit_Position_Y_Error
         )
     else:
         position_priority = False
@@ -1033,35 +1031,35 @@ def poll_art_uart():
         i += 1
 
         if cam_parse_state == 0:
-            if b == Cam_Frame_Head:
+            if b == _Cam_Frame_Head:
                 cam_parse_state = 1
         elif cam_parse_state == 1:
-            if b != Cam_Frame_Head:
+            if b != _Cam_Frame_Head:
                 cam_parse_b1 = b
                 cam_parse_state = 2
         elif cam_parse_state == 2:
             cam_parse_b2 = b
-            if cam_parse_b1 == No_Target_Marker and b == No_Target_Marker:
+            if cam_parse_b1 == _No_Target_Marker and b == _No_Target_Marker:
                 cam_has_target = False
                 cam_last_rx_ms = utime.ticks_ms()
                 cam_parse_state = 0
-            elif cam_parse_b1 == Line_Packet_Tag or cam_parse_b1 == Classify_Packet_Tag:
+            elif cam_parse_b1 == _Line_Packet_Tag or cam_parse_b1 == _Classify_Packet_Tag:
                 cam_last_rx_ms = utime.ticks_ms()
                 cam_parse_state = 0
             else:
                 cam_parse_state = 3
         else:
-            if b == Cam_Frame_Head:
+            if b == _Cam_Frame_Head:
                 err_angle = 0
                 cam_parse_state = 1
             else:
-                err_angle = (b - Cam_Error_Offset) * Cam_Error_Scale
+                err_angle = (b - _Cam_Error_Offset) * _Cam_Error_Scale
                 cam_parse_state = 0
             cam_has_target = True
             target_lost_since_ms = 0
             update_cam_target(
-                (cam_parse_b1 - Cam_Error_Offset) * Cam_Error_Scale,
-                (cam_parse_b2 - Cam_Error_Offset) * Cam_Error_Scale,
+                (cam_parse_b1 - _Cam_Error_Offset) * _Cam_Error_Scale,
+                (cam_parse_b2 - _Cam_Error_Offset) * _Cam_Error_Scale,
                 err_angle,
             )
 
@@ -1079,7 +1077,7 @@ def handle_coop_frame(msg_type, seq, payload, payload_len):
     master_vy = measured_vy * 0.5 - measured_vx * 0.8660254
     master_wz = decode_i16(payload, 4) / 10.0
     master_state_code = payload[9] if payload_len >= 10 else -1
-    if master_state_code >= Master_State_Preview_Flag:
+    if master_state_code >= _Master_State_Preview_Flag:
         preview_vx = payload[6]
         preview_vy = payload[7]
         if preview_vx >= 128:
@@ -1092,7 +1090,7 @@ def handle_coop_frame(msg_type, seq, payload, payload_len):
         master_preview_vy = Follow_Normal_Preview_Gain * (
             preview_vy * 0.25 - preview_vx * 0.4330127
         )
-        master_state_code -= Master_State_Preview_Flag
+        master_state_code -= _Master_State_Preview_Flag
     else:
         master_preview_vx = 0.0
         master_preview_vy = 0.0
@@ -1111,7 +1109,7 @@ def poll_coop_uart():
 
 def debug_due(now):
     global debug_log_last_ms
-    if utime.ticks_diff(now, debug_log_last_ms) < DEBUG_LOG_PERIOD_MS:
+    if utime.ticks_diff(now, debug_log_last_ms) < _DEBUG_LOG_PERIOD_MS:
         return False
     debug_log_last_ms = now
     return True
@@ -1256,7 +1254,7 @@ def calc_follow_yaw_output(
             ):
                 gyro_pid.output = 0.0
                 gyro_pid.err_last = 0.0
-            return gyro_ctrl(gyro_pid, gyro_error)
+            return _pid_mod.gyro_ctrl(gyro_pid, gyro_error)
         gyro_pid.gyro_kp = GYRO_KP
         gyro_pid.gyro_ki = GYRO_KI
         gyro_pid.output = 0.0
@@ -1368,7 +1366,7 @@ def update_follow_targets(gyro_z):
         if mode_key == 1 and explicit_orbit and not explicit_push:
             orbit_follow_entry_until_ms = utime.ticks_add(
                 now,
-                Follow_Orbit_Entry_Hold_Ms,
+                _Follow_Orbit_Entry_Hold_Ms,
             )
         else:
             orbit_follow_entry_until_ms = 0
@@ -1384,7 +1382,7 @@ def update_follow_targets(gyro_z):
         and not explicit_push
         and orbit_follow_entry_until_ms
     )
-    follow_output_limit = FOLLOW_RUN_PWM_LIMIT
+    follow_output_limit = _FOLLOW_RUN_PWM_LIMIT
     if (
         not mode_key
         and -Follow_Master_Edge_Delta < ff_vx < Follow_Master_Edge_Delta
@@ -1395,7 +1393,7 @@ def update_follow_targets(gyro_z):
             or (-10 < cam_error_x < 10 and -10 < cam_error_y < 10)
         )
     ):
-        follow_output_limit = FOLLOW_STATIC_LOCK_PWM_LIMIT
+        follow_output_limit = _FOLLOW_STATIC_LOCK_PWM_LIMIT
     if push_follow_active:
         update_push_reacquire(now, seen)
     elif mode_key:
@@ -1456,7 +1454,7 @@ def update_follow_targets(gyro_z):
             push_follow_active,
             moving_visual_scale,
         )
-        if follow_output_limit == FOLLOW_STATIC_LOCK_PWM_LIMIT:
+        if follow_output_limit == _FOLLOW_STATIC_LOCK_PWM_LIMIT:
             vx -= body_vx * (1.0 - Follow_Static_Visual_Scale)
             vy -= body_vy * (1.0 - Follow_Static_Visual_Scale)
             body_vx *= Follow_Static_Visual_Scale
@@ -1512,7 +1510,7 @@ def update_follow_targets(gyro_z):
             ) / 3.0
             if orbit_damping_active:
                 velocity_damping = Follow_Orbit_Velocity_Damping
-            elif follow_output_limit < FOLLOW_RUN_PWM_LIMIT:
+            elif follow_output_limit < _FOLLOW_RUN_PWM_LIMIT:
                 velocity_damping = Follow_Static_Velocity_Damping
             else:
                 velocity_damping = Follow_Normal_Velocity_Damping
@@ -1542,7 +1540,7 @@ def update_follow_targets(gyro_z):
                 if abs(measured_ff_vy) > speed_ref:
                     speed_ref = abs(measured_ff_vy)
                 safety_trigger = (
-                    -Follow_Distance_Far_Boost_Error
+                    -_Follow_Distance_Far_Boost_Error
                     + speed_ref * Follow_Safety_Speed_Margin
                 )
                 if cam_error_x < safety_trigger:
@@ -1585,7 +1583,7 @@ def update_follow_targets(gyro_z):
                 else (
                     300
                     if not mode_key
-                    else Follow_Target_Lost_Hold_Ms
+                    else _Follow_Target_Lost_Hold_Ms
                 )
             )
         if use_motion_feedforward:
@@ -1595,7 +1593,7 @@ def update_follow_targets(gyro_z):
                 vx = ff_vx * lost_scale
                 vy = ff_vy * lost_scale
                 if (
-                    cam_error_x < -Follow_Distance_Far_Boost_Error
+                    cam_error_x < -_Follow_Distance_Far_Boost_Error
                     and vx < 0.0
                 ):
                     vx = 0.0
@@ -1829,7 +1827,7 @@ def apply_start_pwm(cmd, min_pwm):
         cmd = min_pwm
     elif -min_pwm < cmd < 0:
         cmd = -min_pwm
-    return clamp(cmd, -FOLLOW_RUN_PWM_LIMIT, FOLLOW_RUN_PWM_LIMIT)
+    return clamp(cmd, -_FOLLOW_RUN_PWM_LIMIT, _FOLLOW_RUN_PWM_LIMIT)
 
 
 def follow_start_pwm_for_target(target, stall_boost):
@@ -1839,7 +1837,7 @@ def follow_start_pwm_for_target(target, stall_boost):
     if stall_boost and target_abs >= 2.8:
         return 8800
     if (
-        follow_output_limit < FOLLOW_RUN_PWM_LIMIT
+        follow_output_limit < _FOLLOW_RUN_PWM_LIMIT
         and target_abs < 2.8
     ):
         return 2600
@@ -1858,12 +1856,12 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
     min_pwm = follow_start_pwm_for_target(target, stall_boost)
     if min_pwm <= 0:
         if not _orbit:
-            if follow_output_limit < FOLLOW_RUN_PWM_LIMIT and cmd:
+            if follow_output_limit < _FOLLOW_RUN_PWM_LIMIT and cmd:
                 if last_pwm * cmd < 0:
                     return 0
                 return smooth_value(cmd, last_pwm)
             return 0
-        return follow_low_pwm(
+        return _pid_mod.follow_low_pwm(
             cmd,
             target,
             speed_err,
@@ -1934,7 +1932,7 @@ def speed_ctrl_follow(pid, motor, actual_speed, target_speed):
         if not _orbit:
             speed_reset(pid)
             if (
-                follow_output_limit < FOLLOW_RUN_PWM_LIMIT
+                follow_output_limit < _FOLLOW_RUN_PWM_LIMIT
                 and (
                     actual_speed > WHEEL_TARGET_NORMAL_IDLE_EPS
                     or actual_speed < -WHEEL_TARGET_NORMAL_IDLE_EPS
@@ -1946,7 +1944,7 @@ def speed_ctrl_follow(pid, motor, actual_speed, target_speed):
                     6000.0,
                 )
             return 0.0
-    return speed_ctrl(
+    return _pid_mod.speed_ctrl(
         pid,
         actual_speed,
         target_speed,
@@ -1963,8 +1961,8 @@ def calibrate_gyro_before_launch():
         pit1.stop()
         try:
             imu_runtime.calibrate_offset(
-                samples=GYRO_CALIBRATE_SAMPLES,
-                delay_ms=GYRO_CALIBRATE_DELAY_MS,
+                samples=_GYRO_CALIBRATE_SAMPLES,
+                delay_ms=_GYRO_CALIBRATE_DELAY_MS,
                 logger=None,
             )
             imu_runtime.reset_yaw(0.0)
@@ -2140,7 +2138,7 @@ try:
             not car_started
             and cam_has_target
             and utime.ticks_diff(utime.ticks_ms(), cam_last_rx_ms)
-            <= Cam_Packet_Timeout_Ms
+            <= _Cam_Packet_Timeout_Ms
         ):
             start_follow()
 
@@ -2152,7 +2150,7 @@ try:
             led.toggle()
             last_status_ms = now
 
-        if loop_count % GC_DIV == 0:
+        if loop_count % _GC_DIV == 0:
             gc.collect()
 
         utime.sleep_ms(1)

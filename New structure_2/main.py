@@ -5,8 +5,7 @@ import utime
 from smartcar import ticker, encoder
 from seekfree import WIRELESS_UART
 from lsm6dsv16x_gyro_runtime import LSM6DSV16XYawRuntime
-from models import AnglePID, MoveBase, SpeedPID
-from move_base import calc_wheel_spd
+from move_base import calc_wheel_spd_into
 import pid as _pid_mod
 import config as cfg
 from hardware import Motor
@@ -22,9 +21,9 @@ from coop_protocol import (
     decode_i16,
 )
 
+gc.collect()
 
 speed_reset = _pid_mod.speed_reset
-fit_wheel_delta_scale = _pid_mod.fit_wheel_delta_scale
 
 
 # ====================== Base config ======================
@@ -35,29 +34,14 @@ MOTOR_DUTY_MIN = cfg.MOTOR_DUTY_MIN
 PWM_SMOOTH_FACTOR = cfg.PWM_SMOOTH_FACTOR
 MAX_PWM_CHANGE = cfg.MAX_PWM_CHANGE
 
-ENABLE_GYRO_LOOP = True
-ENABLE_IMU = ENABLE_GYRO_LOOP
-GYRO_SIGN = 1.0
-GYRO_OFFSET_Z = 0.0
-GYRO_SCALE = -1.0
-GYRO_DEADBAND_DPS = 0.8
 GYRO_KP = 0.04
 GYRO_KI = 0.004
 GYRO_TURN_KI = 0.002
 GYRO_OUTPUT_LIMIT = 12.0
-GYRO_NORMAL_POSE_OUTPUT_LIMIT = 16.0
 GYRO_PUSH_OUTPUT_LIMIT = 16.0
 GYRO_ORBIT_OUTPUT_LIMIT = 18.0
-GYRO_SPIN_OUTPUT_LIMIT = 18.0
-GYRO_STOP_RATE = 4.0
-GYRO_NORMAL_STOP_RATE = 12.0
 GYRO_ANGLE_PRIORITY_MIN_CMD = 6.5
-AUTO_CALIBRATE_GYRO_ON_LAUNCH = True
-_GYRO_CALIBRATE_SAMPLES = const(1000)
-_GYRO_CALIBRATE_DELAY_MS = const(2)
 
-_GC_DIV = const(50)
-_DEBUG_LOG_PERIOD_MS = const(100)
 WHEEL_TARGET_STOP_EPS = 0.05
 WHEEL_TARGET_IDLE_EPS = 1.2
 WHEEL_TARGET_NORMAL_IDLE_EPS = 0.35
@@ -75,7 +59,6 @@ _No_Target_Marker = const(0xFE)
 _Line_Packet_Tag = const(0xFC)
 _Classify_Packet_Tag = const(0xFD)
 ART_MODE_TRACK_CMD = b"TRACK\n"
-ART_MODE_IDLE_CMD = b"IDLE\n"
 
 
 # ====================== Follow control ======================
@@ -137,8 +120,6 @@ Follow_Spin_Wz_Feedforward_Limit = 120.0
 Follow_Spin_Turn_Rate_Limit = 128.0
 _Follow_Pose_Angle_Deadband = const(4)
 _Follow_Pose_Angle_Active_Error = const(6)
-Follow_Pose_Wheel_Target_Limit = 33.0
-Follow_Normal_Wheel_Target_Limit = 38.0
 Follow_Normal_Allocation_Reserve = 8.0
 Follow_Normal_Correction_Reserve = 6.0
 Follow_Normal_Conflict_Start_Error = 4
@@ -550,39 +531,6 @@ def follow_limit(base_limit, master_value):
     return limit
 
 
-def calc_follow_forward(error_y, position_priority=False):
-    deadband = _Follow_Orbit_Forward_Deadband if position_priority else _Follow_Forward_Deadband
-    if follow_output_limit == _FOLLOW_STATIC_LOCK_PWM_LIMIT:
-        deadband = 1
-    error_y = soft_deadband(error_y, deadband, deadband * 2)
-    if error_y == 0.0:
-        return 0.0
-
-    if error_y > 0:
-        gain = Follow_Orbit_Forward_Gain if position_priority else Follow_Forward_Gain
-        out = error_y * gain
-        if error_y > _Follow_Distance_Far_Boost_Error:
-            out += (
-                error_y - _Follow_Distance_Far_Boost_Error
-            ) * Follow_Distance_Far_Boost_Gain
-        return clamp(out, 0.0, Follow_Forward_Limit)
-
-    out = error_y * Follow_Distance_Close_Gain
-    return clamp(out, -Follow_Distance_Close_Limit, 0.0)
-
-
-def calc_follow_lateral(error_x, position_priority=False):
-    deadband = _Follow_Orbit_Lateral_Deadband if position_priority else _Follow_Lateral_Deadband
-    if follow_output_limit == _FOLLOW_STATIC_LOCK_PWM_LIMIT:
-        deadband = 1
-    error_x = soft_deadband(error_x, deadband, deadband * 2)
-    if error_x == 0.0:
-        return 0.0
-    gain = Follow_Orbit_Lateral_Gain if position_priority else Follow_Lateral_Gain
-    out = error_x * gain
-    return clamp(out, -Follow_Lateral_Limit, Follow_Lateral_Limit)
-
-
 def calc_follow_angle(error_angle, orbit_mode=False, spin_mode=False):
     if orbit_mode or spin_mode:
         deadband = _Follow_Pose_Angle_Deadband
@@ -621,6 +569,7 @@ def add_feedforward_direct(base, feedforward, gain, limit, conflict_scale=1.0):
 
 
 def solve_follow_pose_twist(
+    out,
     error_x,
     error_y,
     error_angle,
@@ -668,10 +617,56 @@ def solve_follow_pose_twist(
         )
     else:
         position_priority = False
-    body_vx = -calc_follow_forward(cam_vx, position_priority)
+    deadband = (
+        _Follow_Orbit_Forward_Deadband
+        if position_priority
+        else _Follow_Forward_Deadband
+    )
+    if follow_output_limit == _FOLLOW_STATIC_LOCK_PWM_LIMIT:
+        deadband = 1
+    forward_error = soft_deadband(cam_vx, deadband, deadband * 2)
+    if forward_error == 0.0:
+        body_vx = 0.0
+    elif forward_error > 0:
+        gain = (
+            Follow_Orbit_Forward_Gain
+            if position_priority
+            else Follow_Forward_Gain
+        )
+        body_vx = forward_error * gain
+        if forward_error > _Follow_Distance_Far_Boost_Error:
+            body_vx += (
+                forward_error - _Follow_Distance_Far_Boost_Error
+            ) * Follow_Distance_Far_Boost_Gain
+        body_vx = clamp(body_vx, 0.0, Follow_Forward_Limit)
+    else:
+        body_vx = clamp(
+            forward_error * Follow_Distance_Close_Gain,
+            -Follow_Distance_Close_Limit,
+            0.0,
+        )
+    body_vx = -body_vx
     if push_mode and -8.0 < cam_vx < 8.0:
         body_vx *= 0.55
-    body_vy = calc_follow_lateral(cam_vy, position_priority)
+    deadband = (
+        _Follow_Orbit_Lateral_Deadband
+        if position_priority
+        else _Follow_Lateral_Deadband
+    )
+    if follow_output_limit == _FOLLOW_STATIC_LOCK_PWM_LIMIT:
+        deadband = 1
+    body_vy = soft_deadband(cam_vy, deadband, deadband * 2)
+    if body_vy != 0.0:
+        gain = (
+            Follow_Orbit_Lateral_Gain
+            if position_priority
+            else Follow_Lateral_Gain
+        )
+        body_vy = clamp(
+            body_vy * gain,
+            -Follow_Lateral_Limit,
+            Follow_Lateral_Limit,
+        )
     if (
         push_mode
         and error_x < 40
@@ -805,210 +800,22 @@ def solve_follow_pose_twist(
             -Follow_Spin_Turn_Rate_Limit,
             Follow_Spin_Turn_Rate_Limit,
         )
-    return vx, vy, wz, body_vx, body_vy, angle_active, position_priority
-
-
-def pose_wheel_targets(vx, vy, vz):
-    wheel_fr = -vx * 0.866025 + vy * 0.5 + vz
-    wheel_fl = vx * 0.866025 + vy * 0.5 + vz
-    wheel_b = -vy + vz
-    return wheel_fr, wheel_fl, wheel_b
-
-
-def max_wheel_abs(wheel_fr, wheel_fl, wheel_b):
-    max_abs = abs(wheel_fr)
-    tmp = abs(wheel_fl)
-    if tmp > max_abs:
-        max_abs = tmp
-    tmp = abs(wheel_b)
-    if tmp > max_abs:
-        max_abs = tmp
-    return max_abs
-
-
-def limit_pose_twist_for_wheels(
-    vx,
-    vy,
-    vz,
-    base_vx,
-    base_vy,
-    feedback_vx,
-    feedback_vy,
-    safety_vx,
-    preview_vx,
-    preview_vy,
-    preserve_feedforward,
-    preserve_rotation,
-):
-    global last_alloc_scale
-
-    limit = (
-        Follow_Normal_Wheel_Target_Limit
-        if preserve_feedforward
-        else Follow_Pose_Wheel_Target_Limit
-    )
-    if limit <= 0.0:
-        last_alloc_scale = 100
-        return vx, vy, vz
-
-    normal_priority = (
-        preserve_feedforward
-        and last_follow_mode_key == 0
-        and 0 < master_flags < MASTER_MOTION_FLAG_ORBIT
-    )
-    if normal_priority:
-        wfr = -vx * 0.866025 + vy * 0.5 + vz
-        wfl = vx * 0.866025 + vy * 0.5 + vz
-        wb = -vy + vz
-        if max_wheel_abs(wfr, wfl, wb) <= limit:
-            last_alloc_scale = 100
-            return vx, vy, vz
-        cvx = vx - base_vx
-        cvy = vy - base_vy
-        preview_vx = clamp(
-            preview_vx,
-            cvx if cvx < 0.0 else 0.0,
-            cvx if cvx > 0.0 else 0.0,
-        )
-        preview_vy = clamp(
-            preview_vy,
-            cvy if cvy < 0.0 else 0.0,
-            cvy if cvy > 0.0 else 0.0,
-        )
-        corr_vx = cvx - preview_vx
-        corr_vy = cvy - preview_vy
-        safety_vx = clamp(
-            safety_vx,
-            0.0,
-            min(
-                Follow_Normal_Allocation_Reserve
-                + Follow_Normal_Correction_Reserve,
-                corr_vx if corr_vx > 0.0 else 0.0,
-            ),
-        )
-        core_vy = clamp(
-            corr_vy,
-            -Follow_Normal_Correction_Reserve,
-            Follow_Normal_Correction_Reserve,
-        )
-        core_wz = clamp(
-            vz,
-            -Follow_Normal_Allocation_Reserve,
-            Follow_Normal_Allocation_Reserve,
-        )
-        core_vx = safety_vx
-        ox = core_vx
-        oy = core_vy
-        oz = core_wz
-        wfr, wfl, wb = pose_wheel_targets(ox, oy, oz)
-        dfr = -base_vx * 0.866025 + base_vy * 0.5
-        dfl = base_vx * 0.866025 + base_vy * 0.5
-        db = -base_vy
-        scale = fit_wheel_delta_scale(wfr, wfl, wb, dfr, dfl, db, limit)
-        ox += base_vx * scale
-        oy += base_vy * scale
-        wfr += dfr * scale
-        wfl += dfl * scale
-        wb += db * scale
-        base_scale = scale
-        dfr, dfl, db = pose_wheel_targets(preview_vx, preview_vy, 0.0)
-        preview_scale = fit_wheel_delta_scale(
-            wfr, wfl, wb, dfr, dfl, db, limit
-        )
-        ox += preview_vx * preview_scale
-        oy += preview_vy * preview_scale
-        wfr += dfr * preview_scale
-        wfl += dfl * preview_scale
-        wb += db * preview_scale
-        yaw = vz - oz
-        corr_vx -= core_vx
-        corr_vy -= core_vy
-        dfr = -corr_vx * 0.866025 + corr_vy * 0.5 + yaw
-        dfl = corr_vx * 0.866025 + corr_vy * 0.5 + yaw
-        db = -corr_vy + yaw
-        scale = fit_wheel_delta_scale(wfr, wfl, wb, dfr, dfl, db, limit)
-        if base_scale < 0.999:
-            last_alloc_scale = -max(1, int(base_scale * 100.0))
-        else:
-            extra_scale = scale if scale < preview_scale else preview_scale
-            last_alloc_scale = int(extra_scale * 100.0)
-        return (
-            ox + corr_vx * scale,
-            oy + corr_vy * scale,
-            oz + yaw * scale,
-        )
-
-    if preserve_rotation:
-        # Relative heading is the orbit constraint.  Keep the gyro-loop yaw
-        # output and fit translation into the wheel headroom that remains.
-        vz = clamp(vz, -limit, limit)
-        wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, 0.0)
-        scale = fit_wheel_delta_scale(
-            vz, vz, vz, wheel_fr, wheel_fl, wheel_b, limit
-        )
-        last_alloc_scale = int(scale * 100.0)
-        return vx * scale, vy * scale, vz
-
-    if not preserve_feedforward:
-        wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(vx, vy, vz)
-        target_max = max_wheel_abs(wheel_fr, wheel_fl, wheel_b)
-        if target_max > limit:
-            scale = limit / target_max
-            vx *= scale
-            vy *= scale
-            vz *= scale
-            last_alloc_scale = int(scale * 100.0)
-        else:
-            last_alloc_scale = 100
-        return vx, vy, vz
-
-    # Keep the master's rigid-motion feedforward, but reserve wheel-speed
-    # headroom for the visual correction.  The correction still uses one
-    # common scale, so its X/Y direction cannot be distorted by saturation.
-    corr_vx = vx - base_vx
-    corr_vy = vy - base_vy
-    wheel_fr, wheel_fl, wheel_b = pose_wheel_targets(base_vx, base_vy, 0.0)
-    base_max = max_wheel_abs(wheel_fr, wheel_fl, wheel_b)
-    corr_fr, corr_fl, corr_b = pose_wheel_targets(corr_vx, corr_vy, vz)
-    reserve_fr, reserve_fl, reserve_b = pose_wheel_targets(
-        feedback_vx,
-        feedback_vy,
-        vz,
-    )
-    reserve = max_wheel_abs(reserve_fr, reserve_fl, reserve_b)
-    if reserve > Follow_Normal_Allocation_Reserve:
-        reserve = Follow_Normal_Allocation_Reserve
-    base_limit = limit - reserve
-    base_scale = 1.0
-    if base_max > base_limit:
-        base_scale = base_limit / base_max
-        base_vx *= base_scale
-        base_vy *= base_scale
-        wheel_fr *= base_scale
-        wheel_fl *= base_scale
-        wheel_b *= base_scale
-
-    scale = fit_wheel_delta_scale(
-        wheel_fr, wheel_fl, wheel_b, corr_fr, corr_fl, corr_b, limit
-    )
-    last_alloc_scale = int(
-        (scale if scale < base_scale else base_scale) * 100.0
-    )
-    return (
-        base_vx + corr_vx * scale,
-        base_vy + corr_vy * scale,
-        vz * scale,
-    )
+    out[0] = vx
+    out[1] = vy
+    out[2] = wz
+    out[3] = body_vx
+    out[4] = body_vy
+    out[5] = angle_active
+    out[6] = position_priority
 
 
 def reset_turn_loop_state():
     global last_cmd_wz
 
     last_cmd_wz = 0.0
-    if ENABLE_GYRO_LOOP and gyro_pid is not None:
-        gyro_pid.output = 0.0
-        gyro_pid.err = 0.0
-        gyro_pid.err_last = 0.0
+    gyro_pid.output = 0.0
+    gyro_pid.err = 0.0
+    gyro_pid.err_last = 0.0
 
 
 def poll_art_uart():
@@ -1107,46 +914,34 @@ def poll_coop_uart():
         pass
 
 
-def debug_due(now):
-    global debug_log_last_ms
-    if utime.ticks_diff(now, debug_log_last_ms) < _DEBUG_LOG_PERIOD_MS:
-        return False
-    debug_log_last_ms = now
-    return True
-
-
-def debug_send(text):
+def debug_send_state(log_id, gyro_z):
     try:
-        wireless.send_str(text)
+        wireless.send_str(
+            "D %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
+            % (
+                log_id,
+                master_flags,
+                cam_target_state(),
+                last_alloc_scale,
+                int(control_buf[0] * 10.0),
+                int(control_buf[1] * 10.0),
+                int(control_buf[2] * 10.0),
+                int(last_enc_fl * 10.0),
+                int(last_enc_fr * 10.0),
+                int(last_enc_b * 10.0),
+                cam_error_x,
+                cam_error_y,
+                cam_error_angle,
+                int(gyro_z),
+                master_state_code,
+                int(last_ff_wz),
+                int(last_ff_vx),
+                int(last_ff_vy),
+            )
+        )
         wireless.send_str("\r\n")
     except Exception:
         pass
-
-
-def debug_send_state(log_id, gyro_z):
-    debug_send(
-        "D %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
-        % (
-            log_id,
-            master_flags,
-            cam_target_state(),
-            last_alloc_scale,
-            int(move_cmd.speed_fl * 10.0),
-            int(move_cmd.speed_fr * 10.0),
-            int(move_cmd.speed_b * 10.0),
-            int(last_enc_fl * 10.0),
-            int(last_enc_fr * 10.0),
-            int(last_enc_b * 10.0),
-            cam_error_x,
-            cam_error_y,
-            cam_error_angle,
-            int(gyro_z),
-            master_state_code,
-            int(last_ff_wz),
-            int(last_ff_vx),
-            int(last_ff_vy),
-        )
-    )
 
 
 def calc_follow_yaw_output(
@@ -1169,15 +964,9 @@ def calc_follow_yaw_output(
     gyro_brake_active = False
     if -0.001 < turn_rate_cmd < 0.001:
         turn_rate_cmd = 0.0
-        gyro_stop_rate = (
-            GYRO_STOP_RATE
-            if priority_turn_mode
-            else GYRO_NORMAL_STOP_RATE
-        )
+        gyro_stop_rate = 4.0 if priority_turn_mode else 12.0
         if (
-            ENABLE_GYRO_LOOP
-            and gyro_pid is not None
-            and (priority_turn_mode or seen)
+            (priority_turn_mode or seen)
             and (
                 gyro_z >= gyro_stop_rate
                 or gyro_z <= -gyro_stop_rate
@@ -1206,63 +995,61 @@ def calc_follow_yaw_output(
         )
     ):
         last_angle_priority_active = True
-    if ENABLE_GYRO_LOOP and gyro_pid is not None:
-        if turn_rate_cmd:
-            gyro_pid.gyro_kp = GYRO_KP
-            if orbit_settling:
-                gyro_pid.gyro_ki = GYRO_TURN_KI
-                gyro_pid.gyro_output_limit = GYRO_ORBIT_OUTPUT_LIMIT
-            elif spin_mode_active:
-                gyro_pid.gyro_ki = GYRO_TURN_KI
-                gyro_pid.gyro_output_limit = GYRO_SPIN_OUTPUT_LIMIT
-            elif push_follow_active:
-                gyro_pid.gyro_ki = GYRO_KI
-                gyro_pid.gyro_output_limit = GYRO_PUSH_OUTPUT_LIMIT
-            elif orbit_mode_active:
-                gyro_pid.gyro_ki = GYRO_TURN_KI
-                gyro_pid.gyro_output_limit = GYRO_ORBIT_OUTPUT_LIMIT
-            elif angle_pose_mode_active:
-                gyro_pid.gyro_ki = GYRO_KI
-                gyro_pid.gyro_output_limit = GYRO_NORMAL_POSE_OUTPUT_LIMIT
-            else:
-                gyro_pid.gyro_ki = GYRO_KI
-                gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
-        elif gyro_brake_active and (
-            orbit_settling or push_follow_active or not mode_key
-        ):
-            gyro_pid.gyro_kp = GYRO_KP
-            gyro_pid.gyro_ki = 0.0
-            gyro_pid.gyro_output_limit = (
-                GYRO_ORBIT_OUTPUT_LIMIT
-                if orbit_settling
-                else (
-                    GYRO_PUSH_OUTPUT_LIMIT
-                    if push_follow_active
-                    else GYRO_OUTPUT_LIMIT
-                )
-            )
-        if turn_rate_cmd or gyro_brake_active:
-            gyro_error = turn_rate_cmd - gyro_z
-            if (
-                (
-                    orbit_settling
-                    or not mode_key
-                    or (explicit_orbit and not explicit_push)
-                    or push_follow_active
-                )
-                and gyro_pid.err_last * gyro_error < 0.0
-            ):
-                gyro_pid.output = 0.0
-                gyro_pid.err_last = 0.0
-            return _pid_mod.gyro_ctrl(gyro_pid, gyro_error)
+    if turn_rate_cmd:
         gyro_pid.gyro_kp = GYRO_KP
-        gyro_pid.gyro_ki = GYRO_KI
-        gyro_pid.output = 0.0
-        gyro_pid.err = 0.0
-        gyro_pid.err_last = 0.0
-        last_cmd_wz = 0.0
-        return 0.0
-    return turn_rate_cmd
+        if orbit_settling:
+            gyro_pid.gyro_ki = GYRO_TURN_KI
+            gyro_pid.gyro_output_limit = GYRO_ORBIT_OUTPUT_LIMIT
+        elif spin_mode_active:
+            gyro_pid.gyro_ki = GYRO_TURN_KI
+            gyro_pid.gyro_output_limit = 18.0
+        elif push_follow_active:
+            gyro_pid.gyro_ki = GYRO_KI
+            gyro_pid.gyro_output_limit = GYRO_PUSH_OUTPUT_LIMIT
+        elif orbit_mode_active:
+            gyro_pid.gyro_ki = GYRO_TURN_KI
+            gyro_pid.gyro_output_limit = GYRO_ORBIT_OUTPUT_LIMIT
+        elif angle_pose_mode_active:
+            gyro_pid.gyro_ki = GYRO_KI
+            gyro_pid.gyro_output_limit = 16.0
+        else:
+            gyro_pid.gyro_ki = GYRO_KI
+            gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
+    elif gyro_brake_active and (
+        orbit_settling or push_follow_active or not mode_key
+    ):
+        gyro_pid.gyro_kp = GYRO_KP
+        gyro_pid.gyro_ki = 0.0
+        gyro_pid.gyro_output_limit = (
+            GYRO_ORBIT_OUTPUT_LIMIT
+            if orbit_settling
+            else (
+                GYRO_PUSH_OUTPUT_LIMIT
+                if push_follow_active
+                else GYRO_OUTPUT_LIMIT
+            )
+        )
+    if turn_rate_cmd or gyro_brake_active:
+        gyro_error = turn_rate_cmd - gyro_z
+        if (
+            (
+                orbit_settling
+                or not mode_key
+                or (explicit_orbit and not explicit_push)
+                or push_follow_active
+            )
+            and gyro_pid.err_last * gyro_error < 0.0
+        ):
+            gyro_pid.output = 0.0
+            gyro_pid.err_last = 0.0
+        return _pid_mod.gyro_ctrl(gyro_pid, gyro_error)
+    gyro_pid.gyro_kp = GYRO_KP
+    gyro_pid.gyro_ki = GYRO_KI
+    gyro_pid.output = 0.0
+    gyro_pid.err = 0.0
+    gyro_pid.err_last = 0.0
+    last_cmd_wz = 0.0
+    return 0.0
 
 
 def update_follow_targets(gyro_z):
@@ -1279,6 +1066,7 @@ def update_follow_targets(gyro_z):
     global last_control_master_state
     global master_edge_until_ms
     global orbit_follow_entry_until_ms
+    global last_alloc_scale
 
     now = utime.ticks_ms()
     target_state = cam_target_state()
@@ -1433,15 +1221,8 @@ def update_follow_targets(gyro_z):
             and (not push_follow_active)
             and (not orbit_settling)
         )
-        (
-            vx,
-            vy,
-            turn_rate_cmd,
-            body_vx,
-            body_vy,
-            angle_priority_active,
-            position_priority_active,
-        ) = solve_follow_pose_twist(
+        solve_follow_pose_twist(
+            control_buf,
             cam_error_x * visual_scale,
             cam_error_y * visual_scale,
             control_error_angle,
@@ -1454,6 +1235,13 @@ def update_follow_targets(gyro_z):
             push_follow_active,
             moving_visual_scale,
         )
+        vx = control_buf[0]
+        vy = control_buf[1]
+        turn_rate_cmd = control_buf[2]
+        body_vx = control_buf[3]
+        body_vy = control_buf[4]
+        angle_priority_active = control_buf[5]
+        position_priority_active = control_buf[6]
         if follow_output_limit == _FOLLOW_STATIC_LOCK_PWM_LIMIT:
             vx -= body_vx * (1.0 - Follow_Static_Visual_Scale)
             vy -= body_vy * (1.0 - Follow_Static_Visual_Scale)
@@ -1735,7 +1523,8 @@ def update_follow_targets(gyro_z):
         explicit_push,
     )
 
-    cam_target_vx, cam_target_vy, vz_cmd = limit_pose_twist_for_wheels(
+    _pid_mod.limit_pose_twist_for_wheels(
+        control_buf,
         cam_target_vx,
         cam_target_vy,
         vz_cmd,
@@ -1752,11 +1541,17 @@ def update_follow_targets(gyro_z):
             or (seen and push_follow_active)
         ),
         explicit_orbit and not explicit_push,
+        fresh_motion
+        and last_follow_mode_key == 0
+        and 0 < master_flags < 8,
     )
+    cam_target_vx = control_buf[0]
+    cam_target_vy = control_buf[1]
+    vz_cmd = control_buf[2]
+    last_alloc_scale = control_buf[3]
     last_cmd_vx = cam_target_vx
     last_cmd_vy = cam_target_vy
-    if ENABLE_GYRO_LOOP and gyro_pid is not None:
-        gyro_pid.output = vz_cmd
+    gyro_pid.output = vz_cmd
 
     last_turn_rate_cmd = turn_rate_cmd
     last_follow_seen = seen
@@ -1765,12 +1560,6 @@ def update_follow_targets(gyro_z):
     last_ff_wz = follow_ff_wz
     last_control_master_state = master_state_code
     return vz_cmd
-
-
-def stop_all():
-    motor_fl.duty(0)
-    motor_fr.duty(0)
-    motor_b.duty(0)
 
 
 def reset_speed_outputs(keep_orbit_state=False):
@@ -1821,29 +1610,6 @@ def smooth_value(target, last):
     return clamp(int(target), -MOTOR_DUTY_MAX, MOTOR_DUTY_MAX)
 
 
-def apply_start_pwm(cmd, min_pwm):
-    cmd = int(cmd)
-    if 0 < cmd < min_pwm:
-        cmd = min_pwm
-    elif -min_pwm < cmd < 0:
-        cmd = -min_pwm
-    return clamp(cmd, -_FOLLOW_RUN_PWM_LIMIT, _FOLLOW_RUN_PWM_LIMIT)
-
-
-def follow_start_pwm_for_target(target, stall_boost):
-    target_abs = abs(target)
-    if wheel_target_idle(target):
-        return 0
-    if stall_boost and target_abs >= 2.8:
-        return 8800
-    if (
-        follow_output_limit < _FOLLOW_RUN_PWM_LIMIT
-        and target_abs < 2.8
-    ):
-        return 2600
-    return 3600 if target_abs < 2.8 else 6200
-
-
 def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
     fast_reverse = (
         last_follow_mode_key == 3
@@ -1853,7 +1619,15 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
             and master_edge_until_ms
         )
     )
-    min_pwm = follow_start_pwm_for_target(target, stall_boost)
+    target_abs = abs(target)
+    if wheel_target_idle(target):
+        min_pwm = 0
+    elif stall_boost and target_abs >= 2.8:
+        min_pwm = 8800
+    elif follow_output_limit < _FOLLOW_RUN_PWM_LIMIT and target_abs < 2.8:
+        min_pwm = 2600
+    else:
+        min_pwm = 3600 if target_abs < 2.8 else 6200
     if min_pwm <= 0:
         if not _orbit:
             if follow_output_limit < _FOLLOW_RUN_PWM_LIMIT and cmd:
@@ -1878,7 +1652,12 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
             return 8800 if target > 0.0 else -8800
         if last_pwm == 0 and (target - speed_err) * target < 0.0:
             return 8800 if target > 0.0 else -8800
-    cmd = apply_start_pwm(cmd, min_pwm)
+    cmd = int(cmd)
+    if 0 < cmd < min_pwm:
+        cmd = min_pwm
+    elif -min_pwm < cmd < 0:
+        cmd = -min_pwm
+    cmd = clamp(cmd, -_FOLLOW_RUN_PWM_LIMIT, _FOLLOW_RUN_PWM_LIMIT)
     if not fast_reverse and last_follow_mode_key == 0 and last_pwm * cmd < 0:
         return smooth_value(cmd, smooth_value(cmd, last_pwm))
     if last_follow_mode_key == 3:
@@ -1952,30 +1731,21 @@ def speed_ctrl_follow(pid, motor, actual_speed, target_speed):
     )
 
 
-def calibrate_gyro_before_launch():
-    if (
-        AUTO_CALIBRATE_GYRO_ON_LAUNCH
-        and ENABLE_IMU
-        and imu_runtime is not None
-    ):
-        pit1.stop()
-        try:
-            imu_runtime.calibrate_offset(
-                samples=_GYRO_CALIBRATE_SAMPLES,
-                delay_ms=_GYRO_CALIBRATE_DELAY_MS,
-                logger=None,
-            )
-            imu_runtime.reset_yaw(0.0)
-        finally:
-            pit1.start(TICK_PERIOD_MS)
-
-
 def start_follow():
     global car_started
 
     if car_started:
         return
-    calibrate_gyro_before_launch()
+    pit1.stop()
+    try:
+        imu_runtime.calibrate_offset(
+            samples=1000,
+            delay_ms=2,
+            logger=None,
+        )
+        imu_runtime.reset_yaw(0.0)
+    finally:
+        pit1.start(TICK_PERIOD_MS)
     clear_cam_target_state()
     car_started = True
     cam_uart.write(ART_MODE_TRACK_CMD)
@@ -2013,6 +1783,7 @@ def calc_speed_closed_loop():
     global last_stall_count, last_stall_boost
     global cam_target_vx, cam_target_vy
     global last_enc_fl, last_enc_fr, last_enc_b
+    global debug_log_last_ms
 
     if not car_started:
         reset_speed_outputs()
@@ -2024,20 +1795,17 @@ def calc_speed_closed_loop():
         set_three_pwm_zero()
         return None
 
-    if ENABLE_IMU:
-        gyro_z = imu_runtime.read_gyro_z()
-    else:
-        gyro_z = 0.0
+    gyro_z = imu_runtime.read_gyro_z()
 
     vz_cmd = update_follow_targets(gyro_z)
-    calc_wheel_spd(move_cmd, cam_target_vx, cam_target_vy, vz_cmd)
+    calc_wheel_spd_into(control_buf, cam_target_vx, cam_target_vy, vz_cmd)
 
     e_fl = enc_fl.get() * ENC_SCALE
     e_fr = enc_fr.get() * ENC_SCALE
     e_b = enc_b.get() * ENC_SCALE
-    t_fl = move_cmd.speed_fl
-    t_fr = move_cmd.speed_fr
-    t_b = move_cmd.speed_b
+    t_fl = control_buf[0]
+    t_fr = control_buf[1]
+    t_b = control_buf[2]
     last_enc_fl = e_fl
     last_enc_fr = e_fr
     last_enc_b = e_b
@@ -2071,7 +1839,8 @@ def calc_speed_closed_loop():
         )
 
     now_log = utime.ticks_ms()
-    if debug_due(now_log):
+    if utime.ticks_diff(now_log, debug_log_last_ms) >= 100:
+        debug_log_last_ms = now_log
         log_id = now_log & 0x7FFF
         debug_send_state(log_id, gyro_z)
 
@@ -2095,35 +1864,31 @@ cam_uart.init(cfg.CAM_UART_BAUD, timeout_char=100)
 cam_uart_buf = bytearray(32)
 cam_uart.write(ART_MODE_TRACK_CMD)
 
-imu_runtime = None
-if ENABLE_IMU:
-    imu_runtime = LSM6DSV16XYawRuntime(
-        sign=GYRO_SIGN,
-        offset_z=GYRO_OFFSET_Z,
-        scale=GYRO_SCALE,
-        deadband_dps=GYRO_DEADBAND_DPS,
-        tick_period_ms=TICK_PERIOD_MS,
-    )
+imu_runtime = LSM6DSV16XYawRuntime(
+    sign=1.0,
+    offset_z=0.0,
+    scale=-1.0,
+    deadband_dps=0.8,
+    tick_period_ms=TICK_PERIOD_MS,
+)
 
 pit1 = ticker(1)
 pit1.capture_list(enc_fl, enc_fr, enc_b)
 pit1.callback(time_pit_handler)
 pit1.start(TICK_PERIOD_MS)
 
-move_cmd = MoveBase()
-pid_fl = SpeedPID()
-pid_fr = SpeedPID()
-pid_b = SpeedPID()
+control_buf = [0.0, 0.0, 0.0, 0.0, 0.0, False, False]
+pid_fl = _pid_mod.SpeedPID()
+pid_fr = _pid_mod.SpeedPID()
+pid_b = _pid_mod.SpeedPID()
 
-gyro_pid = None
-if ENABLE_GYRO_LOOP:
-    gyro_pid = AnglePID()
-    gyro_pid.output = 0.0
-    gyro_pid.err = 0.0
-    gyro_pid.err_last = 0.0
-    gyro_pid.gyro_kp = GYRO_KP
-    gyro_pid.gyro_ki = GYRO_KI
-    gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
+gyro_pid = _pid_mod.AnglePID()
+gyro_pid.output = 0.0
+gyro_pid.err = 0.0
+gyro_pid.err_last = 0.0
+gyro_pid.gyro_kp = GYRO_KP
+gyro_pid.gyro_ki = GYRO_KI
+gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
 
 try:
     while True:
@@ -2150,13 +1915,15 @@ try:
             led.toggle()
             last_status_ms = now
 
-        if loop_count % _GC_DIV == 0:
+        if loop_count % 50 == 0:
             gc.collect()
 
         utime.sleep_ms(1)
 
 finally:
     pit1.stop()
-    cam_uart.write(ART_MODE_IDLE_CMD)
-    stop_all()
+    cam_uart.write(b"IDLE\n")
+    motor_fl.duty(0)
+    motor_fr.duty(0)
+    motor_b.duty(0)
     led.value(True)

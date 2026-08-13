@@ -638,7 +638,7 @@ def solve_follow_pose_twist(
         if position_priority
         else _Follow_Lateral_Deadband
     )
-    if follow_output_limit == _FOLLOW_STATIC_LOCK_PWM_LIMIT:
+    if push_mode or follow_output_limit == _FOLLOW_STATIC_LOCK_PWM_LIMIT:
         deadband = 1
     body_vy = soft_deadband(cam_vy, deadband, deadband * 2)
     if body_vy != 0.0:
@@ -1084,7 +1084,11 @@ def update_follow_targets(gyro_z):
         now,
         gyro_z,
         explicit_orbit,
-        strict_follow_active,
+        strict_follow_active or (
+            fresh_motion
+            and last_control_master_state == 16
+            and master_state_code == 2
+        ),
         spin_mode_active,
         fresh_motion and (master_flags & MASTER_MOTION_FLAG_BACK),
     )

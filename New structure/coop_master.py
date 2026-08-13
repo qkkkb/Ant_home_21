@@ -132,7 +132,7 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             vx = 0.0
             vy = 0.0
             wz = cmd_wz
-        elif state_code == 5:
+        elif state_code == 5 or state_code == 16:
             flags |= _FLAG_ORBIT
             vx = cmd_vx
             vy = cmd_vy

@@ -122,7 +122,15 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             vx = _vx
             vy = _vy
             wz = _wz
-        elif state_code == 6 or state_code == 10:
+        elif state_code == 6:
+            # Push preparation is strict following: publish measured motion as
+            # the rigid base and keep only half of the command gap as preview.
+            preview_vx = cmd_vx - _vx
+            preview_vy = cmd_vy - _vy
+            vx = _vx
+            vy = _vy
+            wz = cmd_wz
+        elif state_code == 10:
             vy = cmd_vy
             vx = cmd_vx
             wz = cmd_wz
@@ -134,13 +142,18 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             wz = cmd_wz
         elif state_code == 5 or state_code == 16:
             flags |= _FLAG_ORBIT
-            vx = cmd_vx
-            vy = cmd_vy
+            # Formation translation must follow what the leader is actually
+            # doing.  Commanded yaw remains the follower's yaw-rate reference;
+            # measured yaw is packed below for orbital XY kinematics only.
+            vx = _vx
+            vy = _vy
             wz = cmd_wz
         elif state_code == 7:
             flags |= _FLAG_PUSH
-            vx = cmd_vx
-            vy = cmd_vy
+            preview_vx = cmd_vx - _vx
+            preview_vy = cmd_vy - _vy
+            vx = _vx
+            vy = _vy
             wz = cmd_wz
         elif state_code == 8 or state_code == 11 or state_code == 12 or state_code == 14:
             vx = cmd_vx * (0.90 if state_code == 12 else 1.0)
@@ -174,10 +187,12 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
     _put_i16(5, vx * 10)
     _put_i16(7, vy * 10)
     _put_i16(9, wz * 10)
-    if state_code == 2 or state_code == 3:
+    if state_code == 2 or state_code == 3 or state_code == 6 or state_code == 7:
         _put_i8(11, preview_vx * _PREVIEW_SCALE)
         _put_i8(12, preview_vy * _PREVIEW_SCALE)
         state_code |= _STATE_PREVIEW
+    elif state_code == 5 or state_code == 16:
+        _put_i16(11, _wz * 10)
     else:
         _put_i16(11, yaw_deg * 10)
     _put_u8(13, flags)

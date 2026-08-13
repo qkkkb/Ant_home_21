@@ -175,6 +175,7 @@ cam_parse_b2 = 0
 master_vx = 0.0
 master_vy = 0.0
 master_wz = 0.0
+master_orbit_wz = 0.0
 master_preview_vx = 0.0
 master_preview_vy = 0.0
 master_flags = 0
@@ -677,8 +678,8 @@ def solve_follow_pose_twist(
     if use_ff:
         if orbit_mode:
             ff_scale = orbit_feedforward_position_scale(cam_vy, cam_vx)
-            target_ff_vx = ff_vx + ff_wz * Follow_Orbit_Target_Point_Wz_To_Vx
-            target_ff_vy = ff_vy + ff_wz * Follow_Orbit_Target_Point_Wz_To_Vy
+            target_ff_vx = ff_vx + master_orbit_wz * Follow_Orbit_Target_Point_Wz_To_Vx
+            target_ff_vy = ff_vy + master_orbit_wz * Follow_Orbit_Target_Point_Wz_To_Vy
             target_ff_vx *= ff_scale
             target_ff_vy *= ff_scale
             vx = add_feedforward_direct(
@@ -863,7 +864,7 @@ def poll_art_uart():
 
 
 def handle_coop_frame(msg_type, seq, payload, payload_len):
-    global master_vx, master_vy, master_wz
+    global master_vx, master_vy, master_wz, master_orbit_wz
     global master_preview_vx, master_preview_vy
     global master_flags, master_state_code, master_last_rx_ms
 
@@ -875,6 +876,8 @@ def handle_coop_frame(msg_type, seq, payload, payload_len):
     master_vy = measured_vy * 0.5 - measured_vx * 0.8660254
     master_wz = decode_i16(payload, 4) / 10.0
     master_state_code = payload[9] if payload_len >= 10 else -1
+    master_preview_vx = master_preview_vy = 0.0
+    master_orbit_wz = 0.0
     if master_state_code >= _Master_State_Preview_Flag:
         preview_vx = payload[6]
         preview_vy = payload[7]
@@ -889,9 +892,8 @@ def handle_coop_frame(msg_type, seq, payload, payload_len):
             preview_vy * 0.25 - preview_vx * 0.4330127
         )
         master_state_code -= _Master_State_Preview_Flag
-    else:
-        master_preview_vx = 0.0
-        master_preview_vy = 0.0
+    elif master_state_code == 5 or master_state_code == 16:
+        master_orbit_wz = decode_i16(payload, 6) / 10.0
     master_flags = payload[8]
     master_last_rx_ms = utime.ticks_ms()
 

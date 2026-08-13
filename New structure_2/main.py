@@ -1359,7 +1359,8 @@ def update_follow_targets(gyro_z):
             use_motion_feedforward = True
         elif fresh_motion and not orbit_settling:
             use_motion_feedforward = (
-                utime.ticks_diff(now, target_lost_since_ms)
+                master_state_code == 16
+                or utime.ticks_diff(now, target_lost_since_ms)
                 <= (300 if not mode_key else _Follow_Target_Lost_Hold_Ms)
             )
         if use_motion_feedforward:

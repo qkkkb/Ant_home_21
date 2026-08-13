@@ -211,6 +211,7 @@ Nav_Return_Back_Speed = 16.0
 Nav_Return_Back_Ms = 250
 Nav_Return_Shift_Hold_Ms = 600
 Nav_Return_Turn_Dir = 1
+Nav_Search_Spin_Dir = -1
 Nav_Return_Final_Back_Speed = 14.0
 Nav_Return_Final_Line_Extra_Ms = 60
 Nav_Return_Turn_Ok_Yaw = 2
@@ -893,7 +894,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
 
         spin_dt_ms = utime.ticks_diff(now, push_orbit_last_ms)
         if spin_dt_ms > 0:
-            spin_step = Nav_Return_Turn_Dir * gyro_z * spin_dt_ms * 0.001
+            spin_step = Nav_Search_Spin_Dir * gyro_z * spin_dt_ms * 0.001
             if spin_step > 0.0:
                 push_orbit_progress_deg += spin_step
             push_orbit_last_ms = now
@@ -1750,7 +1751,7 @@ def calc_speed_closed_loop():
         spin_remaining = max(0.0, 360.0 - push_orbit_progress_deg)
         spin_rate_mag = get_push_turn_rate(spin_remaining)
         if spin_rate_mag > 0.0:
-            turn_rate_cmd = Nav_Return_Turn_Dir * spin_rate_mag
+            turn_rate_cmd = Nav_Search_Spin_Dir * spin_rate_mag
         else:
             turn_rate_cmd = 0.0
         gyro_rate_mode = True

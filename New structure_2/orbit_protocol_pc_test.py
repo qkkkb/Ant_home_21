@@ -7,6 +7,8 @@ import unittest
 
 MASTER_DIR = os.path.join(os.path.dirname(__file__), "..", "New structure")
 MASTER_PATH = os.path.join(MASTER_DIR, "coop_master.py")
+MASTER_MAIN_PATH = os.path.join(MASTER_DIR, "main_lsm6dsv16x_95.py")
+FOLLOWER_MAIN_PATH = os.path.join(os.path.dirname(__file__), "main.py")
 
 
 def load_coop_master():
@@ -64,6 +66,30 @@ class OrbitProtocolTest(unittest.TestCase):
         self.assertEqual(search[14], 16)
         self.assertTrue(normal[13] & 0x08)
         self.assertTrue(search[13] & 0x08)
+
+    def test_search_spin_uses_independent_verified_direction(self):
+        with open(MASTER_MAIN_PATH, "r", encoding="utf-8") as source_file:
+            source = source_file.read()
+
+        self.assertIn("Nav_Search_Spin_Dir = -1", source)
+        self.assertIn(
+            "spin_step = Nav_Search_Spin_Dir * gyro_z * spin_dt_ms * 0.001",
+            source,
+        )
+        self.assertIn(
+            "turn_rate_cmd = Nav_Search_Spin_Dir * spin_rate_mag",
+            source,
+        )
+
+    def test_search_orbit_keeps_fresh_feedforward_without_vision(self):
+        with open(FOLLOWER_MAIN_PATH, "r", encoding="utf-8") as source_file:
+            source = source_file.read()
+
+        self.assertIn(
+            "master_state_code == 16\n"
+            "                or utime.ticks_diff(now, target_lost_since_ms)",
+            source,
+        )
 
 
 if __name__ == "__main__":

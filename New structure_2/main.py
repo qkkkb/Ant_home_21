@@ -96,8 +96,9 @@ Follow_Orbit_Target_Point_Wz_To_Vx = -0.17
 Follow_Orbit_Target_Point_Wz_To_Vy = -0.28
 Follow_Orbit_Feedforward_Forward_Gain = 1.30
 Follow_Orbit_Feedforward_Lateral_Gain = 0.76
-Follow_Orbit_Feedforward_Forward_Limit = 22.0
+Follow_Orbit_Feedforward_Forward_Limit = 14.0
 Follow_Orbit_Feedforward_Lateral_Limit = 20.0
+Follow_Orbit_Forward_Command_Limit = 26.0
 _Follow_Orbit_Feedforward_Close_Error = const(6)
 _Follow_Orbit_Feedforward_Full_Error = const(22)
 Follow_Orbit_Feedforward_Close_Scale = 0.78
@@ -122,6 +123,10 @@ Follow_Normal_Conflict_Stop_Error = 16
 Follow_Normal_Preview_Gain = 0.50
 Follow_Normal_Velocity_Damping = 0.55
 Follow_Push_Velocity_Damping = 0.75
+Follow_Push_Brake_Correction_Limit = 6.0
+Follow_Push_Catchup_Correction_Limit = 5.0
+Follow_Push_Lateral_Correction_Limit = 6.0
+_Follow_Push_Emergency_Error = const(48)
 Follow_Safety_Speed_Margin = 0.12
 _Master_State_Preview_Flag = const(0x80)
 Follow_Static_Velocity_Damping = 0.85
@@ -1358,7 +1363,11 @@ def update_follow_targets(gyro_z):
             reset_turn_loop_state()
         last_angle_priority_active = False
 
-    vx_limit = Follow_Forward_Limit
+    vx_limit = (
+        Follow_Orbit_Forward_Command_Limit
+        if explicit_orbit
+        else Follow_Forward_Limit
+    )
     if master_flags & MASTER_MOTION_FLAG_RETURN:
         vy_limit = Follow_Return_Lateral_Limit
     elif push_follow_active:
@@ -1400,6 +1409,31 @@ def update_follow_targets(gyro_z):
     if not (classification_exit and not mode_key):
         vx = ramp_value(vx, last_cmd_vx, vx_ramp)
         vy = ramp_value(vy, last_cmd_vy, vy_ramp)
+    if explicit_orbit:
+        vx = clamp(
+            vx,
+            -Follow_Orbit_Forward_Command_Limit,
+            Follow_Orbit_Forward_Command_Limit,
+        )
+    elif push_follow_active:
+        push_catchup_limit = Follow_Push_Catchup_Correction_Limit
+        if (
+            cam_error_x <= -_Follow_Push_Emergency_Error
+            and safety_vx > push_catchup_limit
+        ):
+            push_catchup_limit = safety_vx
+        vx = clamp(
+            vx,
+            alloc_base_vx - Follow_Push_Brake_Correction_Limit,
+            alloc_base_vx + push_catchup_limit,
+        )
+        vy = clamp(
+            vy,
+            alloc_base_vy - Follow_Push_Lateral_Correction_Limit,
+            alloc_base_vy + Follow_Push_Lateral_Correction_Limit,
+        )
+        body_vx = vx - alloc_base_vx
+        body_vy = vy - alloc_base_vy
     # A normal state-4 exit can apply the new leader feedforward immediately,
     # because vision correction stayed continuous.  ORBIT keeps its dedicated
     # entry ramp so the first high-rate command cannot kick the follower.

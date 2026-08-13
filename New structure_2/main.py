@@ -99,10 +99,6 @@ Follow_Orbit_Feedforward_Lateral_Gain = 0.76
 Follow_Orbit_Feedforward_Forward_Limit = 14.0
 Follow_Orbit_Feedforward_Lateral_Limit = 20.0
 Follow_Orbit_Forward_Command_Limit = 26.0
-_Follow_Orbit_Feedforward_Close_Error = const(6)
-_Follow_Orbit_Feedforward_Full_Error = const(22)
-Follow_Orbit_Feedforward_Close_Scale = 0.78
-_Follow_Orbit_Close_Feedforward_Full_Error = const(6)
 Follow_Pose_Angle_Gain = -0.68
 Follow_Pose_Angle_Limit = 40.0
 Follow_Normal_Pose_Angle_Limit = 24.0
@@ -271,44 +267,6 @@ def angle_pose_mode_needed(error_angle, orbit_mode=False, spin_mode=False):
         error_angle >= _Follow_Normal_Pose_Angle_Active_Error
         or error_angle <= -_Follow_Normal_Pose_Angle_Active_Error
     )
-
-
-def orbit_feedforward_position_scale(error_x, error_y):
-    err_abs = error_x if error_x >= 0 else -error_x
-    tmp = error_y if error_y >= 0 else -error_y
-    if tmp > err_abs:
-        err_abs = tmp
-    if err_abs <= _Follow_Orbit_Feedforward_Close_Error:
-        scale = Follow_Orbit_Feedforward_Close_Scale
-    elif err_abs >= _Follow_Orbit_Feedforward_Full_Error:
-        scale = 1.0
-    else:
-        span = _Follow_Orbit_Feedforward_Full_Error - _Follow_Orbit_Feedforward_Close_Error
-        scale = Follow_Orbit_Feedforward_Close_Scale + (
-            (err_abs - _Follow_Orbit_Feedforward_Close_Error)
-            * (1.0 - Follow_Orbit_Feedforward_Close_Scale)
-            / span
-        )
-    depth = orbit_close_depth(error_y)
-    if depth <= 0.0:
-        return scale
-    if depth >= _Follow_Orbit_Close_Feedforward_Full_Error:
-        return Follow_Close_Feedforward_Min_Scale
-    close_scale = 1.0 - (
-        (1.0 - Follow_Close_Feedforward_Min_Scale)
-        * depth
-        / _Follow_Orbit_Close_Feedforward_Full_Error
-    )
-    if close_scale < scale:
-        return close_scale
-    return scale
-
-
-def orbit_close_depth(error_y):
-    depth = error_y - _Follow_Forward_Deadband
-    if depth < 0:
-        return 0.0
-    return depth
 
 
 def update_cam_target(err_x, err_y, err_angle=0):
@@ -601,6 +559,9 @@ def solve_follow_pose_twist(
     # Vision already reports independent position and heading errors.
     cam_vx = error_x
     cam_vy = error_y
+    if push_mode:
+        cam_vx += 2
+        cam_vy += 2
     if orbit_mode or spin_mode:
         position_priority = (
             (angle_active and (not spin_mode))
@@ -616,7 +577,7 @@ def solve_follow_pose_twist(
         if position_priority
         else _Follow_Forward_Deadband
     )
-    if follow_output_limit == _FOLLOW_STATIC_LOCK_PWM_LIMIT:
+    if push_mode or follow_output_limit == _FOLLOW_STATIC_LOCK_PWM_LIMIT:
         deadband = 1
     forward_error = soft_deadband(cam_vx, deadband, deadband * 2)
     if forward_error == 0.0:
@@ -677,25 +638,36 @@ def solve_follow_pose_twist(
     wz = vision_wz
     if use_ff:
         if orbit_mode:
-            ff_scale = orbit_feedforward_position_scale(cam_vy, cam_vx)
-            target_ff_vx = ff_vx + master_orbit_wz * Follow_Orbit_Target_Point_Wz_To_Vx
-            target_ff_vy = ff_vy + master_orbit_wz * Follow_Orbit_Target_Point_Wz_To_Vy
-            target_ff_vx *= ff_scale
-            target_ff_vy *= ff_scale
-            vx = add_feedforward_direct(
-                vx,
-                target_ff_vx,
-                Follow_Orbit_Feedforward_Forward_Gain,
-                Follow_Orbit_Feedforward_Forward_Limit,
-                Follow_Close_Feedforward_Min_Scale,
-            )
-            vy = add_feedforward_direct(
-                vy,
-                target_ff_vy,
-                Follow_Orbit_Feedforward_Lateral_Gain,
-                Follow_Orbit_Feedforward_Lateral_Limit,
-                Follow_Close_Feedforward_Min_Scale,
-            )
+            if master_state_code == 16:
+                _pid_mod.search_spin_translation(
+                    out, body_vx, body_vy, ff_vx, ff_vy, master_orbit_wz,
+                )
+                vx = out[0]
+                vy = out[1]
+                body_vx = out[3]
+                body_vy = out[4]
+            else:
+                ff_scale = _pid_mod.orbit_feedforward_position_scale(cam_vy, cam_vx)
+                target_ff_vx = (
+                    ff_vx + master_orbit_wz * Follow_Orbit_Target_Point_Wz_To_Vx
+                ) * ff_scale
+                target_ff_vy = (
+                    ff_vy + master_orbit_wz * Follow_Orbit_Target_Point_Wz_To_Vy
+                ) * ff_scale
+                vx = add_feedforward_direct(
+                    vx,
+                    target_ff_vx,
+                    Follow_Orbit_Feedforward_Forward_Gain,
+                    Follow_Orbit_Feedforward_Forward_Limit,
+                    Follow_Close_Feedforward_Min_Scale,
+                )
+                vy = add_feedforward_direct(
+                    vy,
+                    target_ff_vy,
+                    Follow_Orbit_Feedforward_Lateral_Gain,
+                    Follow_Orbit_Feedforward_Lateral_Limit,
+                    Follow_Close_Feedforward_Min_Scale,
+                )
             wz = add_feedforward_direct(
                 wz,
                 ff_wz,
@@ -1051,6 +1023,39 @@ def calc_follow_yaw_output(
     return 0.0
 
 
+def lost_follow_translation(
+    out, mode_key, orbit_mode, lost_scale,
+    ff_vx, ff_vy, ff_wz,
+):
+    alloc_vx = alloc_vy = 0.0
+    if master_state_code == 16 and orbit_mode:
+        _pid_mod.search_spin_translation(
+            out, 0, 0, ff_vx, ff_vy, master_orbit_wz,
+        )
+        vx = alloc_vx = out[0]
+        vy = alloc_vy = out[1]
+    elif not mode_key:
+        vx = ff_vx * lost_scale
+        vy = ff_vy * lost_scale
+        if cam_error_x < -_Follow_Distance_Far_Boost_Error and vx < 0.0:
+            vx = 0.0
+        alloc_vx = vx
+        alloc_vy = vy
+    else:
+        scale = 1.0 if master_flags & MASTER_MOTION_FLAG_RETURN else (
+            Follow_Hold_Feedforward_Gain
+        )
+        vx = ff_vx * scale
+        vy = ff_vy * Follow_Hold_Feedforward_Gain
+    if orbit_mode and (master_flags & MASTER_MOTION_FLAG_RETURN):
+        vx += ff_wz * Follow_Orbit_Target_Point_Wz_To_Vx * Follow_Orbit_Feedforward_Forward_Gain
+        vy += ff_wz * Follow_Orbit_Target_Point_Wz_To_Vy * Follow_Orbit_Feedforward_Lateral_Gain
+    out[0] = vx
+    out[1] = vy
+    out[3] = alloc_vx
+    out[4] = alloc_vy
+
+
 def update_follow_targets(gyro_z):
     global cam_target_vx, cam_target_vy, target_lost_since_ms
     global last_turn_rate_cmd
@@ -1343,38 +1348,22 @@ def update_follow_targets(gyro_z):
         if fresh_motion and not orbit_settling and not mode_key and lost_scale:
             use_motion_feedforward = True
         elif fresh_motion and not orbit_settling:
-            use_motion_feedforward = utime.ticks_diff(
-                now,
-                target_lost_since_ms,
-            ) <= (
-                300
-                if not mode_key
-                else _Follow_Target_Lost_Hold_Ms
+            use_motion_feedforward = master_state_code == 16 or (
+                utime.ticks_diff(now, target_lost_since_ms)
+                <= (300 if not mode_key else _Follow_Target_Lost_Hold_Ms)
             )
         if use_motion_feedforward:
             if not mode_key:
                 ff_vx = measured_ff_vx
                 ff_vy = measured_ff_vy
-                vx = ff_vx * lost_scale
-                vy = ff_vy * lost_scale
-                if (
-                    cam_error_x < -_Follow_Distance_Far_Boost_Error
-                    and vx < 0.0
-                ):
-                    vx = 0.0
-                alloc_base_vx = vx
-                alloc_base_vy = vy
-            else:
-                xy_scale = Follow_Hold_Feedforward_Gain
-                vx = ff_vx * (
-                    1.0
-                    if master_flags & MASTER_MOTION_FLAG_RETURN
-                    else xy_scale
-                )
-                vy = ff_vy * xy_scale
-            if orbit_mode_active and (master_flags & MASTER_MOTION_FLAG_RETURN):
-                vx += follow_ff_wz * Follow_Orbit_Target_Point_Wz_To_Vx * Follow_Orbit_Feedforward_Forward_Gain
-                vy += follow_ff_wz * Follow_Orbit_Target_Point_Wz_To_Vy * Follow_Orbit_Feedforward_Lateral_Gain
+            lost_follow_translation(
+                control_buf, mode_key, orbit_mode_active, lost_scale,
+                ff_vx, ff_vy, follow_ff_wz,
+            )
+            vx = control_buf[0]
+            vy = control_buf[1]
+            alloc_base_vx = control_buf[3]
+            alloc_base_vy = control_buf[4]
         else:
             vx = 0.0
             vy = 0.0

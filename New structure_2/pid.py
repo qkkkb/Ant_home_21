@@ -123,6 +123,40 @@ def _clamp(value, low, high):
     return value
 
 
+def search_spin_translation(out, body_vx, body_vy, ff_vx, ff_vy, wz):
+    base_vx = _clamp((ff_vx - wz * 0.17) * 1.30, -14.0, 14.0)
+    base_vy = _clamp((ff_vy - wz * 0.28) * 0.76, -20.0, 20.0)
+    body_vx = _clamp(body_vx, -38.0, 38.0)
+    body_vy = _clamp(body_vy, -30.0, 30.0)
+    if base_vx * body_vx < -0.001:
+        body_vx *= 0.15
+    if base_vy * body_vy < -0.001:
+        body_vy *= 0.15
+    out[0] = base_vx + body_vx
+    out[1] = base_vy + body_vy
+    out[3] = body_vx
+    out[4] = body_vy
+
+
+def orbit_feedforward_position_scale(error_x, error_y):
+    error = abs(error_x)
+    if abs(error_y) > error:
+        error = abs(error_y)
+    if error <= 6.0:
+        scale = 0.78
+    elif error >= 22.0:
+        scale = 1.0
+    else:
+        scale = 0.78 + (error - 6.0) * 0.22 / 16.0
+    depth = error_y - 2.0
+    if depth <= 0.0:
+        return scale
+    if depth >= 6.0:
+        return 0.25
+    close_scale = 1.0 - 0.75 * depth / 6.0
+    return close_scale if close_scale < scale else scale
+
+
 def push_correction_envelope(out, state, error_x, error_y, base_vx, moving_push):
     target = _clamp((abs(error_x) - 6.0) / 24.0, 0.0, 1.0)
     if state[2] * error_x < 0:

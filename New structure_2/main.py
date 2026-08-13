@@ -453,14 +453,20 @@ def update_orbit_follow_mode(
     global orbit_follow_settle_since_ms
 
     if explicit_spin or explicit_back or strict_follow:
+        if orbit_follow_active or orbit_follow_exit_since_ms:
+            follow_state[0] = follow_state[1] = 0.0
+            follow_state[2] = follow_state[3] = 0
         orbit_follow_active = False
         orbit_follow_exit_since_ms = orbit_follow_settle_since_ms = 0
         follow_state[4] = follow_state[5] = 0
         return False
     if explicit_orbit:
+        if not orbit_follow_active or orbit_follow_exit_since_ms:
+            follow_state[0] = follow_state[1] = 0.0
+            follow_state[2] = follow_state[3] = 0
+            follow_state[4] = follow_state[5] = 0.0
         orbit_follow_active = True
         orbit_follow_exit_since_ms = orbit_follow_settle_since_ms = 0
-        follow_state[4] = follow_state[5] = 0
         return True
 
     if not orbit_follow_active:
@@ -940,6 +946,7 @@ def calc_follow_yaw_output(
     orbit_mode_active,
     angle_pose_mode_active,
     explicit_orbit,
+    orbit_rate_base,
     push_mode_active,
 ):
     global last_cmd_wz, last_angle_priority_active
@@ -961,19 +968,29 @@ def calc_follow_yaw_output(
         else:
             reset_turn_loop_state()
     else:
-        if spin_mode_active:
-            output_ramp = 36.0
-        elif orbit_entry_active:
-            output_ramp = Follow_Orbit_Entry_Ramp_Wz
-        elif orbit_mode_active:
-            output_ramp = Follow_Orbit_Command_Ramp_Wz
-        elif push_mode_active:
-            output_ramp = 12.0
-        elif priority_turn_mode:
-            output_ramp = 18.0
+        if explicit_orbit and not orbit_settling:
+            output_ramp = (
+                Follow_Orbit_Entry_Ramp_Wz
+                if orbit_entry_active
+                else Follow_Orbit_Command_Ramp_Wz
+            )
+            last_cmd_wz = orbit_rate_base + follow_state[0]
         else:
-            output_ramp = 11.0
+            if spin_mode_active:
+                output_ramp = 36.0
+            elif orbit_entry_active:
+                output_ramp = Follow_Orbit_Entry_Ramp_Wz
+            elif orbit_mode_active:
+                output_ramp = Follow_Orbit_Command_Ramp_Wz
+            elif push_mode_active:
+                output_ramp = 12.0
+            elif priority_turn_mode:
+                output_ramp = 18.0
+            else:
+                output_ramp = 11.0
         turn_rate_cmd = ramp_value(turn_rate_cmd, last_cmd_wz, output_ramp)
+        if explicit_orbit and not orbit_settling:
+            follow_state[0] = turn_rate_cmd - orbit_rate_base
         last_cmd_wz = turn_rate_cmd
     if (
         priority_turn_mode
@@ -1017,7 +1034,6 @@ def calc_follow_yaw_output(
             (
                 orbit_settling
                 or not mode_key
-                or explicit_orbit
             )
             and gyro_pid.err_last * gyro_error < 0.0
         ):
@@ -1104,7 +1120,7 @@ def update_follow_targets(gyro_z):
             Follow_Normal_Wz_Feedforward_Limit,
         )
     push_follow_active = strict_follow_active
-    if not push_follow_active:
+    if not push_follow_active and not explicit_orbit:
         follow_state[0] = follow_state[1] = 0
         follow_state[2] = follow_state[3] = 0
     classification_exit = (
@@ -1410,15 +1426,22 @@ def update_follow_targets(gyro_z):
     else:
         vx_ramp = Follow_Command_Ramp_Vx
         vy_ramp = Follow_Command_Ramp_Vy
+    if explicit_orbit and not orbit_settling:
+        last_cmd_vx = alloc_base_vx + follow_state[4]
+        last_cmd_vy = alloc_base_vy + follow_state[5]
     if not (classification_exit and not mode_key):
         vx = ramp_value(vx, last_cmd_vx, vx_ramp)
         vy = ramp_value(vy, last_cmd_vy, vy_ramp)
     if explicit_orbit:
+        if not orbit_settling:
+            follow_state[4] = vx - alloc_base_vx
+            follow_state[5] = vy - alloc_base_vy
         vx = clamp(
             vx,
             -Follow_Orbit_Forward_Command_Limit,
             Follow_Orbit_Forward_Command_Limit,
         )
+        vy = clamp(vy, -vy_limit, vy_limit)
     elif push_follow_active:
         _pid_mod.push_correction_envelope(
             control_buf, follow_state, cam_error_x, cam_error_y,
@@ -1481,6 +1504,11 @@ def update_follow_targets(gyro_z):
         orbit_mode_active,
         angle_pose_mode_active,
         explicit_orbit,
+        clamp(
+            follow_ff_wz * Follow_Orbit_Wz_Feedforward_Gain,
+            -Follow_Orbit_Wz_Feedforward_Limit,
+            Follow_Orbit_Wz_Feedforward_Limit,
+        ) if explicit_orbit else 0.0,
         push_follow_active,
     )
 

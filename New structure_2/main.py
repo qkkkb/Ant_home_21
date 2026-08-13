@@ -481,14 +481,6 @@ def update_orbit_follow_mode(
     return orbit_follow_active
 
 
-def follow_limit(base_limit, master_value):
-    limit = base_limit
-    master_abs = abs(master_value)
-    if master_abs > limit:
-        limit = master_abs
-    return limit
-
-
 def calc_follow_angle(error_angle, orbit_mode=False, spin_mode=False, push_mode=False):
     if orbit_mode or spin_mode:
         deadband = _Follow_Pose_Angle_Deadband
@@ -561,7 +553,7 @@ def solve_follow_pose_twist(
     cam_vy = error_y
     if push_mode:
         cam_vx += 2
-        cam_vy += 2
+        cam_vy += 4
     if orbit_mode or spin_mode:
         position_priority = (
             (angle_active and (not spin_mode))
@@ -946,7 +938,11 @@ def calc_follow_yaw_output(
             output_ramp = (
                 Follow_Orbit_Entry_Ramp_Wz
                 if orbit_entry_active
-                else Follow_Orbit_Command_Ramp_Wz
+                else (
+                    3.0
+                    if master_state_code == 5
+                    else Follow_Orbit_Command_Ramp_Wz
+                )
             )
             last_cmd_wz = orbit_rate_base + follow_state[0]
         else:
@@ -1037,7 +1033,11 @@ def lost_follow_translation(
     elif not mode_key:
         vx = ff_vx * lost_scale
         vy = ff_vy * lost_scale
-        if cam_error_x < -_Follow_Distance_Far_Boost_Error and vx < 0.0:
+        if (
+            not (master_flags & MASTER_MOTION_FLAG_RETURN)
+            and cam_error_x < -_Follow_Distance_Far_Boost_Error
+            and vx < 0.0
+        ):
             vx = 0.0
         alloc_vx = vx
         alloc_vy = vy
@@ -1090,6 +1090,7 @@ def update_follow_targets(gyro_z):
     explicit_orbit = fresh_motion and (master_flags & MASTER_MOTION_FLAG_ORBIT)
     explicit_push = fresh_motion and (master_flags & MASTER_MOTION_FLAG_PUSH)
     explicit_spin = fresh_motion and (master_flags & MASTER_MOTION_FLAG_SPIN)
+    return_follow = master_flags & MASTER_MOTION_FLAG_RETURN
     strict_follow_active = fresh_motion and (
         explicit_push or master_state_code == 6
     )
@@ -1271,6 +1272,7 @@ def update_follow_targets(gyro_z):
             and (
                 master_flags < MASTER_MOTION_FLAG_ORBIT
                 or push_follow_active
+                or return_follow
             )
         )
         orbit_damping_active = explicit_orbit and not explicit_push
@@ -1292,20 +1294,16 @@ def update_follow_targets(gyro_z):
                 velocity_damping = Follow_Static_Velocity_Damping
             else:
                 velocity_damping = Follow_Normal_Velocity_Damping
-            damp_vx = -velocity_damping * (
-                actual_body_vx - alloc_base_vx
+            _pid_mod.velocity_damping(
+                control_buf, follow_state, actual_body_vx, actual_body_vy,
+                alloc_base_vx, alloc_base_vy,
+                0.18
+                if orbit_damping_active and master_state_code == 5
+                else 0.0,
+                velocity_damping, Follow_Normal_Correction_Reserve,
             )
-            damp_vy = -velocity_damping * (
-                actual_body_vy - alloc_base_vy
-            )
-            damping_max = abs(damp_vx)
-            damping_tmp = abs(damp_vy)
-            if damping_tmp > damping_max:
-                damping_max = damping_tmp
-            if damping_max > Follow_Normal_Correction_Reserve:
-                damping_scale = Follow_Normal_Correction_Reserve / damping_max
-                damp_vx *= damping_scale
-                damp_vy *= damping_scale
+            damp_vx = control_buf[0]
+            damp_vy = control_buf[1]
             body_vx += damp_vx
             body_vy += damp_vy
             # Do not open the distance loop during a fast turn.  The final
@@ -1345,7 +1343,14 @@ def update_follow_targets(gyro_z):
             target_lost_since_ms = now
         if not mode_key:
             lost_scale = lost_motion_scale(now, target_state)
-        if fresh_motion and not orbit_settling and not mode_key and lost_scale:
+            if master_flags & MASTER_MOTION_FLAG_RETURN:
+                lost_scale = 1.0
+        if (
+            fresh_motion
+            and not orbit_settling
+            and not mode_key
+            and lost_scale
+        ):
             use_motion_feedforward = True
         elif fresh_motion and not orbit_settling:
             use_motion_feedforward = master_state_code == 16 or (
@@ -1383,8 +1388,8 @@ def update_follow_targets(gyro_z):
     else:
         vy_limit = 32.0
     if fresh_motion:
-        vx_limit = follow_limit(vx_limit, ff_vx)
-        vy_limit = follow_limit(vy_limit, ff_vy)
+        vx_limit = max(vx_limit, abs(ff_vx))
+        vy_limit = max(vy_limit, abs(ff_vy))
     vx = clamp(vx, -vx_limit, vx_limit)
     vy = clamp(vy, -vy_limit, vy_limit)
     if (
@@ -1412,8 +1417,8 @@ def update_follow_targets(gyro_z):
         vx_ramp = Follow_Orbit_Entry_Ramp_Vx
         vy_ramp = Follow_Orbit_Entry_Ramp_Vy
     elif position_priority_active:
-        vx_ramp = Follow_Orbit_Command_Ramp_Vx
-        vy_ramp = Follow_Orbit_Command_Ramp_Vy
+        vx_ramp = 0.45 if master_state_code == 5 else Follow_Orbit_Command_Ramp_Vx
+        vy_ramp = 0.65 if master_state_code == 5 else Follow_Orbit_Command_Ramp_Vy
     else:
         vx_ramp = Follow_Command_Ramp_Vx
         vy_ramp = Follow_Command_Ramp_Vy
@@ -1460,6 +1465,8 @@ def update_follow_targets(gyro_z):
         )
         vx = alloc_base_vx + body_vx
         vy = alloc_base_vy + body_vy
+    if not fresh_motion and return_follow:
+        vx = vy = turn_rate_cmd = 0.0
     # A normal state-4 exit can apply the new leader feedforward immediately,
     # because vision correction stayed continuous.  ORBIT keeps its dedicated
     # entry ramp so the first high-rate command cannot kick the follower.
@@ -1502,6 +1509,9 @@ def update_follow_targets(gyro_z):
         ) if explicit_orbit else 0.0,
         push_follow_active,
     )
+    if not fresh_motion and return_follow:
+        vz_cmd = 0.0
+        reset_turn_loop_state()
 
     _pid_mod.limit_pose_twist_for_wheels(
         control_buf,
@@ -1519,6 +1529,7 @@ def update_follow_targets(gyro_z):
         and (
             (0 < master_flags < 8 and not mode_key)
             or (seen and push_follow_active)
+            or (return_follow and not mode_key)
         ),
         explicit_orbit and not explicit_push,
         fresh_motion
@@ -1526,6 +1537,7 @@ def update_follow_targets(gyro_z):
         and (
             0 < master_flags < 8
             or push_follow_active
+            or return_follow
         ),
     )
     cam_target_vx = control_buf[0]

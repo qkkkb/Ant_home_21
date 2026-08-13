@@ -138,6 +138,29 @@ def search_spin_translation(out, body_vx, body_vy, ff_vx, ff_vy, wz):
     out[4] = body_vy
 
 
+def velocity_damping(
+    out, state, actual_vx, actual_vy, base_vx, base_vy, alpha, gain, limit,
+):
+    actual_vx -= base_vx
+    actual_vy -= base_vy
+    if alpha:
+        state[2] += (actual_vx - state[2]) * alpha
+        state[3] += (actual_vy - state[3]) * alpha
+        actual_vx = state[2]
+        actual_vy = state[3]
+    vx = -gain * actual_vx
+    vy = -gain * actual_vy
+    peak = abs(vx)
+    if abs(vy) > peak:
+        peak = abs(vy)
+    if peak > limit:
+        scale = limit / peak
+        vx *= scale
+        vy *= scale
+    out[0] = vx
+    out[1] = vy
+
+
 def orbit_feedforward_position_scale(error_x, error_y):
     error = abs(error_x)
     if abs(error_y) > error:

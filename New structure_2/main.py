@@ -142,7 +142,7 @@ _Follow_Target_Lost_Hold_Ms = const(450)
 _Follow_Orbit_Settle_Position_Error = const(6)
 _Follow_Orbit_Settle_Angle_Error = const(6)
 Follow_Orbit_Settle_Gyro_Rate = 5.0
-Follow_Orbit_Settle_XY_Limit = 10.0
+Follow_Orbit_Settle_XY_Limit = 12.0
 Follow_Orbit_Settle_Turn_Limit = 32.0
 _Follow_Orbit_Settle_Hold_Ms = const(160)
 _Follow_Orbit_Settle_Timeout_Ms = const(1400)
@@ -1228,8 +1228,7 @@ def update_follow_targets(gyro_z):
                 actual_body_vx, actual_body_vy,
                 cam_error_x, cam_error_y, cam_error_angle, gyro_z,
                 Follow_Orbit_Settle_XY_Limit, _Follow_Orbit_Settle_Angle_Error,
-                Follow_Orbit_Settle_Gyro_Rate,
-                Follow_Normal_Reverse_Release_Speed,
+                Follow_Orbit_Settle_Gyro_Rate, 1.5,
             )
             body_vx = control_buf[0]
             body_vy = control_buf[1]
@@ -1415,13 +1414,11 @@ def update_follow_targets(gyro_z):
         )
     elif push_follow_active:
         _pid_mod.push_correction_envelope(
-            control_buf, follow_state, now,
-            cam_error_x, cam_error_y, cam_error_angle, gyro_z,
+            control_buf, follow_state, cam_error_x, cam_error_y,
         )
         push_catchup_limit = control_buf[0]
         push_brake_limit = control_buf[1]
         push_lateral_limit = control_buf[2]
-        push_xy_scale = control_buf[3]
         if (
             cam_error_x <= -_Follow_Push_Emergency_Error
             and safety_vx > push_catchup_limit
@@ -1439,8 +1436,6 @@ def update_follow_targets(gyro_z):
             -push_lateral_limit,
             push_lateral_limit,
         )
-        body_vx *= push_xy_scale
-        body_vy *= push_xy_scale
         vx = alloc_base_vx + body_vx
         vy = alloc_base_vy + body_vy
     # A normal state-4 exit can apply the new leader feedforward immediately,

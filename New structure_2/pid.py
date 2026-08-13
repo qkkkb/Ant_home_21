@@ -1,6 +1,3 @@
-import utime
-
-
 PWM_MAX = 60000.0
 _POSE_WHEEL_LIMIT = 33.0
 _NORMAL_WHEEL_LIMIT = 38.0
@@ -126,49 +123,34 @@ def _clamp(value, low, high):
     return value
 
 
-def push_correction_envelope(out, state, now, error_x, error_y, error_angle, gyro_z):
-    error_total = abs(error_x) + abs(error_y)
-    crossed = state[2] * error_x < 0 or state[3] * error_y < 0
+def push_correction_envelope(out, state, error_x, error_y):
+    target = _clamp((abs(error_x) - 12.0) / 36.0, 0.0, 1.0)
+    if state[2] * error_x < 0:
+        state[0] = 0.0
+    elif state[0] < target:
+        state[0] += 0.02
+        if state[0] > target:
+            state[0] = target
+    else:
+        state[0] = target
     if error_x:
         state[2] = error_x
+
+    target = _clamp((abs(error_y) - 12.0) / 36.0, 0.0, 1.0)
+    if state[3] * error_y < 0:
+        state[1] = 0.0
+    elif state[1] < target:
+        state[1] += 0.02
+        if state[1] > target:
+            state[1] = target
+    else:
+        state[1] = target
     if error_y:
         state[3] = error_y
-    if error_total <= 12:
-        state[0] = 0
-        state[1] = error_total
-        recovery = 0.0
-    elif crossed:
-        state[0] = now
-        state[1] = error_total
-        recovery = 0.0
-    elif state[0] == 0:
-        state[0] = now
-        state[1] = error_total
-        recovery = 0.0
-    elif error_total < state[1] - 6:
-        state[0] = now
-        state[1] = error_total
-        recovery = 0.0
-    else:
-        if error_total > state[1]:
-            state[1] = error_total
-        recovery = (utime.ticks_diff(now, state[0]) - 200) / 500.0
-        recovery = _clamp(recovery, 0.0, 1.0)
 
-    yaw_load = 0.0
-    error_angle = abs(error_angle)
-    if error_angle > 6:
-        yaw_load = (error_angle - 6) / 18.0
-    gyro_z = abs(gyro_z)
-    if gyro_z > 12:
-        gyro_load = (gyro_z - 12) / 68.0
-        if gyro_load > yaw_load:
-            yaw_load = gyro_load
-    yaw_scale = 1.0 - 0.55 * _clamp(yaw_load, 0.0, 1.0)
-    out[0] = 3.0 + 2.0 * recovery
-    out[1] = 3.0 + 3.0 * recovery
-    out[2] = 4.0 + 2.0 * recovery
-    out[3] = yaw_scale
+    out[0] = 3.0 + 2.0 * state[0]
+    out[1] = 3.0 + 3.0 * state[0]
+    out[2] = 4.0 + 2.0 * state[1]
 
 
 def orbit_settle_translation(
@@ -185,22 +167,28 @@ def orbit_settle_translation(
     xy_limit,
     angle_limit,
     gyro_limit,
-    reverse_speed,
+    speed_deadband,
 ):
     vx = _clamp(vx, -xy_limit, xy_limit)
     vy = _clamp(vy, -xy_limit, xy_limit)
-    if state[4] and error_x and state[4] * error_x < 0:
-        vx = 0.0
-    if state[5] and error_y and state[5] * error_y < 0:
-        vy = 0.0
+    crossed_x = state[4] and error_x and state[4] * error_x < 0
+    crossed_y = state[5] and error_y and state[5] * error_y < 0
     if error_x:
         state[4] = error_x
     if error_y:
         state[5] = error_y
-    if vx * actual_vx < 0.0 and abs(actual_vx) > reverse_speed:
+    if crossed_x:
         vx = 0.0
-    if vy * actual_vy < 0.0 and abs(actual_vy) > reverse_speed:
+    if actual_vx > speed_deadband:
+        vx += _clamp(-1.5 * (actual_vx - speed_deadband), -6.0, 0.0)
+    elif actual_vx < -speed_deadband:
+        vx += _clamp(-1.5 * (actual_vx + speed_deadband), 0.0, 6.0)
+    if crossed_y:
         vy = 0.0
+    if actual_vy > speed_deadband:
+        vy += _clamp(-1.5 * (actual_vy - speed_deadband), -6.0, 0.0)
+    elif actual_vy < -speed_deadband:
+        vy += _clamp(-1.5 * (actual_vy + speed_deadband), 0.0, 6.0)
 
     abs_x = abs(vx)
     abs_y = abs(vy)
@@ -223,7 +211,7 @@ def orbit_settle_translation(
         gyro = (gyro - gyro_limit) / 75.0
         if gyro > yaw_load:
             yaw_load = gyro
-    scale = 1.0 - 0.55 * _clamp(yaw_load, 0.0, 1.0)
+    scale = 1.0 - 0.35 * _clamp(yaw_load, 0.0, 1.0)
     out[0] = vx * scale
     out[1] = vy * scale
 

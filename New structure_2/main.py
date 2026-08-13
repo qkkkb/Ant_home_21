@@ -632,6 +632,7 @@ def solve_follow_pose_twist(
             if master_state_code == 5 or master_state_code == 16:
                 _pid_mod.orbit_translation(
                     out, body_vx, body_vy, ff_vx, ff_vy, ff_wz,
+                    master_state_code == 5,
                 )
                 vx = out[0]
                 vy = out[1]
@@ -933,7 +934,7 @@ def calc_follow_yaw_output(
                 if orbit_entry_active
                 else (
                     3.0
-                    if master_state_code == 5
+                    if master_state_code == 5 or master_state_code == 16
                     else Follow_Orbit_Command_Ramp_Wz
                 )
             )
@@ -1022,6 +1023,7 @@ def lost_follow_translation(
     ):
         _pid_mod.orbit_translation(
             out, 0, 0, ff_vx, ff_vy, ff_wz,
+            master_state_code == 5,
         )
         vx = alloc_vx = out[0]
         vy = alloc_vy = out[1]
@@ -1307,7 +1309,9 @@ def update_follow_targets(gyro_z):
                 control_buf, follow_state, actual_body_vx, actual_body_vy,
                 alloc_base_vx, alloc_base_vy,
                 0.18
-                if orbit_damping_active and master_state_code == 5
+                if orbit_damping_active and (
+                    master_state_code == 5 or master_state_code == 16
+                )
                 else 0.0,
                 velocity_damping, Follow_Normal_Correction_Reserve,
             )
@@ -1399,8 +1403,9 @@ def update_follow_targets(gyro_z):
     if fresh_motion:
         vx_limit = max(vx_limit, abs(ff_vx))
         vy_limit = max(vy_limit, abs(ff_vy))
-    vx = clamp(vx, -vx_limit, vx_limit)
-    vy = clamp(vy, -vy_limit, vy_limit)
+    if not (explicit_orbit and master_state_code == 16):
+        vx = clamp(vx, -vx_limit, vx_limit)
+        vy = clamp(vy, -vy_limit, vy_limit)
     if (
         seen
         and not mode_key
@@ -1426,8 +1431,12 @@ def update_follow_targets(gyro_z):
         vx_ramp = Follow_Orbit_Entry_Ramp_Vx
         vy_ramp = Follow_Orbit_Entry_Ramp_Vy
     elif position_priority_active:
-        vx_ramp = 0.45 if master_state_code == 5 else Follow_Orbit_Command_Ramp_Vx
-        vy_ramp = 0.65 if master_state_code == 5 else Follow_Orbit_Command_Ramp_Vy
+        if master_state_code == 5 or master_state_code == 16:
+            vx_ramp = 0.45
+            vy_ramp = 0.65
+        else:
+            vx_ramp = Follow_Orbit_Command_Ramp_Vx
+            vy_ramp = Follow_Orbit_Command_Ramp_Vy
     else:
         vx_ramp = Follow_Command_Ramp_Vx
         vy_ramp = Follow_Command_Ramp_Vy
@@ -1441,12 +1450,13 @@ def update_follow_targets(gyro_z):
         if not orbit_settling:
             follow_state[4] = vx - alloc_base_vx
             follow_state[5] = vy - alloc_base_vy
-        vx = clamp(
-            vx,
-            -Follow_Orbit_Forward_Command_Limit,
-            Follow_Orbit_Forward_Command_Limit,
-        )
-        vy = clamp(vy, -vy_limit, vy_limit)
+        if master_state_code != 16:
+            vx = clamp(
+                vx,
+                -Follow_Orbit_Forward_Command_Limit,
+                Follow_Orbit_Forward_Command_Limit,
+            )
+            vy = clamp(vy, -vy_limit, vy_limit)
     elif push_follow_active:
         _pid_mod.push_correction_envelope(
             control_buf, follow_state, cam_error_x, cam_error_y,

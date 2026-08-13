@@ -16,20 +16,6 @@ def wheel_targets(vx, vy, vz):
 
 
 class OrbitKinematicsTest(unittest.TestCase):
-    def test_wrapped_search_phase_error(self):
-        self.assertAlmostEqual(pid.wrapped_angle_error(2, 358), 4.0)
-        self.assertAlmostEqual(pid.wrapped_angle_error(358, 2), -4.0)
-
-    def test_search_phase_target_is_continuous_across_zero(self):
-        offset = pid.wrapped_angle_error(29.0, 359.0)
-        self.assertAlmostEqual(
-            pid.wrapped_angle_error(359.0 + offset, 29.0), 0.0
-        )
-        self.assertAlmostEqual(
-            pid.wrapped_angle_error(1.0 + offset, 31.0), 0.0
-        )
-        self.assertAlmostEqual(pid.wrapped_angle_error(0.2, 359.8), 0.4)
-
     def test_orbit_base_stays_inside_verified_limit(self):
         out = [0.0] * 8
         pid.orbit_translation(out, 0, 0, 0, 0, 145)

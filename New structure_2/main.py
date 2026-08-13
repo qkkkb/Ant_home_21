@@ -142,8 +142,6 @@ Follow_Orbit_Settle_Turn_Limit = 32.0
 _Follow_Orbit_Settle_Hold_Ms = const(160)
 _Follow_Orbit_Settle_Timeout_Ms = const(1400)
 Follow_Orbit_Mode_FfWz_Filter = 0.22
-Follow_Search_Phase_Gain = 0.90
-Follow_Search_Phase_Limit = 32.0
 Follow_Normal_Wz_Feedforward_Limit = 15.0
 Follow_Normal_Target_Point_Wz_Limit = 15.0
 Follow_Spin_Latch_Min_Wz = 26.0
@@ -173,7 +171,6 @@ master_vx = 0.0
 master_vy = 0.0
 master_wz = 0.0
 master_orbit_wz = 0.0
-master_search_yaw = 0.0
 master_preview_vx = 0.0
 master_preview_vy = 0.0
 master_flags = 0
@@ -215,7 +212,6 @@ last_stall_count = 0
 last_stall_boost = False
 last_alloc_scale = 100
 follow_output_limit = _FOLLOW_RUN_PWM_LIMIT
-search_phase_offset = None
 
 
 def clamp(value, low, high):
@@ -826,7 +822,6 @@ def poll_art_uart():
 
 def handle_coop_frame(msg_type, seq, payload, payload_len):
     global master_vx, master_vy, master_wz, master_orbit_wz
-    global master_search_yaw, search_phase_offset
     global master_preview_vx, master_preview_vy
     global master_flags, master_state_code, master_last_rx_ms
 
@@ -854,18 +849,8 @@ def handle_coop_frame(msg_type, seq, payload, payload_len):
             preview_vy * 0.25 - preview_vx * 0.4330127
         )
         master_state_code -= _Master_State_Preview_Flag
-    elif master_state_code == 5:
+    elif master_state_code == 5 or master_state_code == 16:
         master_orbit_wz = decode_i16(payload, 6) / 10.0
-    elif master_state_code == 16:
-        yaw = decode_i16(payload, 6) / 10.0
-        master_orbit_wz = master_wz
-        if search_phase_offset is None:
-            search_phase_offset = _pid_mod.wrapped_angle_error(
-                imu_runtime.read_yaw(), yaw
-            )
-        master_search_yaw = yaw
-    if master_state_code != 16:
-        search_phase_offset = None
     master_flags = payload[8]
     master_last_rx_ms = utime.ticks_ms()
 
@@ -1130,13 +1115,7 @@ def update_follow_targets(gyro_z):
         now,
         gyro_z,
         explicit_orbit,
-        strict_follow_active or (
-            last_control_master_state == 16
-            and (
-                not fresh_motion
-                or (master_state_code != 16 and not explicit_orbit)
-            )
-        ),
+        strict_follow_active,
         spin_mode_active,
         fresh_motion and (master_flags & MASTER_MOTION_FLAG_BACK),
     )
@@ -1379,7 +1358,7 @@ def update_follow_targets(gyro_z):
         ):
             use_motion_feedforward = True
         elif fresh_motion and not orbit_settling:
-            use_motion_feedforward = master_state_code == 16 or (
+            use_motion_feedforward = (
                 utime.ticks_diff(now, target_lost_since_ms)
                 <= (300 if not mode_key else _Follow_Target_Lost_Hold_Ms)
             )
@@ -1521,21 +1500,6 @@ def update_follow_targets(gyro_z):
         else:
             turn_rate_cmd = follow_ff_wz * Follow_Normal_Wz_Feedforward_Gain
             turn_rate_cmd *= lost_scale
-    if (
-        fresh_motion
-        and search_phase_offset is not None
-        and not orbit_settling
-        and master_state_code == 16
-    ):
-        phase_error = _pid_mod.wrapped_angle_error(
-            master_search_yaw + search_phase_offset,
-            imu_runtime.read_yaw(),
-        )
-        turn_rate_cmd += clamp(
-            phase_error * Follow_Search_Phase_Gain,
-            -Follow_Search_Phase_Limit,
-            Follow_Search_Phase_Limit,
-        )
     vz_cmd = calc_follow_yaw_output(
         gyro_z,
         turn_rate_cmd,
@@ -1621,7 +1585,6 @@ def reset_speed_outputs(keep_orbit_state=False):
     global last_control_master_state
     global master_edge_until_ms
     global last_alloc_scale
-    global search_phase_offset
 
     speed_reset(pid_fl)
     speed_reset(pid_fr)
@@ -1644,7 +1607,6 @@ def reset_speed_outputs(keep_orbit_state=False):
         filtered_ff_wz = 0.0
         last_follow_mode_key = -1
         last_control_master_state = -1
-        search_phase_offset = None
     spin_latched_wz = 0.0
     spin_latch_until_ms = 0
     master_edge_until_ms = 0

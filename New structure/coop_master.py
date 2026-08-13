@@ -142,9 +142,8 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             wz = cmd_wz
         elif state_code == 5 or state_code == 16:
             flags |= _FLAG_ORBIT
-            # Formation translation must follow what the leader is actually
-            # doing.  Commanded yaw remains the follower's yaw-rate reference;
-            # measured yaw is packed below for orbital XY kinematics only.
+            # Commanded yaw rate starts the follower immediately. State 16 also
+            # packs measured yaw below so the follower can close the phase loop.
             vx = _vx
             vy = _vy
             wz = cmd_wz
@@ -191,8 +190,10 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
         _put_i8(11, preview_vx * _PREVIEW_SCALE)
         _put_i8(12, preview_vy * _PREVIEW_SCALE)
         state_code |= _STATE_PREVIEW
-    elif state_code == 5 or state_code == 16:
+    elif state_code == 5:
         _put_i16(11, _wz * 10)
+    elif state_code == 16:
+        _put_i16(11, yaw_deg * 10)
     else:
         _put_i16(11, yaw_deg * 10)
     _put_u8(13, flags)

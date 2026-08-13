@@ -142,6 +142,8 @@ Follow_Orbit_Settle_Turn_Limit = 32.0
 _Follow_Orbit_Settle_Hold_Ms = const(160)
 _Follow_Orbit_Settle_Timeout_Ms = const(1400)
 Follow_Orbit_Mode_FfWz_Filter = 0.22
+Follow_Search_Phase_Gain = 0.90
+Follow_Search_Phase_Limit = 32.0
 Follow_Normal_Wz_Feedforward_Limit = 15.0
 Follow_Normal_Target_Point_Wz_Limit = 15.0
 Follow_Spin_Latch_Min_Wz = 26.0
@@ -171,6 +173,8 @@ master_vx = 0.0
 master_vy = 0.0
 master_wz = 0.0
 master_orbit_wz = 0.0
+master_search_yaw = 0.0
+master_search_last_ms = 0
 master_preview_vx = 0.0
 master_preview_vy = 0.0
 master_flags = 0
@@ -212,6 +216,8 @@ last_stall_count = 0
 last_stall_boost = False
 last_alloc_scale = 100
 follow_output_limit = _FOLLOW_RUN_PWM_LIMIT
+search_phase_offset = None
+search_phase_error = 0.0
 
 
 def clamp(value, low, high):
@@ -822,6 +828,8 @@ def poll_art_uart():
 
 def handle_coop_frame(msg_type, seq, payload, payload_len):
     global master_vx, master_vy, master_wz, master_orbit_wz
+    global master_search_yaw, master_search_last_ms
+    global search_phase_offset, search_phase_error
     global master_preview_vx, master_preview_vy
     global master_flags, master_state_code, master_last_rx_ms
 
@@ -832,6 +840,7 @@ def handle_coop_frame(msg_type, seq, payload, payload_len):
     master_vx = measured_vx * 0.5 + measured_vy * 0.8660254
     master_vy = measured_vy * 0.5 - measured_vx * 0.8660254
     master_wz = decode_i16(payload, 4) / 10.0
+    previous_state = master_state_code
     master_state_code = payload[9] if payload_len >= 10 else -1
     master_preview_vx = master_preview_vy = 0.0
     master_orbit_wz = 0.0
@@ -849,8 +858,42 @@ def handle_coop_frame(msg_type, seq, payload, payload_len):
             preview_vy * 0.25 - preview_vx * 0.4330127
         )
         master_state_code -= _Master_State_Preview_Flag
-    elif master_state_code == 5 or master_state_code == 16:
+        master_search_last_ms = 0
+        search_phase_offset = None
+        search_phase_error = 0.0
+    elif master_state_code == 5:
         master_orbit_wz = decode_i16(payload, 6) / 10.0
+        master_search_last_ms = 0
+        search_phase_offset = None
+        search_phase_error = 0.0
+    elif master_state_code == 16:
+        now = utime.ticks_ms()
+        yaw = decode_i16(payload, 6) / 10.0
+        if previous_state != 16 or not master_search_last_ms:
+            master_orbit_wz = master_wz
+            search_phase_offset = imu_runtime.read_yaw() - yaw
+            search_phase_error = 0.0
+        else:
+            yaw_step = _pid_mod.wrapped_angle_error(yaw, master_search_yaw)
+            dt_ms = utime.ticks_diff(now, master_search_last_ms)
+            if dt_ms > 0:
+                master_orbit_wz = clamp(
+                    yaw_step * 1000.0 / dt_ms,
+                    -Follow_Orbit_Wz_Feedforward_Limit,
+                    Follow_Orbit_Wz_Feedforward_Limit,
+                )
+            else:
+                master_orbit_wz = master_wz
+            target_yaw = (yaw + search_phase_offset) % 360.0
+            search_phase_error = _pid_mod.wrapped_angle_error(
+                target_yaw, imu_runtime.read_yaw()
+            )
+        master_search_yaw = yaw
+        master_search_last_ms = now
+    else:
+        master_search_last_ms = 0
+        search_phase_offset = None
+        search_phase_error = 0.0
     master_flags = payload[8]
     master_last_rx_ms = utime.ticks_ms()
 
@@ -867,7 +910,7 @@ def poll_coop_uart():
 def debug_send_state(log_id, gyro_z):
     try:
         wireless.send_str(
-            "D %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
+            "D %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d"
             % (
                 log_id,
                 master_flags,
@@ -887,6 +930,7 @@ def debug_send_state(log_id, gyro_z):
                 int(last_ff_wz),
                 int(last_ff_vx),
                 int(last_ff_vy),
+                int(search_phase_error),
             )
         )
         wireless.send_str("\r\n")
@@ -1506,6 +1550,22 @@ def update_follow_targets(gyro_z):
         else:
             turn_rate_cmd = follow_ff_wz * Follow_Normal_Wz_Feedforward_Gain
             turn_rate_cmd *= lost_scale
+    if (
+        fresh_motion
+        and search_phase_offset is not None
+        and not orbit_settling
+        and master_state_code == 16
+    ):
+        turn_rate_cmd += clamp(
+            search_phase_error * Follow_Search_Phase_Gain,
+            -Follow_Search_Phase_Limit,
+            Follow_Search_Phase_Limit,
+        )
+        turn_rate_cmd = clamp(
+            turn_rate_cmd,
+            follow_ff_wz - Follow_Search_Phase_Limit,
+            follow_ff_wz + Follow_Search_Phase_Limit,
+        )
     vz_cmd = calc_follow_yaw_output(
         gyro_z,
         turn_rate_cmd,
@@ -1591,6 +1651,7 @@ def reset_speed_outputs(keep_orbit_state=False):
     global last_control_master_state
     global master_edge_until_ms
     global last_alloc_scale
+    global search_phase_offset, search_phase_error
 
     speed_reset(pid_fl)
     speed_reset(pid_fr)
@@ -1613,6 +1674,8 @@ def reset_speed_outputs(keep_orbit_state=False):
         filtered_ff_wz = 0.0
         last_follow_mode_key = -1
         last_control_master_state = -1
+        search_phase_offset = None
+        search_phase_error = 0.0
     spin_latched_wz = 0.0
     spin_latch_until_ms = 0
     master_edge_until_ms = 0

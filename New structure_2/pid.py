@@ -123,6 +123,15 @@ def _clamp(value, low, high):
     return value
 
 
+def wrapped_angle_error(target, current):
+    error = target - current
+    if error > 180.0:
+        error -= 360.0
+    elif error < -180.0:
+        error += 360.0
+    return error
+
+
 def orbit_translation(out, body_vx, body_vy, ff_vx, ff_vy, wz):
     base_vx = (ff_vx - wz * 0.17) * 1.30
     base_vy = (ff_vy - wz * 0.28) * 0.76

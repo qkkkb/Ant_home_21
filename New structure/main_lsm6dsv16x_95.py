@@ -177,7 +177,7 @@ Nav_Push_Prepare_Ok_Yaw = 6   #准备阶段定向误差小于该值即认为定�
 Nav_Push_Prepare_Ok_Ms = 70
 Nav_Ball_Push_Yaw_Offset = 30.0
 Nav_Bear_Push_Execute_Forward_Speed = 16.0
-Nav_Bear_Push_Ms = 3000
+Nav_Bear_Push_Ms = 2800
 Nav_Ball_Field_Vx_Scale = 0.8660254
 Nav_Ball_Field_Vy_Scale = 0.5
 Nav_Push_Execute_Forward_Speed = 20.0    #执行阶段前进速度
@@ -204,7 +204,7 @@ Nav_Post_Turn_No_Target_Ms = 100
 Nav_Post_Turn_Forward_Ms = 1500
 Nav_Post_Turn_Forward_Speed = 13.0
 Nav_Object_Total = 2
-Nav_Return_Left_Speed = 20.0
+Nav_Return_Left_Speed = 22.0
 Nav_Return_Left_Start_Yaw = 10.0
 Nav_Return_Left_Max_Ms = 10000
 Nav_Return_Back_Speed = 16.0
@@ -1323,7 +1323,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 Nav_Push_Execute_Forward_Speed * Nav_Ball_Field_Vy_Scale
             )
             yaw_ref_deg = push_yaw_target
-            if utime.ticks_diff(now, nav_transition_ms) >= 1000:
+            if utime.ticks_diff(now, nav_transition_ms) >= 800:
                 nav_set_state(NAV_STATE_PUSH_BACK)
             return
         if push_dir_code == Push_Dir_Right:

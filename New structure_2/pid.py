@@ -155,7 +155,7 @@ def push_correction_envelope(out, state, error_x, error_y, base_vx, moving_push)
         if brake_limit > moving_limit:
             brake_limit = moving_limit
     out[1] = brake_limit
-    out[2] = 5.0 + 3.0 * state[1]
+    out[2] = 4.4 + 3.6 * state[1]
 
 
 def orbit_settle_translation(

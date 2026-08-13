@@ -123,8 +123,8 @@ def _clamp(value, low, high):
     return value
 
 
-def push_correction_envelope(out, state, error_x, error_y):
-    target = _clamp((abs(error_x) - 12.0) / 36.0, 0.0, 1.0)
+def push_correction_envelope(out, state, error_x, error_y, base_vx, moving_push):
+    target = _clamp((abs(error_x) - 6.0) / 24.0, 0.0, 1.0)
     if state[2] * error_x < 0:
         state[0] = 0.0
     elif state[0] < target:
@@ -136,7 +136,7 @@ def push_correction_envelope(out, state, error_x, error_y):
     if error_x:
         state[2] = error_x
 
-    target = _clamp((abs(error_y) - 12.0) / 36.0, 0.0, 1.0)
+    target = _clamp((abs(error_y) - 6.0) / 24.0, 0.0, 1.0)
     if state[3] * error_y < 0:
         state[1] = 0.0
     elif state[1] < target:
@@ -148,9 +148,14 @@ def push_correction_envelope(out, state, error_x, error_y):
     if error_y:
         state[3] = error_y
 
-    out[0] = 3.0 + 2.0 * state[0]
-    out[1] = 3.0 + 3.0 * state[0]
-    out[2] = 4.0 + 2.0 * state[1]
+    out[0] = 4.0 + 2.0 * state[0]
+    brake_limit = 4.0 + 5.0 * state[0]
+    if moving_push and base_vx > 0.0:
+        moving_limit = base_vx - 1.0 if base_vx > 1.0 else 0.0
+        if brake_limit > moving_limit:
+            brake_limit = moving_limit
+    out[1] = brake_limit
+    out[2] = 5.0 + 3.0 * state[1]
 
 
 def orbit_settle_translation(
@@ -169,8 +174,14 @@ def orbit_settle_translation(
     gyro_limit,
     speed_deadband,
 ):
-    vx = _clamp(vx, -xy_limit, xy_limit)
-    vy = _clamp(vy, -xy_limit, xy_limit)
+    position_limit = abs(error_x) * 0.55
+    if position_limit > xy_limit:
+        position_limit = xy_limit
+    vx = _clamp(vx, -position_limit, position_limit)
+    position_limit = abs(error_y) * 0.55
+    if position_limit > xy_limit:
+        position_limit = xy_limit
+    vy = _clamp(vy, -position_limit, position_limit)
     crossed_x = state[4] and error_x and state[4] * error_x < 0
     crossed_y = state[5] and error_y and state[5] * error_y < 0
     if error_x:
@@ -180,15 +191,15 @@ def orbit_settle_translation(
     if crossed_x:
         vx = 0.0
     if actual_vx > speed_deadband:
-        vx += _clamp(-1.5 * (actual_vx - speed_deadband), -6.0, 0.0)
+        vx += _clamp(-2.2 * (actual_vx - speed_deadband), -9.0, 0.0)
     elif actual_vx < -speed_deadband:
-        vx += _clamp(-1.5 * (actual_vx + speed_deadband), 0.0, 6.0)
+        vx += _clamp(-2.2 * (actual_vx + speed_deadband), 0.0, 9.0)
     if crossed_y:
         vy = 0.0
     if actual_vy > speed_deadband:
-        vy += _clamp(-1.5 * (actual_vy - speed_deadband), -6.0, 0.0)
+        vy += _clamp(-2.2 * (actual_vy - speed_deadband), -9.0, 0.0)
     elif actual_vy < -speed_deadband:
-        vy += _clamp(-1.5 * (actual_vy + speed_deadband), 0.0, 6.0)
+        vy += _clamp(-2.2 * (actual_vy + speed_deadband), 0.0, 9.0)
 
     abs_x = abs(vx)
     abs_y = abs(vy)
@@ -211,7 +222,7 @@ def orbit_settle_translation(
         gyro = (gyro - gyro_limit) / 75.0
         if gyro > yaw_load:
             yaw_load = gyro
-    scale = 1.0 - 0.35 * _clamp(yaw_load, 0.0, 1.0)
+    scale = 1.0 - 0.15 * _clamp(yaw_load, 0.0, 1.0)
     out[0] = vx * scale
     out[1] = vy * scale
 

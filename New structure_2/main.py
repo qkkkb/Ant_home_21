@@ -142,7 +142,7 @@ _Follow_Target_Lost_Hold_Ms = const(450)
 _Follow_Orbit_Settle_Position_Error = const(6)
 _Follow_Orbit_Settle_Angle_Error = const(6)
 Follow_Orbit_Settle_Gyro_Rate = 5.0
-Follow_Orbit_Settle_XY_Limit = 12.0
+Follow_Orbit_Settle_XY_Limit = 14.0
 Follow_Orbit_Settle_Turn_Limit = 32.0
 _Follow_Orbit_Settle_Hold_Ms = const(160)
 _Follow_Orbit_Settle_Timeout_Ms = const(1400)
@@ -1228,7 +1228,7 @@ def update_follow_targets(gyro_z):
                 actual_body_vx, actual_body_vy,
                 cam_error_x, cam_error_y, cam_error_angle, gyro_z,
                 Follow_Orbit_Settle_XY_Limit, _Follow_Orbit_Settle_Angle_Error,
-                Follow_Orbit_Settle_Gyro_Rate, 1.5,
+                Follow_Orbit_Settle_Gyro_Rate, 1.0,
             )
             body_vx = control_buf[0]
             body_vy = control_buf[1]
@@ -1394,7 +1394,10 @@ def update_follow_targets(gyro_z):
             and abs(actual_body_vy) > Follow_Normal_Reverse_Release_Speed
         ):
             vy = 0.0
-    if orbit_entry_active:
+    if orbit_settling:
+        vx_ramp = 3.0
+        vy_ramp = 4.0
+    elif orbit_entry_active:
         vx_ramp = Follow_Orbit_Entry_Ramp_Vx
         vy_ramp = Follow_Orbit_Entry_Ramp_Vy
     elif position_priority_active:
@@ -1415,6 +1418,7 @@ def update_follow_targets(gyro_z):
     elif push_follow_active:
         _pid_mod.push_correction_envelope(
             control_buf, follow_state, cam_error_x, cam_error_y,
+            alloc_base_vx, explicit_push,
         )
         push_catchup_limit = control_buf[0]
         push_brake_limit = control_buf[1]
@@ -1424,7 +1428,7 @@ def update_follow_targets(gyro_z):
             and safety_vx > push_catchup_limit
         ):
             push_catchup_limit += (safety_vx - push_catchup_limit) * (
-                (push_catchup_limit - 3.0) / 2.0
+                (push_catchup_limit - 4.0) / 2.0
             )
         body_vx = clamp(
             vx - alloc_base_vx,

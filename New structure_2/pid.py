@@ -123,17 +123,16 @@ def _clamp(value, low, high):
     return value
 
 
-def orbit_translation(out, body_vx, body_vy, ff_vx, ff_vy, wz, limit_base):
+def orbit_translation(out, body_vx, body_vy, ff_vx, ff_vy, wz):
     base_vx = (ff_vx - wz * 0.17) * 1.30
     base_vy = (ff_vy - wz * 0.28) * 0.76
-    if limit_base:
-        scale = abs(base_vx) / 14.0
-        tmp = abs(base_vy) / 20.0
-        if tmp > scale:
-            scale = tmp
-        if scale > 1.0:
-            base_vx /= scale
-            base_vy /= scale
+    scale = abs(base_vx) / 14.0
+    tmp = abs(base_vy) / 20.0
+    if tmp > scale:
+        scale = tmp
+    if scale > 1.0:
+        base_vx /= scale
+        base_vy /= scale
     body_vx = _clamp(body_vx, -38.0, 38.0)
     body_vy = _clamp(body_vy, -30.0, 30.0)
     out[0] = base_vx + body_vx

@@ -21,11 +21,13 @@ class OrbitKinematicsTest(unittest.TestCase):
         self.assertAlmostEqual(pid.wrapped_angle_error(358, 2), -4.0)
 
     def test_search_phase_target_is_continuous_across_zero(self):
-        offset = 30.0
-        before_target = (359.0 + offset) % 360.0
-        after_target = (1.0 + offset) % 360.0
-        self.assertAlmostEqual(pid.wrapped_angle_error(before_target, 29.0), 0.0)
-        self.assertAlmostEqual(pid.wrapped_angle_error(after_target, 31.0), 0.0)
+        offset = pid.wrapped_angle_error(29.0, 359.0)
+        self.assertAlmostEqual(
+            pid.wrapped_angle_error(359.0 + offset, 29.0), 0.0
+        )
+        self.assertAlmostEqual(
+            pid.wrapped_angle_error(1.0 + offset, 31.0), 0.0
+        )
         self.assertAlmostEqual(pid.wrapped_angle_error(0.2, 359.8), 0.4)
 
     def test_orbit_base_stays_inside_verified_limit(self):

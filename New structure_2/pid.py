@@ -1,3 +1,6 @@
+import utime
+
+
 PWM_MAX = 60000.0
 _POSE_WHEEL_LIMIT = 33.0
 _NORMAL_WHEEL_LIMIT = 38.0
@@ -121,6 +124,108 @@ def _clamp(value, low, high):
     if value > high:
         return high
     return value
+
+
+def push_correction_envelope(out, state, now, error_x, error_y, error_angle, gyro_z):
+    error_total = abs(error_x) + abs(error_y)
+    crossed = state[2] * error_x < 0 or state[3] * error_y < 0
+    if error_x:
+        state[2] = error_x
+    if error_y:
+        state[3] = error_y
+    if error_total <= 12:
+        state[0] = 0
+        state[1] = error_total
+        recovery = 0.0
+    elif crossed:
+        state[0] = now
+        state[1] = error_total
+        recovery = 0.0
+    elif state[0] == 0:
+        state[0] = now
+        state[1] = error_total
+        recovery = 0.0
+    elif error_total < state[1] - 6:
+        state[0] = now
+        state[1] = error_total
+        recovery = 0.0
+    else:
+        if error_total > state[1]:
+            state[1] = error_total
+        recovery = (utime.ticks_diff(now, state[0]) - 200) / 500.0
+        recovery = _clamp(recovery, 0.0, 1.0)
+
+    yaw_load = 0.0
+    error_angle = abs(error_angle)
+    if error_angle > 6:
+        yaw_load = (error_angle - 6) / 18.0
+    gyro_z = abs(gyro_z)
+    if gyro_z > 12:
+        gyro_load = (gyro_z - 12) / 68.0
+        if gyro_load > yaw_load:
+            yaw_load = gyro_load
+    yaw_scale = 1.0 - 0.55 * _clamp(yaw_load, 0.0, 1.0)
+    out[0] = 3.0 + 2.0 * recovery
+    out[1] = 3.0 + 3.0 * recovery
+    out[2] = 4.0 + 2.0 * recovery
+    out[3] = yaw_scale
+
+
+def orbit_settle_translation(
+    out,
+    state,
+    vx,
+    vy,
+    actual_vx,
+    actual_vy,
+    error_x,
+    error_y,
+    error_angle,
+    gyro_z,
+    xy_limit,
+    angle_limit,
+    gyro_limit,
+    reverse_speed,
+):
+    vx = _clamp(vx, -xy_limit, xy_limit)
+    vy = _clamp(vy, -xy_limit, xy_limit)
+    if state[4] and error_x and state[4] * error_x < 0:
+        vx = 0.0
+    if state[5] and error_y and state[5] * error_y < 0:
+        vy = 0.0
+    if error_x:
+        state[4] = error_x
+    if error_y:
+        state[5] = error_y
+    if vx * actual_vx < 0.0 and abs(actual_vx) > reverse_speed:
+        vx = 0.0
+    if vy * actual_vy < 0.0 and abs(actual_vy) > reverse_speed:
+        vy = 0.0
+
+    abs_x = abs(vx)
+    abs_y = abs(vy)
+    if abs_x < abs_y:
+        tmp = abs_x
+        abs_x = abs_y
+        abs_y = tmp
+    load = abs_x + abs_y * 0.5
+    if load > xy_limit:
+        scale = xy_limit / load
+        vx *= scale
+        vy *= scale
+
+    yaw_load = 0.0
+    angle = abs(error_angle)
+    if angle > angle_limit:
+        yaw_load = (angle - angle_limit) / 18.0
+    gyro = abs(gyro_z)
+    if gyro > gyro_limit:
+        gyro = (gyro - gyro_limit) / 75.0
+        if gyro > yaw_load:
+            yaw_load = gyro
+    scale = 1.0 - 0.55 * _clamp(yaw_load, 0.0, 1.0)
+    out[0] = vx * scale
+    out[1] = vy * scale
 
 
 def limit_pose_twist_for_wheels(

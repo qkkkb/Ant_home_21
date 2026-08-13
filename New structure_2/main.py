@@ -123,9 +123,6 @@ Follow_Normal_Conflict_Stop_Error = 16
 Follow_Normal_Preview_Gain = 0.50
 Follow_Normal_Velocity_Damping = 0.55
 Follow_Push_Velocity_Damping = 0.75
-Follow_Push_Brake_Correction_Limit = 6.0
-Follow_Push_Catchup_Correction_Limit = 5.0
-Follow_Push_Lateral_Correction_Limit = 6.0
 _Follow_Push_Emergency_Error = const(48)
 Follow_Safety_Speed_Margin = 0.12
 _Master_State_Preview_Flag = const(0x80)
@@ -145,7 +142,7 @@ _Follow_Target_Lost_Hold_Ms = const(450)
 _Follow_Orbit_Settle_Position_Error = const(6)
 _Follow_Orbit_Settle_Angle_Error = const(6)
 Follow_Orbit_Settle_Gyro_Rate = 5.0
-Follow_Orbit_Settle_XY_Limit = 14.0
+Follow_Orbit_Settle_XY_Limit = 10.0
 Follow_Orbit_Settle_Turn_Limit = 32.0
 _Follow_Orbit_Settle_Hold_Ms = const(160)
 _Follow_Orbit_Settle_Timeout_Ms = const(1400)
@@ -458,19 +455,24 @@ def update_orbit_follow_mode(
     if explicit_spin or explicit_back or strict_follow:
         orbit_follow_active = False
         orbit_follow_exit_since_ms = orbit_follow_settle_since_ms = 0
+        follow_state[4] = follow_state[5] = 0
         return False
     if explicit_orbit:
         orbit_follow_active = True
         orbit_follow_exit_since_ms = orbit_follow_settle_since_ms = 0
+        follow_state[4] = follow_state[5] = 0
         return True
 
     if not orbit_follow_active:
         orbit_follow_exit_since_ms = orbit_follow_settle_since_ms = 0
+        follow_state[4] = follow_state[5] = 0
         return False
 
     if orbit_follow_exit_since_ms == 0:
         orbit_follow_exit_since_ms = now
         orbit_follow_settle_since_ms = 0
+        follow_state[4] = cam_error_x
+        follow_state[5] = cam_error_y
         reset_turn_loop_state()
 
     settled = (
@@ -510,6 +512,7 @@ def update_orbit_follow_mode(
 
     if not orbit_follow_active:
         orbit_follow_exit_since_ms = orbit_follow_settle_since_ms = 0
+        follow_state[4] = follow_state[5] = 0
     return orbit_follow_active
 
 
@@ -521,10 +524,13 @@ def follow_limit(base_limit, master_value):
     return limit
 
 
-def calc_follow_angle(error_angle, orbit_mode=False, spin_mode=False):
+def calc_follow_angle(error_angle, orbit_mode=False, spin_mode=False, push_mode=False):
     if orbit_mode or spin_mode:
         deadband = _Follow_Pose_Angle_Deadband
         full_error = _Follow_Pose_Angle_Active_Error
+    elif push_mode:
+        deadband = 4
+        full_error = 12
     else:
         deadband = (
             10
@@ -571,18 +577,16 @@ def solve_follow_pose_twist(
     spin_mode,
     push_mode,
 ):
-    vision_wz = calc_follow_angle(error_angle, orbit_mode, spin_mode)
+    vision_wz = calc_follow_angle(error_angle, orbit_mode, spin_mode, push_mode)
     if not orbit_mode and not spin_mode:
         vision_wz = clamp(
             vision_wz,
             -Follow_Normal_Pose_Angle_Limit,
             Follow_Normal_Pose_Angle_Limit,
         )
-    active_error = (
-        _Follow_Pose_Angle_Active_Error
-        if (orbit_mode or spin_mode)
-        else _Follow_Normal_Pose_Angle_Active_Error
-    )
+    active_error = _Follow_Pose_Angle_Active_Error if (
+        orbit_mode or spin_mode
+    ) else (12 if push_mode else _Follow_Normal_Pose_Angle_Active_Error)
     angle_active = (
         error_angle >= active_error
         or error_angle <= -active_error
@@ -936,10 +940,11 @@ def calc_follow_yaw_output(
     orbit_mode_active,
     angle_pose_mode_active,
     explicit_orbit,
+    push_mode_active,
 ):
     global last_cmd_wz, last_angle_priority_active
 
-    priority_turn_mode = mode_key or angle_pose_mode_active
+    priority_turn_mode = mode_key or angle_pose_mode_active or push_mode_active
     gyro_brake_active = False
     if -0.001 < turn_rate_cmd < 0.001:
         turn_rate_cmd = 0.0
@@ -962,6 +967,8 @@ def calc_follow_yaw_output(
             output_ramp = Follow_Orbit_Entry_Ramp_Wz
         elif orbit_mode_active:
             output_ramp = Follow_Orbit_Command_Ramp_Wz
+        elif push_mode_active:
+            output_ramp = 12.0
         elif priority_turn_mode:
             output_ramp = 18.0
         else:
@@ -987,6 +994,9 @@ def calc_follow_yaw_output(
         elif orbit_mode_active:
             gyro_pid.gyro_ki = GYRO_TURN_KI
             gyro_pid.gyro_output_limit = GYRO_ORBIT_OUTPUT_LIMIT
+        elif push_mode_active:
+            gyro_pid.gyro_ki = GYRO_KI
+            gyro_pid.gyro_output_limit = 16.0
         elif angle_pose_mode_active:
             gyro_pid.gyro_ki = GYRO_KI
             gyro_pid.gyro_output_limit = 16.0
@@ -1090,6 +1100,9 @@ def update_follow_targets(gyro_z):
             Follow_Normal_Wz_Feedforward_Limit,
         )
     push_follow_active = strict_follow_active
+    if not push_follow_active:
+        follow_state[0] = follow_state[1] = 0
+        follow_state[2] = follow_state[3] = 0
     classification_exit = (
         fresh_motion
         and last_control_master_state == 4
@@ -1202,37 +1215,26 @@ def update_follow_targets(gyro_z):
         body_vy = control_buf[4]
         angle_priority_active = control_buf[5]
         position_priority_active = control_buf[6]
+        actual_body_vx = (last_enc_fl - last_enc_fr) * 0.5773503
+        actual_body_vy = (last_enc_fl + last_enc_fr - 2.0 * last_enc_b) / 3.0
         if follow_output_limit == _FOLLOW_STATIC_LOCK_PWM_LIMIT:
             vx -= body_vx * (1.0 - Follow_Static_Visual_Scale)
             vy -= body_vy * (1.0 - Follow_Static_Visual_Scale)
             body_vx *= Follow_Static_Visual_Scale
             body_vy *= Follow_Static_Visual_Scale
         if orbit_settling:
-            # Converge translation, relative angle and yaw rate together.
-            # Waiting for a low-rate pre-phase can repeatedly reset on an
-            # overshoot and leave the relative pose uncontrolled.
-            settle_ff_vx = clamp(
-                ff_vx * Follow_Feedforward_Forward_Gain,
-                -Follow_Feedforward_Forward_Limit,
-                Follow_Feedforward_Forward_Limit,
+            _pid_mod.orbit_settle_translation(
+                control_buf, follow_state, vx, vy,
+                actual_body_vx, actual_body_vy,
+                cam_error_x, cam_error_y, cam_error_angle, gyro_z,
+                Follow_Orbit_Settle_XY_Limit, _Follow_Orbit_Settle_Angle_Error,
+                Follow_Orbit_Settle_Gyro_Rate,
+                Follow_Normal_Reverse_Release_Speed,
             )
-            settle_ff_vy = clamp(
-                ff_vy * Follow_Feedforward_Lateral_Gain,
-                -Follow_Feedforward_Lateral_Limit,
-                Follow_Feedforward_Lateral_Limit,
-            )
-            body_vx = clamp(
-                vx,
-                -Follow_Orbit_Settle_XY_Limit,
-                Follow_Orbit_Settle_XY_Limit,
-            )
-            body_vy = clamp(
-                vy,
-                -Follow_Orbit_Settle_XY_Limit,
-                Follow_Orbit_Settle_XY_Limit,
-            )
-            vx = settle_ff_vx + body_vx
-            vy = settle_ff_vy + body_vy
+            body_vx = control_buf[0]
+            body_vy = control_buf[1]
+            vx = body_vx
+            vy = body_vy
             turn_rate_cmd = clamp(
                 turn_rate_cmd,
                 -Follow_Orbit_Settle_Turn_Limit,
@@ -1256,10 +1258,6 @@ def update_follow_targets(gyro_z):
             alloc_base_vy = vy - body_vy
         if normal_damping_active or orbit_damping_active:
             # Dampen motion relative to the preserved master feedforward.
-            actual_body_vx = (last_enc_fl - last_enc_fr) * 0.5773503
-            actual_body_vy = (
-                last_enc_fl + last_enc_fr - 2.0 * last_enc_b
-            ) / 3.0
             if orbit_damping_active:
                 velocity_damping = Follow_Orbit_Velocity_Damping
             elif push_follow_active:
@@ -1416,24 +1414,35 @@ def update_follow_targets(gyro_z):
             Follow_Orbit_Forward_Command_Limit,
         )
     elif push_follow_active:
-        push_catchup_limit = Follow_Push_Catchup_Correction_Limit
+        _pid_mod.push_correction_envelope(
+            control_buf, follow_state, now,
+            cam_error_x, cam_error_y, cam_error_angle, gyro_z,
+        )
+        push_catchup_limit = control_buf[0]
+        push_brake_limit = control_buf[1]
+        push_lateral_limit = control_buf[2]
+        push_xy_scale = control_buf[3]
         if (
             cam_error_x <= -_Follow_Push_Emergency_Error
             and safety_vx > push_catchup_limit
         ):
-            push_catchup_limit = safety_vx
-        vx = clamp(
-            vx,
-            alloc_base_vx - Follow_Push_Brake_Correction_Limit,
-            alloc_base_vx + push_catchup_limit,
+            push_catchup_limit += (safety_vx - push_catchup_limit) * (
+                (push_catchup_limit - 3.0) / 2.0
+            )
+        body_vx = clamp(
+            vx - alloc_base_vx,
+            -push_brake_limit,
+            push_catchup_limit,
         )
-        vy = clamp(
-            vy,
-            alloc_base_vy - Follow_Push_Lateral_Correction_Limit,
-            alloc_base_vy + Follow_Push_Lateral_Correction_Limit,
+        body_vy = clamp(
+            vy - alloc_base_vy,
+            -push_lateral_limit,
+            push_lateral_limit,
         )
-        body_vx = vx - alloc_base_vx
-        body_vy = vy - alloc_base_vy
+        body_vx *= push_xy_scale
+        body_vy *= push_xy_scale
+        vx = alloc_base_vx + body_vx
+        vy = alloc_base_vy + body_vy
     # A normal state-4 exit can apply the new leader feedforward immediately,
     # because vision correction stayed continuous.  ORBIT keeps its dedicated
     # entry ramp so the first high-rate command cannot kick the follower.
@@ -1469,6 +1478,7 @@ def update_follow_targets(gyro_z):
         orbit_mode_active,
         angle_pose_mode_active,
         explicit_orbit,
+        push_follow_active,
     )
 
     _pid_mod.limit_pose_twist_for_wheels(
@@ -1822,6 +1832,7 @@ pit1.callback(time_pit_handler)
 pit1.start(TICK_PERIOD_MS)
 
 control_buf = [0.0, 0.0, 0.0, 0.0, 0.0, False, False]
+follow_state = [0, 0, 0, 0, 0, 0]
 pid_fl = _pid_mod.SpeedPID()
 pid_fr = _pid_mod.SpeedPID()
 pid_b = _pid_mod.SpeedPID()

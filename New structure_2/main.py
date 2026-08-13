@@ -84,7 +84,6 @@ Follow_Feedforward_Forward_Limit = 35.0
 Follow_Feedforward_Lateral_Limit = 42.0
 Follow_Normal_Visual_Forward_Scale = 0.72
 Follow_Static_Visual_Scale = 0.60
-Follow_Close_Feedforward_Min_Scale = 0.25
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Normal_Wz_Feedforward_Gain = 1.00
 Follow_Orbit_Wz_Feedforward_Gain = 1.00
@@ -552,7 +551,7 @@ def solve_follow_pose_twist(
     cam_vx = error_x
     cam_vy = error_y
     if push_mode:
-        cam_vx += 2
+        cam_vx += 4
         cam_vy += 4
     if orbit_mode or spin_mode:
         position_priority = (
@@ -630,35 +629,29 @@ def solve_follow_pose_twist(
     wz = vision_wz
     if use_ff:
         if orbit_mode:
-            if master_state_code == 16:
-                _pid_mod.search_spin_translation(
-                    out, body_vx, body_vy, ff_vx, ff_vy, master_orbit_wz,
+            if master_state_code == 5 or master_state_code == 16:
+                _pid_mod.orbit_translation(
+                    out, body_vx, body_vy, ff_vx, ff_vy, ff_wz,
                 )
                 vx = out[0]
                 vy = out[1]
                 body_vx = out[3]
                 body_vy = out[4]
             else:
-                ff_scale = _pid_mod.orbit_feedforward_position_scale(cam_vy, cam_vx)
-                target_ff_vx = (
-                    ff_vx + master_orbit_wz * Follow_Orbit_Target_Point_Wz_To_Vx
-                ) * ff_scale
-                target_ff_vy = (
-                    ff_vy + master_orbit_wz * Follow_Orbit_Target_Point_Wz_To_Vy
-                ) * ff_scale
+                ff_scale = _pid_mod.return_orbit_scale(cam_vy, cam_vx)
                 vx = add_feedforward_direct(
                     vx,
-                    target_ff_vx,
+                    ff_vx * ff_scale,
                     Follow_Orbit_Feedforward_Forward_Gain,
                     Follow_Orbit_Feedforward_Forward_Limit,
-                    Follow_Close_Feedforward_Min_Scale,
+                    0.25,
                 )
                 vy = add_feedforward_direct(
                     vy,
-                    target_ff_vy,
+                    ff_vy * ff_scale,
                     Follow_Orbit_Feedforward_Lateral_Gain,
                     Follow_Orbit_Feedforward_Lateral_Limit,
-                    Follow_Close_Feedforward_Min_Scale,
+                    0.25,
                 )
             wz = add_feedforward_direct(
                 wz,
@@ -1024,9 +1017,11 @@ def lost_follow_translation(
     ff_vx, ff_vy, ff_wz,
 ):
     alloc_vx = alloc_vy = 0.0
-    if master_state_code == 16 and orbit_mode:
-        _pid_mod.search_spin_translation(
-            out, 0, 0, ff_vx, ff_vy, master_orbit_wz,
+    if orbit_mode and (
+        master_state_code == 5 or master_state_code == 16
+    ):
+        _pid_mod.orbit_translation(
+            out, 0, 0, ff_vx, ff_vy, ff_wz,
         )
         vx = alloc_vx = out[0]
         vy = alloc_vy = out[1]
@@ -1103,15 +1098,29 @@ def update_follow_targets(gyro_z):
         cam_error_angle,
     )
     spin_mode_active = explicit_spin
-    filtered_wz = update_filtered_ff_wz(spin_ff_wz if spin_mode_active else ff_wz, fresh_motion)
+    orbit_rate = master_orbit_wz
+    if explicit_orbit and orbit_follow_entry_until_ms:
+        orbit_rate += clamp(master_wz - orbit_rate, -24.0, 24.0) * 0.25
+    filtered_wz = update_filtered_ff_wz(
+        spin_ff_wz if spin_mode_active else (
+            orbit_rate
+            if explicit_orbit and (
+                master_state_code == 5 or master_state_code == 16
+            )
+            else ff_wz
+        ),
+        fresh_motion,
+    )
     orbit_mode_active = update_orbit_follow_mode(
         now,
         gyro_z,
         explicit_orbit,
         strict_follow_active or (
-            fresh_motion
-            and last_control_master_state == 16
-            and master_state_code == 2
+            last_control_master_state == 16
+            and (
+                not fresh_motion
+                or (master_state_code != 16 and not explicit_orbit)
+            )
         ),
         spin_mode_active,
         fresh_motion and (master_flags & MASTER_MOTION_FLAG_BACK),
@@ -1531,7 +1540,13 @@ def update_follow_targets(gyro_z):
             or (seen and push_follow_active)
             or (return_follow and not mode_key)
         ),
-        explicit_orbit and not explicit_push,
+        (
+            2
+            if explicit_orbit and (
+                master_state_code == 5 or master_state_code == 16
+            )
+            else explicit_orbit and not explicit_push
+        ),
         fresh_motion
         and last_follow_mode_key == 0
         and (

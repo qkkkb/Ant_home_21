@@ -123,19 +123,41 @@ def _clamp(value, low, high):
     return value
 
 
-def search_spin_translation(out, body_vx, body_vy, ff_vx, ff_vy, wz):
-    base_vx = _clamp((ff_vx - wz * 0.17) * 1.30, -14.0, 14.0)
-    base_vy = _clamp((ff_vy - wz * 0.28) * 0.76, -20.0, 20.0)
+def orbit_translation(out, body_vx, body_vy, ff_vx, ff_vy, wz):
+    base_vx = (ff_vx - wz * 0.17) * 1.30
+    base_vy = (ff_vy - wz * 0.28) * 0.76
+    scale = abs(base_vx) / 14.0
+    tmp = abs(base_vy) / 20.0
+    if tmp > scale:
+        scale = tmp
+    if scale > 1.0:
+        base_vx /= scale
+        base_vy /= scale
     body_vx = _clamp(body_vx, -38.0, 38.0)
     body_vy = _clamp(body_vy, -30.0, 30.0)
-    if base_vx * body_vx < -0.001:
-        body_vx *= 0.15
-    if base_vy * body_vy < -0.001:
-        body_vy *= 0.15
     out[0] = base_vx + body_vx
     out[1] = base_vy + body_vy
     out[3] = body_vx
     out[4] = body_vy
+
+
+def return_orbit_scale(error_x, error_y):
+    error = abs(error_x)
+    if abs(error_y) > error:
+        error = abs(error_y)
+    if error <= 6.0:
+        scale = 0.78
+    elif error >= 22.0:
+        scale = 1.0
+    else:
+        scale = 0.78 + (error - 6.0) * 0.01375
+    depth = error_y - 2.0
+    if depth <= 0.0:
+        return scale
+    if depth >= 6.0:
+        return 0.25
+    depth = 1.0 - depth * 0.125
+    return depth if depth < scale else scale
 
 
 def velocity_damping(
@@ -159,25 +181,6 @@ def velocity_damping(
         vy *= scale
     out[0] = vx
     out[1] = vy
-
-
-def orbit_feedforward_position_scale(error_x, error_y):
-    error = abs(error_x)
-    if abs(error_y) > error:
-        error = abs(error_y)
-    if error <= 6.0:
-        scale = 0.78
-    elif error >= 22.0:
-        scale = 1.0
-    else:
-        scale = 0.78 + (error - 6.0) * 0.22 / 16.0
-    depth = error_y - 2.0
-    if depth <= 0.0:
-        return scale
-    if depth >= 6.0:
-        return 0.25
-    close_scale = 1.0 - 0.75 * depth / 6.0
-    return close_scale if close_scale < scale else scale
 
 
 def push_correction_envelope(out, state, error_x, error_y, base_vx, moving_push):
@@ -398,14 +401,40 @@ def limit_pose_twist_for_wheels(
 
     if preserve_rotation:
         vz = _clamp(vz, -limit, limit)
-        _wheel_targets_into(out, vx, vy, 0.0)
+        corr_vx = vx - base_vx
+        corr_vy = vy - base_vy
+        if preserve_rotation == 2:
+            _wheel_targets_into(out, base_vx, base_vy, vz)
+            base_scale = _max_wheel_abs(out[0], out[1], out[2])
+            if base_scale > limit:
+                base_scale = limit / base_scale
+                base_vx *= base_scale
+                base_vy *= base_scale
+                vz *= base_scale
+            else:
+                base_scale = 1.0
+            _wheel_targets_into(out, base_vx, base_vy, vz)
+            wheel_fr = out[0]
+            wheel_fl = out[1]
+            wheel_b = out[2]
+        else:
+            _wheel_targets_into(out, vx, vy, 0.0)
+            scale = fit_wheel_delta_scale(
+                vz, vz, vz, out[0], out[1], out[2], limit
+            )
+            out[0] = vx * scale
+            out[1] = vy * scale
+            out[2] = vz
+            out[3] = int(scale * 100.0)
+            return
+        _wheel_targets_into(out, corr_vx, corr_vy, 0.0)
         scale = fit_wheel_delta_scale(
-            vz, vz, vz, out[0], out[1], out[2], limit
+            wheel_fr, wheel_fl, wheel_b, out[0], out[1], out[2], limit
         )
-        out[0] = vx * scale
-        out[1] = vy * scale
+        out[0] = base_vx + corr_vx * scale
+        out[1] = base_vy + corr_vy * scale
         out[2] = vz
-        out[3] = int(scale * 100.0)
+        out[3] = int((scale if scale < base_scale else base_scale) * 100.0)
         return
 
     if not preserve_feedforward:

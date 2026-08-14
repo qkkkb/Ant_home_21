@@ -1,34 +1,28 @@
-"""前右轮延长轴公转测试。
+"""Standalone state-16 wheel-space spin test.
 
-电脑端执行时只打印几何计算结果；复制为设备上的 ``main.py`` 后，
-会自动低速运行轮速闭环测试。C8 为急停键，日志通过无线 UART 发送。
+On a PC this prints the virtual leader and follower wheel targets. When this
+file is copied to a board as main.py it runs the same wheel-space allocation
+used by the follower during a leader search spin. C8 is an emergency stop.
 """
 
-# 车体坐标：x 向前，y 向左。轮位和轴偏移单位为 mm。
-WHEEL_FR_X = 70
-WHEEL_FR_Y = -45
-AXIS_FROM_FR_X = 0
-AXIS_FROM_FR_Y = 100
+# Negative wheel rate is the clockwise direction used by the vehicle.
+MASTER_WHEEL_RATE = -6.0
+MASTER_FL = MASTER_WHEEL_RATE
+MASTER_FR = MASTER_WHEEL_RATE
+MASTER_B = MASTER_WHEEL_RATE
 
-AXIS_X = WHEEL_FR_X + AXIS_FROM_FR_X
-AXIS_Y = WHEEL_FR_Y + AXIS_FROM_FR_Y
+# Keep these values identical to the production state-16 allocator.
+ANCHOR_GAIN = 1.05
+DRIVE_GAIN = 2.0
+TARGET_RAMP = 1.2
 
-# 轮速单位沿用现有编码器速度闭环。修改符号可切换公转方向。
-TEST_WZ = 0.10
-BODY_VX = AXIS_Y * TEST_WZ
-BODY_VY = -AXIS_X * TEST_WZ
-TARGET_FR = -0.866025 * BODY_VX + 0.5 * BODY_VY + TEST_WZ
-TARGET_FL = 0.866025 * BODY_VX + 0.5 * BODY_VY + TEST_WZ
-TARGET_B = -BODY_VY + TEST_WZ
-
-
-def wheel_targets(vx, vy, wz):
-    """返回 (FR, FL, B)，使 AXIS_X/AXIS_Y 点成为瞬时旋转轴。"""
-    return (
-        -0.866025 * vx + 0.5 * vy + wz,
-        0.866025 * vx + 0.5 * vy + wz,
-        -vy + wz,
-    )
+MASTER_WHEEL_MEAN = (MASTER_FL + MASTER_FR + MASTER_B) * 0.3333333
+FOLLOW_ANCHOR_FR = MASTER_FL * ANCHOR_GAIN
+FOLLOW_CENTER = (3.0 * MASTER_WHEEL_MEAN - FOLLOW_ANCHOR_FR) * 0.5
+FOLLOW_DRIVE = MASTER_WHEEL_MEAN * DRIVE_GAIN
+FOLLOW_FL_GOAL = FOLLOW_CENTER + FOLLOW_DRIVE
+FOLLOW_FR_GOAL = FOLLOW_ANCHOR_FR
+FOLLOW_B_GOAL = FOLLOW_CENTER - FOLLOW_DRIVE
 
 
 try:
@@ -53,7 +47,7 @@ if _DEVICE:
     _RUN_MS = const(4000)
     _START_DELAY_MS = const(500)
     _LOG_MS = const(100)
-    _LOG_BUF_SIZE = const(192)
+    _LOG_BUF_SIZE = const(224)
     _PWM_LIMIT = const(36000)
     _PWM_STEP = const(4800)
 
@@ -74,6 +68,9 @@ if _DEVICE:
     actual_fl = 0.0
     actual_fr = 0.0
     actual_b = 0.0
+    target_fl = 0.0
+    target_fr = 0.0
+    target_b = 0.0
     pwm_fl = 0
     pwm_fr = 0
     pwm_b = 0
@@ -91,7 +88,6 @@ if _DEVICE:
             buf[pos] = 45
             pos += 1
             value = -value
-
         start = pos
         if value == 0:
             buf[pos] = 48
@@ -124,7 +120,7 @@ if _DEVICE:
 
 
     def _send_sample(elapsed):
-        """使用固定 bytearray 发一行，避免格式化字符串反复上堆。"""
+        """Send one fixed-buffer sample; no formatted string in the hot loop."""
         buf = log_buf
         pos = 0
         buf[pos] = 84  # T
@@ -133,15 +129,19 @@ if _DEVICE:
         pos += 1
         pos = _put_int(buf, pos, elapsed)
         pos = _put_int(buf, pos, elapsed * 360 // _RUN_MS)
-        pos = _put_int(buf, pos, TARGET_FR * 100)
-        pos = _put_int(buf, pos, TARGET_FL * 100)
-        pos = _put_int(buf, pos, TARGET_B * 100)
-        pos = _put_int(buf, pos, actual_fr * 100)
+        pos = _put_int(buf, pos, MASTER_FL * 100)
+        pos = _put_int(buf, pos, MASTER_FR * 100)
+        pos = _put_int(buf, pos, MASTER_B * 100)
+        pos = _put_int(buf, pos, target_fl * 100)
+        pos = _put_int(buf, pos, target_fr * 100)
+        pos = _put_int(buf, pos, target_b * 100)
         pos = _put_int(buf, pos, actual_fl * 100)
+        pos = _put_int(buf, pos, actual_fr * 100)
         pos = _put_int(buf, pos, actual_b * 100)
-        pos = _put_int(buf, pos, pwm_fr)
         pos = _put_int(buf, pos, pwm_fl)
+        pos = _put_int(buf, pos, pwm_fr)
         pos = _put_int(buf, pos, pwm_b)
+        pos = _put_int(buf, pos, (target_fr - MASTER_FL) * 100)
         buf[pos - 1] = 13
         buf[pos] = 10
         try:
@@ -157,6 +157,15 @@ if _DEVICE:
 
     def _reset_pid(pid):
         pid_mod.speed_reset(pid)
+
+
+    def _ramp_value(goal, value, step):
+        delta = goal - value
+        if delta > step:
+            return value + step
+        if delta < -step:
+            return value - step
+        return goal
 
 
     def _clamp_pwm(value):
@@ -214,14 +223,18 @@ if _DEVICE:
 
 
     def _update_control():
-        global pit_flag, pwm_fl, pwm_fr, pwm_b
+        global pit_flag, target_fl, target_fr, target_b
+        global pwm_fl, pwm_fr, pwm_b
         if not pit_flag:
             return False
         pit_flag = False
         _read_encoders()
-        out_fl = _speed_output(pid_fl, actual_fl, TARGET_FL)
-        out_fr = _speed_output(pid_fr, actual_fr, TARGET_FR)
-        out_b = _speed_output(pid_b, actual_b, TARGET_B)
+        target_fl = _ramp_value(FOLLOW_FL_GOAL, target_fl, TARGET_RAMP)
+        target_fr = _ramp_value(FOLLOW_FR_GOAL, target_fr, TARGET_RAMP)
+        target_b = _ramp_value(FOLLOW_B_GOAL, target_b, TARGET_RAMP)
+        out_fl = _speed_output(pid_fl, actual_fl, target_fl)
+        out_fr = _speed_output(pid_fr, actual_fr, target_fr)
+        out_b = _speed_output(pid_b, actual_b, target_b)
         pwm_fl = _smooth_pwm(out_fl, pwm_fl)
         pwm_fr = _smooth_pwm(out_fr, pwm_fr)
         pwm_b = _smooth_pwm(out_b, pwm_b)
@@ -252,11 +265,13 @@ if _DEVICE:
 
 
     def _idle(duration_ms):
+        global target_fl, target_fr, target_b
         end_ms = utime.ticks_add(utime.ticks_ms(), duration_ms)
         while utime.ticks_diff(end_ms, utime.ticks_ms()) > 0:
             _check_exit()
             _wait_tick()
         _stop_all()
+        target_fl = target_fr = target_b = 0.0
         _reset_pid(pid_fl)
         _reset_pid(pid_fr)
         _reset_pid(pid_b)
@@ -308,14 +323,15 @@ if _DEVICE:
 
 
     def _run_device_test():
-        _send_text("A AXIS_X=%d AXIS_Y=%d" % (AXIS_X, AXIS_Y))
+        _send_text("STATE16 VIRTUAL_MASTER DIR=CW")
         _send_text(
-            "CFG DIR=%s BODY_VX=%.3f BODY_VY=%.3f WZ=%.3f" %
-            ("CCW" if TEST_WZ >= 0 else "CW", BODY_VX, BODY_VY, TEST_WZ)
+            "MASTER FL=%.3f FR=%.3f B=%.3f" %
+            (MASTER_FL, MASTER_FR, MASTER_B)
         )
         _send_text(
-            "TARGET FR=%.3f FL=%.3f B=%.3f RUN_MS=%d" %
-            (TARGET_FR, TARGET_FL, TARGET_B, _RUN_MS)
+            "FOLLOW_GOAL FL=%.3f FR=%.3f B=%.3f LOCK_ERR=%.3f" %
+            (FOLLOW_FL_GOAL, FOLLOW_FR_GOAL, FOLLOW_B_GOAL,
+             FOLLOW_FR_GOAL - MASTER_FL)
         )
         _send_text("READY AUTO_START C8=STOP")
         _idle(_START_DELAY_MS)
@@ -365,11 +381,12 @@ if _DEVICE:
 else:
 
     def _pc_main():
-        targets = wheel_targets(BODY_VX, BODY_VY, TEST_WZ)
-        print("Follower front-right extension-axis geometry")
-        print("axis=(%d,%d) body=(%.3f,%.3f,%.3f)" %
-              (AXIS_X, AXIS_Y, BODY_VX, BODY_VY, TEST_WZ))
-        print("targets FR=%.3f FL=%.3f B=%.3f" % targets)
+        print("Virtual state-16 spin test")
+        print("MASTER FL=%.3f FR=%.3f B=%.3f" %
+              (MASTER_FL, MASTER_FR, MASTER_B))
+        print("FOLLOW FL=%.3f FR=%.3f B=%.3f LOCK_ERR=%.3f" %
+              (FOLLOW_FL_GOAL, FOLLOW_FR_GOAL, FOLLOW_B_GOAL,
+               FOLLOW_FR_GOAL - MASTER_FL))
 
 
 if _DEVICE:

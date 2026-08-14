@@ -736,7 +736,7 @@ def update_return_home(now, yaw_deg, low_speed, gyro_z):
         if push_turn_reached_once:
             cam_target_vx = Nav_Return_Left_Speed
             if line_crossed:
-                nav_set_state(NAV_STATE_RETURN_BACK)
+                nav_set_state(NAV_STATE_RETURN_TURN)
         else:
             cam_target_vx = 0.0
         if utime.ticks_diff(now, nav_transition_ms) >= Nav_Return_Left_Max_Ms:

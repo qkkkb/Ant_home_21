@@ -730,7 +730,11 @@ def solve_follow_pose_twist(
                 target_ff_vy,
                 Follow_Feedforward_Lateral_Gain,
                 Follow_Feedforward_Lateral_Limit,
-                0.0 if master_flags & MASTER_MOTION_FLAG_BACK else (
+                1.0 if (
+                    (master_flags & MASTER_MOTION_FLAG_BACK)
+                    or master_state_code == 12
+                    or master_state_code == 14
+                ) else (
                     (
                         0.66
                         if error_x > -48
@@ -1361,11 +1365,6 @@ def update_follow_targets(gyro_z):
                     -Follow_Normal_Allocation_Reserve,
                     Follow_Normal_Allocation_Reserve,
                 )
-                body_vy = clamp(
-                    body_vy,
-                    -Follow_Normal_Allocation_Reserve,
-                    Follow_Normal_Allocation_Reserve,
-                )
             # Do not open the distance loop during a fast turn.  The final
             # command ramp already limits how quickly this correction changes;
             # suppressing it here lets a real close-distance error accumulate.
@@ -1504,7 +1503,13 @@ def update_follow_targets(gyro_z):
             body_vy = ramp_value(
                 vy - alloc_base_vy,
                 last_cmd_vy - last_ff_vy,
-                0.6 if back_follow else vy_ramp,
+                Follow_Command_Ramp_Vy
+                if (
+                    back_follow
+                    or master_state_code == 12
+                    or master_state_code == 14
+                )
+                else vy_ramp,
             )
             vx = alloc_base_vx + body_vx
             vy = alloc_base_vy + body_vy

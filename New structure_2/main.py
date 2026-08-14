@@ -107,9 +107,9 @@ Follow_Orbit_Pose_Angle_Limit = 32.0
 _Follow_Normal_Pose_Angle_Deadband = const(8)
 _Follow_Normal_Pose_Angle_Active_Error = const(18)
 Follow_Spin_Target_Point_Wz_To_Vy = -0.08
-Follow_Spin_Wz_Feedforward_Gain = 0.95
-Follow_Spin_Wz_Feedforward_Limit = 120.0
-Follow_Spin_Turn_Rate_Limit = 128.0
+Follow_Spin_Wz_Feedforward_Gain = 0.80
+Follow_Spin_Wz_Feedforward_Limit = 100.0
+Follow_Spin_Turn_Rate_Limit = 108.0
 _Follow_Pose_Angle_Deadband = const(4)
 _Follow_Pose_Angle_Active_Error = const(6)
 Follow_Normal_Allocation_Reserve = 8.0
@@ -117,7 +117,7 @@ Follow_Normal_Correction_Reserve = 6.0
 Follow_Normal_Conflict_Start_Error = 4
 Follow_Normal_Conflict_Stop_Error = 16
 Follow_Normal_Preview_Gain = 0.50
-Follow_Normal_Velocity_Damping = 0.55
+Follow_Normal_Velocity_Damping = 0.42
 Follow_Push_Velocity_Damping = 0.75
 _Follow_Push_Emergency_Error = const(48)
 Follow_Safety_Speed_Margin = 0.12
@@ -152,7 +152,7 @@ Follow_Orbit_Mode_FfWz_Filter = 0.22
 Follow_Normal_Wz_Feedforward_Limit = 15.0
 Follow_Normal_Target_Point_Wz_Limit = 15.0
 Follow_Spin_Latch_Min_Wz = 26.0
-_Follow_Spin_Command_Hold_Ms = const(900)
+_Follow_Spin_Command_Hold_Ms = const(500)
 _Follow_Spin_Latch_Release_Angle = const(3)
 _Master_Motion_Timeout_Ms = const(250)
 Follow_Master_Edge_Delta = 4.0
@@ -668,6 +668,11 @@ def solve_follow_pose_twist(
                 Follow_Orbit_Wz_Feedforward_Limit,
             )
         elif spin_mode:
+            ff_wz = clamp(
+                ff_wz * Follow_Spin_Wz_Feedforward_Gain,
+                -Follow_Spin_Wz_Feedforward_Limit,
+                Follow_Spin_Wz_Feedforward_Limit,
+            )
             target_ff_vx = ff_vx + ff_wz * 0.08
             target_ff_vy = ff_vy + ff_wz * Follow_Spin_Target_Point_Wz_To_Vy
             vx = add_feedforward_direct(
@@ -687,7 +692,7 @@ def solve_follow_pose_twist(
             wz = add_feedforward_direct(
                 wz,
                 ff_wz,
-                Follow_Spin_Wz_Feedforward_Gain,
+                1.0,
                 Follow_Spin_Wz_Feedforward_Limit,
             )
         else:
@@ -961,7 +966,7 @@ def calc_follow_yaw_output(
             last_cmd_wz = orbit_rate_base + follow_state[0]
         else:
             if spin_mode_active:
-                output_ramp = 36.0
+                output_ramp = 18.0
             elif orbit_entry_active:
                 output_ramp = Follow_Orbit_Entry_Ramp_Wz
             elif orbit_mode_active:
@@ -970,6 +975,8 @@ def calc_follow_yaw_output(
                 output_ramp = 12.0
             elif master_flags & MASTER_MOTION_FLAG_RETURN:
                 output_ramp = Follow_Return_Command_Ramp_Wz
+            elif master_flags & MASTER_MOTION_FLAG_BACK:
+                output_ramp = 4.0
             elif priority_turn_mode:
                 output_ramp = 18.0
             else:
@@ -1342,6 +1349,9 @@ def update_follow_targets(gyro_z):
             damp_vy = control_buf[1]
             body_vx += damp_vx
             body_vy += damp_vy
+            if back_follow:
+                body_vx = clamp(body_vx, -16.0, 16.0)
+                body_vy = clamp(body_vy, -16.0, 16.0)
             # Do not open the distance loop during a fast turn.  The final
             # command ramp already limits how quickly this correction changes;
             # suppressing it here lets a real close-distance error accumulate.
@@ -1520,7 +1530,7 @@ def update_follow_targets(gyro_z):
             turn_rate_cmd = ramp_value(
                 0.0,
                 last_turn_rate_cmd,
-                Follow_Return_Command_Ramp_Wz,
+                4.0 if back_follow else Follow_Return_Command_Ramp_Wz,
             )
     # A normal state-4 exit can apply the new leader feedforward immediately,
     # because vision correction stayed continuous.  ORBIT keeps its dedicated
@@ -1666,7 +1676,6 @@ def smooth_value(target, last):
 
 
 def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
-    fast_reverse = last_follow_mode_key == 3
     target_abs = abs(target)
     if wheel_target_idle(target):
         min_pwm = 0
@@ -1692,23 +1701,13 @@ def follow_channel_pwm(cmd, target, speed_err, stall_boost, last_pwm):
             MOTOR_DUTY_MIN,
             smooth_value,
         )
-    if (
-        fast_reverse
-        and (target >= 4.0 or target <= -4.0)
-    ):
-        if last_pwm * target < 0.0:
-            return 8800 if target > 0.0 else -8800
-        if last_pwm == 0 and (target - speed_err) * target < 0.0:
-            return 8800 if target > 0.0 else -8800
     cmd = int(cmd)
     if 0 < cmd < min_pwm:
         cmd = min_pwm
     elif -min_pwm < cmd < 0:
         cmd = -min_pwm
     cmd = clamp(cmd, -_FOLLOW_RUN_PWM_LIMIT, _FOLLOW_RUN_PWM_LIMIT)
-    if not fast_reverse and last_follow_mode_key == 0 and last_pwm * cmd < 0:
-        return smooth_value(cmd, smooth_value(cmd, last_pwm))
-    if last_follow_mode_key == 3:
+    if last_follow_mode_key == 0 and last_pwm * cmd < 0:
         return smooth_value(cmd, smooth_value(cmd, last_pwm))
     return smooth_value(cmd, last_pwm)
 

@@ -58,7 +58,7 @@ def speed_ctrl(pid, actual_speed, tar_spd, hold_integral=False):
     elif integral < -18000.0:
         integral = -18000.0
 
-    command = 1450.0 * tar_spd + pid.kp * error + integral
+    command = 1300.0 * tar_spd + pid.kp * error + integral
     if command > PWM_MAX:
         command = PWM_MAX
         if error > 0:

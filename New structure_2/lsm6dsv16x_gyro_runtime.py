@@ -141,10 +141,6 @@ class LSM6DSV16XGyroOnly:
         self.cs(1)
         return self._i16(rx[5], rx[6]) / self.gyro_factor
 
-    def info(self):
-        print("LSM6DSV16X gyro-only SPI mode")
-
-
 class LSM6DSV16XYawRuntime:
     """Yaw runtime wrapper that keeps the old main.py interface."""
 
@@ -171,22 +167,6 @@ class LSM6DSV16XYawRuntime:
         self.gyro_z_deg = 0.0
         self.yaw_deg = 0.0
         self.last_update_ms = utime.ticks_ms()
-
-    @staticmethod
-    def help():
-        print("LSM6DSV16X gyro-only runtime: gyro Z -> yaw-rate")
-
-    def info(self):
-        self.imu.info()
-
-    def capture_device(self):
-        return None
-
-    def set_sign(self, sign):
-        self.sign = float(sign)
-
-    def set_offset_z(self, offset_z):
-        self.gyro_offset_z = float(offset_z)
 
     def reset_yaw(self, yaw_deg=0.0):
         self.yaw_deg = float(yaw_deg) % 360.0
@@ -236,6 +216,3 @@ class LSM6DSV16XYawRuntime:
 
     def read_gyro_z(self):
         return self.update()
-
-    def read_yaw(self):
-        return self.yaw_deg

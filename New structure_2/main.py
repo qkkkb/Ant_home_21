@@ -112,8 +112,10 @@ Follow_Spin_Turn_Rate_Limit = 128.0
 # State 16 uses wheel-space orbit feedforward.  The follower front-right
 # wheel is the anchor corresponding to the leader front-left wheel.
 Follow_Spin_Anchor_Gain = 1.05
+Follow_Spin_Orbit_Drive_Gain = 2.0
 Follow_Spin_Visual_Wheel_Limit = 8.0
 Follow_Spin_Anchor_Correction_Limit = 1.0
+Follow_Spin_Visual_Yaw_Limit = 2.0
 Follow_Spin_Wheel_Ramp = 1.20
 _Follow_Pose_Angle_Deadband = const(4)
 _Follow_Pose_Angle_Active_Error = const(6)
@@ -1136,28 +1138,44 @@ def update_spin_wheel_targets(now, seen, fresh_motion):
     ) * 0.3333333
     anchor_speed = master_wheel_fl * Follow_Spin_Anchor_Gain
 
-    # Keep FR on the leader-FL anchor.  The mean of the three wheel rates is
-    # the rotational component of the symmetric wheel mapping, so derive FL/B
-    # from that same component instead of adding an independent yaw boost.
+    # Keep FR on the leader-FL anchor.  FL/B use an equal-and-opposite
+    # differential so the mean wheel rate stays equal to the leader while the
+    # follower translates around the anchor instead of spinning in place.
     base_fr = anchor_speed
-    base_fl = (3.0 * spin_wheel_rate - base_fr) * 0.5
-    base_b = base_fl
+    pair_center = (3.0 * spin_wheel_rate - base_fr) * 0.5
+    orbit_drive = spin_wheel_rate * Follow_Spin_Orbit_Drive_Gain
+    base_fl = pair_center + orbit_drive
+    base_b = pair_center - orbit_drive
+
+    # Position corrections are made zero-mean; only a small bounded part of
+    # the visual yaw correction may change the common wheel rate.
+    visual_mean = (
+        control_buf[0] + control_buf[1] + control_buf[2]
+    ) * 0.3333333
+    visual_yaw = clamp(
+        visual_mean,
+        -Follow_Spin_Visual_Yaw_Limit,
+        Follow_Spin_Visual_Yaw_Limit,
+    )
+    visual_fl = control_buf[0] - visual_mean
+    visual_fr = control_buf[1] - visual_mean
+    visual_b = control_buf[2] - visual_mean
 
     target_fl = base_fl + clamp(
-        control_buf[0],
+        visual_fl,
         -Follow_Spin_Visual_Wheel_Limit,
         Follow_Spin_Visual_Wheel_Limit,
-    )
+    ) + visual_yaw
     target_fr = base_fr + clamp(
-        control_buf[1],
+        visual_fr + visual_yaw,
         -Follow_Spin_Anchor_Correction_Limit,
         Follow_Spin_Anchor_Correction_Limit,
     )
     target_b = base_b + clamp(
-        control_buf[2],
+        visual_b,
         -Follow_Spin_Visual_Wheel_Limit,
         Follow_Spin_Visual_Wheel_Limit,
-    )
+    ) + visual_yaw
     target_fl = clamp(target_fl, -Follow_Forward_Limit, Follow_Forward_Limit)
     target_fr = clamp(target_fr, -Follow_Forward_Limit, Follow_Forward_Limit)
     target_b = clamp(target_b, -Follow_Forward_Limit, Follow_Forward_Limit)

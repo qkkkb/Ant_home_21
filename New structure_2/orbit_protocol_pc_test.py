@@ -127,11 +127,21 @@ class OrbitProtocolTest(unittest.TestCase):
         self.assertIn("State 16 stays in wheel space", source)
         self.assertIn("base_fr = anchor_speed", source)
         self.assertIn(
-            "base_fl = (3.0 * spin_wheel_rate - base_fr) * 0.5",
+            "pair_center = (3.0 * spin_wheel_rate - base_fr) * 0.5",
+            source,
+        )
+        self.assertIn(
+            "orbit_drive = spin_wheel_rate * Follow_Spin_Orbit_Drive_Gain",
+            source,
+        )
+        self.assertIn("base_fl = pair_center + orbit_drive", source)
+        self.assertIn("base_b = pair_center - orbit_drive", source)
+        self.assertIn(
+            "visual_mean = (",
             source,
         )
         self.assertNotIn("Follow_Spin_Pivot_Offset", source)
-        self.assertIn("base_fl = (", source)
+        self.assertIn("base_fl = pair_center + orbit_drive", source)
         self.assertIn("if not direct_wheel_mode:", source)
 
 

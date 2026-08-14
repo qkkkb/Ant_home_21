@@ -1063,7 +1063,9 @@ def lost_follow_translation(
         vx = ff_vx * lost_scale
         vy = ff_vy * lost_scale
         if (
-            not (master_flags & MASTER_MOTION_FLAG_RETURN)
+            not (master_flags & (
+                MASTER_MOTION_FLAG_BACK | MASTER_MOTION_FLAG_RETURN
+            ))
             and cam_error_x < -_Follow_Distance_Far_Boost_Error
             and vx < 0.0
         ):
@@ -1122,7 +1124,7 @@ def update_follow_targets(gyro_z):
     back_follow = master_flags & MASTER_MOTION_FLAG_BACK
     return_follow = master_flags & MASTER_MOTION_FLAG_RETURN
     recovery_follow = back_follow or return_follow
-    reverse_y_follow = (
+    reverse_follow = (
         back_follow
         or master_state_code == 12
         or master_state_code == 14
@@ -1327,10 +1329,10 @@ def update_follow_targets(gyro_z):
         )
         orbit_damping_active = explicit_orbit and not explicit_push
         if normal_damping_active:
-            alloc_base_vx = measured_ff_vx
-            # Keep the reverse-y ramp and its previous-command reference on
-            # the same measured-plus-preview feedforward base.
-            alloc_base_vy = ff_vy if reverse_y_follow else measured_ff_vy
+            # Reverse is one transformed 2-D vector.  Preserve both preview
+            # components before ramping only the relative-pose correction.
+            alloc_base_vx = ff_vx if reverse_follow else measured_ff_vx
+            alloc_base_vy = ff_vy if reverse_follow else measured_ff_vy
             body_vx = vx - alloc_base_vx
             body_vy = vy - alloc_base_vy
         else:
@@ -1424,7 +1426,7 @@ def update_follow_targets(gyro_z):
                 <= (300 if not mode_key else _Follow_Target_Lost_Hold_Ms)
             )
         if use_motion_feedforward:
-            if not mode_key:
+            if not mode_key and not reverse_follow:
                 ff_vx = measured_ff_vx
                 ff_vy = measured_ff_vy
             lost_follow_translation(
@@ -1461,6 +1463,7 @@ def update_follow_targets(gyro_z):
     if (
         seen
         and not mode_key
+        and not reverse_follow
         and (
             master_flags < MASTER_MOTION_FLAG_ORBIT
             or push_follow_active
@@ -1511,7 +1514,7 @@ def update_follow_targets(gyro_z):
                 vy - alloc_base_vy,
                 last_cmd_vy - last_ff_vy,
                 Follow_Command_Ramp_Vy
-                if reverse_y_follow
+                if reverse_follow
                 else vy_ramp,
             )
             vx = alloc_base_vx + body_vx
@@ -1622,9 +1625,11 @@ def update_follow_targets(gyro_z):
         body_vx,
         body_vy,
         safety_vx,
-        master_preview_vx if seen and fresh_motion and not mode_key else 0.0,
+        master_preview_vx
+        if seen and fresh_motion and not mode_key and not reverse_follow
+        else 0.0,
         master_preview_vy
-        if seen and fresh_motion and not mode_key and not reverse_y_follow
+        if seen and fresh_motion and not mode_key and not reverse_follow
         else 0.0,
         fresh_motion
         and (

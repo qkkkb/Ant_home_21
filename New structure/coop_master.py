@@ -123,7 +123,13 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
         if state_code == 1:
             # 普通发车转向传递受控角速度指令，避免实测瞬态直接冲击从车。
             wz = cmd_wz
-        elif state_code == 2 or state_code == 3:
+        elif (
+            state_code == 2
+            or state_code == 3
+            or state_code == 8
+            or state_code == 12
+            or state_code == 14
+        ):
             # Measured translation is the rigid-motion base.  The compact
             # command delta gives the follower acceleration preview without
             # making it chase a speed the leader has not reached yet.
@@ -171,8 +177,8 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             vx = _vx
             vy = _vy
             wz = cmd_wz
-        elif state_code == 8 or state_code == 11 or state_code == 12 or state_code == 14:
-            vx = cmd_vx * (0.90 if state_code == 12 else 1.0)
+        elif state_code == 11:
+            vx = cmd_vx
             vy = cmd_vy
             wz = cmd_wz
         elif state_code == 9:
@@ -203,7 +209,15 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
     _put_i16(5, vx * 10)
     _put_i16(7, vy * 10)
     _put_i16(9, wz * 10)
-    if state_code == 2 or state_code == 3 or state_code == 6 or state_code == 7:
+    if (
+        state_code == 2
+        or state_code == 3
+        or state_code == 6
+        or state_code == 7
+        or state_code == 8
+        or state_code == 12
+        or state_code == 14
+    ):
         _put_i8(11, preview_vx * _PREVIEW_SCALE)
         _put_i8(12, preview_vy * _PREVIEW_SCALE)
         state_code |= _STATE_PREVIEW

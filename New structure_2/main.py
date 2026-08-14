@@ -1800,19 +1800,12 @@ def speed_ctrl_follow(pid, motor, actual_speed, target_speed):
                     6000.0,
                 )
             return 0.0
-    cmd = _pid_mod.speed_ctrl(
+    return _pid_mod.speed_ctrl(
         pid,
         actual_speed,
         target_speed,
         motor.direction_waiting(target_speed),
     )
-    if (
-        (master_flags & MASTER_MOTION_FLAG_BACK)
-        and pid is pid_b
-        and pid.err * target_speed > 0.0
-    ):
-        cmd += clamp(pid.err * 300.0, -3600.0, 3600.0)
-    return cmd
 
 
 def start_follow():

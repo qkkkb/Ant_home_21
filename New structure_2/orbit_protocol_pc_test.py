@@ -48,7 +48,7 @@ class Capture:
 
 
 class OrbitProtocolTest(unittest.TestCase):
-    def test_search_orbit_matches_normal_orbit_motion_fields(self):
+    def test_normal_orbit_keeps_body_motion_and_search_sends_wheels(self):
         module = load_coop_master()
         capture = Capture()
         module._wireless = capture
@@ -56,16 +56,39 @@ class OrbitProtocolTest(unittest.TestCase):
         module._vx = 12.3
         module._vy = -4.5
         module._wz = 67.8
+        module._wheel_fl = 11.1
+        module._wheel_fr = 22.2
+        module._wheel_b = 33.3
 
         module.send_if_due(100, True, 5, False, 123.4, 1.0, 2.0, 70.0)
         module.send_if_due(200, True, 16, False, 245.6, 1.0, 2.0, 70.0)
 
         normal, search = capture.frames
-        self.assertEqual(normal[5:14], search[5:14])
         self.assertEqual(normal[14], 5)
         self.assertEqual(search[14], 16)
         self.assertTrue(normal[13] & 0x08)
         self.assertTrue(search[13] & 0x08)
+        self.assertNotEqual(normal[5:13], search[5:13])
+        self.assertAlmostEqual(
+            int.from_bytes(search[5:7], "little", signed=True) / 10.0,
+            11.1,
+            places=1,
+        )
+        self.assertAlmostEqual(
+            int.from_bytes(search[7:9], "little", signed=True) / 10.0,
+            22.2,
+            places=1,
+        )
+        self.assertAlmostEqual(
+            int.from_bytes(search[9:11], "little", signed=True) / 10.0,
+            33.3,
+            places=1,
+        )
+        self.assertAlmostEqual(
+            int.from_bytes(search[11:13], "little", signed=True) / 10.0,
+            67.8,
+            places=1,
+        )
 
     def test_search_spin_uses_independent_verified_direction(self):
         with open(MASTER_MAIN_PATH, "r", encoding="utf-8") as source_file:
@@ -90,6 +113,11 @@ class OrbitProtocolTest(unittest.TestCase):
             "                or utime.ticks_diff(now, target_lost_since_ms)",
             source,
         )
+        self.assertIn("def update_spin_wheel_targets", source)
+        self.assertIn("follower front-right wheel follows the leader front-left", source)
+        self.assertIn("base_fr = anchor_speed + pivot_offset * spin_wheel_rate", source)
+        self.assertIn("base_fl = (", source)
+        self.assertIn("if not direct_wheel_mode:", source)
 
 
 if __name__ == "__main__":

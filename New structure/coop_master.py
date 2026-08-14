@@ -28,6 +28,9 @@ _motion_est = None
 _vx = 0.0
 _vy = 0.0
 _wz = 0.0
+_wheel_fl = 0.0
+_wheel_fr = 0.0
+_wheel_b = 0.0
 
 
 def init():
@@ -47,7 +50,7 @@ def _deadband(value, deadband):
 
 
 def update_state(e_fl, e_fr, e_b, gyro_z):
-    global _vx, _vy, _wz
+    global _vx, _vy, _wz, _wheel_fl, _wheel_fr, _wheel_b
     if _motion_est is None:
         return
     get_car_spd(_motion_est, e_fr, e_fl, e_b)
@@ -57,6 +60,9 @@ def update_state(e_fl, e_fr, e_b, gyro_z):
     _vx += (vx - _vx) * _FILTER
     _vy += (vy - _vy) * _FILTER
     _wz += (wz - _wz) * _FILTER
+    _wheel_fl += (e_fl - _wheel_fl) * _FILTER
+    _wheel_fr += (e_fr - _wheel_fr) * _FILTER
+    _wheel_b += (e_b - _wheel_b) * _FILTER
 
 
 def _next_seq():
@@ -140,9 +146,17 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             vx = 0.0
             vy = 0.0
             wz = cmd_wz
-        elif state_code == 5 or state_code == 16:
+        elif state_code == 16:
             flags |= _FLAG_ORBIT
-            # Search orbit uses the same motion contract as normal orbit.
+            # Search spin publishes measured wheel speeds.  The follower
+            # keeps its front-right wheel anchored to the leader front-left
+            # wheel instead of copying the leader body twist.
+            vx = _wheel_fl
+            vy = _wheel_fr
+            wz = _wheel_b
+        elif state_code == 5:
+            flags |= _FLAG_ORBIT
+            # Normal orbit keeps the existing body-twist contract.
             vx = _vx
             vy = _vy
             wz = cmd_wz
@@ -189,7 +203,9 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
         _put_i8(11, preview_vx * _PREVIEW_SCALE)
         _put_i8(12, preview_vy * _PREVIEW_SCALE)
         state_code |= _STATE_PREVIEW
-    elif state_code == 5 or state_code == 16:
+    elif state_code == 16:
+        _put_i16(11, _wz * 10)
+    elif state_code == 5:
         _put_i16(11, _wz * 10)
     else:
         _put_i16(11, yaw_deg * 10)

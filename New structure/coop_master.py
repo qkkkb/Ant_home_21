@@ -114,6 +114,7 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
     wz = 0.0
     preview_vx = 0.0
     preview_vy = 0.0
+    preview_frame = False
     hard_stop = state_code == 17
     if car_started and not hard_stop:
         flags = _FLAG_STARTED | _FLAG_CLOSED_LOOP
@@ -135,6 +136,7 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             # making it chase a speed the leader has not reached yet.
             preview_vx = cmd_vx - _vx
             preview_vy = cmd_vy - _vy
+            preview_frame = True
             vx = _vx
             vy = _vy
             wz = _wz
@@ -143,6 +145,7 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             # the rigid base and keep only half of the command gap as preview.
             preview_vx = cmd_vx - _vx
             preview_vy = cmd_vy - _vy
+            preview_frame = True
             vx = _vx
             vy = _vy
             wz = cmd_wz
@@ -174,6 +177,7 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             flags |= _FLAG_PUSH
             preview_vx = cmd_vx - _vx
             preview_vy = cmd_vy - _vy
+            preview_frame = True
             vx = _vx
             vy = _vy
             wz = cmd_wz
@@ -209,15 +213,7 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
     _put_i16(5, vx * 10)
     _put_i16(7, vy * 10)
     _put_i16(9, wz * 10)
-    if (
-        state_code == 2
-        or state_code == 3
-        or state_code == 6
-        or state_code == 7
-        or state_code == 8
-        or state_code == 12
-        or state_code == 14
-    ):
+    if preview_frame:
         _put_i8(11, preview_vx * _PREVIEW_SCALE)
         _put_i8(12, preview_vy * _PREVIEW_SCALE)
         state_code |= _STATE_PREVIEW

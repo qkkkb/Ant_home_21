@@ -8,7 +8,7 @@ from move_base import calc_wheel_spd
 import pid as _pid_mod
 import config as cfg
 from hardware import Motor
-import coop_master
+import tune_log
 
 # 设置 PID 最大 PWM 值
 _pid_mod.PWM_MAX = cfg.PWM_MAX
@@ -27,6 +27,7 @@ MOTOR_DUTY_MIN = cfg.MOTOR_DUTY_MIN
 PWM_SMOOTH_FACTOR = cfg.PWM_SMOOTH_FACTOR
 # PWM 单次最大变化量（防冲击）
 MAX_PWM_CHANGE = cfg.MAX_PWM_CHANGE
+Nav_Wheel_Target_Limit = 34.0
 
 GYRO_SIGN = 1.0
 
@@ -100,7 +101,7 @@ Push_Dir_Down = 4
 Nav_Detect_Ms = 200
 Nav_Target_Lost_Ms = 500
 Nav_Search_Forward_Ms = 1000
-Nav_Coarse_Exit_Y = 120
+Nav_Coarse_Exit_Y = 100
 Nav_Coarse_Ok_Ms = 80
 Nav_Fine_Classify_Ok_X = 30
 Nav_Fine_Classify_Ok_Y_Min = -35
@@ -111,11 +112,11 @@ Nav_Fine_Push_Ok_Y_Max = 24
 Nav_Transition_Grace_Ms = 200
 Nav_Low_Speed_Th = 6
 Nav_Normal_Follow_Scale = 1.00
-Nav_Coarse_Forward_Gain = 0.180
+Nav_Coarse_Forward_Gain = 0.220
 Nav_Coarse_Lateral_Gain = 0.085		#COARSE 横移系数
-Nav_Coarse_Forward_Limit = 22.0
+Nav_Coarse_Forward_Limit = 28.0
 Nav_Coarse_Lateral_Limit = 13.0
-Nav_Fine_Forward_Gain = 0.095
+Nav_Fine_Forward_Gain = 0.110
 Nav_Fine_Classify_Lateral_Gain = 0.155
 Nav_Fine_Lateral_Gain = 0.250        #FINE 横移系数
 Nav_Fine_Push_Lateral_Gain = 0.160
@@ -142,11 +143,11 @@ Nav_Push_Orbit_Opposite_Yaw = 115.0
 Nav_Push_Orbit_Opposite_Radius_Add = 0.8
 Nav_Push_Orient_Max_Ms = 15000
 Nav_Push_Orbit_Slow_Yaw = 70.0
-Nav_Push_Orbit_Fast_Vy = 6.4
-Nav_Push_Orbit_Slow_Vy = 6.0
-Nav_Push_Orbit_Fast_Rate = 145.0
-Nav_Push_Orbit_Slow_Rate = 95.0
-Nav_Push_Orbit_End_Rate = 25
+Nav_Push_Orbit_Fast_Vy = 7.3
+Nav_Push_Orbit_Slow_Vy = 6.6
+Nav_Push_Orbit_Fast_Rate = 165.0
+Nav_Push_Orbit_Slow_Rate = 105.0
+Nav_Push_Orbit_End_Rate = 28
 Nav_Push_Orbit_Gyro_Limit = 28.0
 Nav_Push_Orbit_Radius_Base = 2.0   #orbit 基础半径系数，实际轨迹半径=该系数 * 车轮轴距；如果轨迹过大或过小可以调整该值
 Nav_Push_Orbit_Radius_Gain = 0.010
@@ -172,8 +173,10 @@ Nav_Push_Prepare_Ok_Y_Min = -8
 Nav_Push_Prepare_Ok_Y_Max = 8  #准备阶段横移误差小于该值即认为前进准备就绪
 Nav_Push_Prepare_Ok_Yaw = 6   #准备阶段定向误差小于该值即认为定向准备就绪
 Nav_Ball_Push_Yaw_Offset = 30.0
-Nav_Bear_Push_Execute_Forward_Speed = 20.0
-Nav_Bear_Push_Ms = 2400
+Nav_Bear_Push_Execute_Forward_Speed = 24.0
+Nav_Bear_Push_Ms = 2000
+Nav_Ball_Push_Execute_Forward_Speed = 24.0
+Nav_Ball_Push_Ms = 670
 Nav_Ball_Field_Vx_Scale = 0.8660254
 Nav_Ball_Field_Vy_Scale = 0.5
 Nav_Push_Execute_Forward_Speed = 20.0    #执行阶段前进速度
@@ -181,10 +184,10 @@ Nav_Push_Execute_Gyro_Limit = 16.0
 Nav_Ball_Push_Gyro_Limit = 22.0
 Nav_Push_Line_Lost_Ms = 150
 Nav_Push_Line_Extra_Ms = 100
-Nav_Push_Back_Speed = 20.0
-Nav_Push_Back_Ms = 833
+Nav_Push_Back_Speed = 24.0
+Nav_Push_Back_Ms = 700
 Nav_Push_Turn_Slow_Yaw = 95.0
-Nav_Push_Turn_Fast_Rate = 145.0
+Nav_Push_Turn_Fast_Rate = 165.0
 Nav_Push_Turn_Slow_Rate = 35.0
 Nav_Push_Turn_Gyro_Limit = 18.0
 Nav_Push_Turn_Gyro_Kp = 0.04
@@ -198,9 +201,9 @@ Nav_Push_Turn_Correct_Rate = 35.0       # 越过目标后按连续运动下限�
 Nav_Push_Turn_Max_Ms = 6000             # 推后回转超时直接停车
 Nav_Post_Turn_No_Target_Ms = 100
 Nav_Post_Turn_Forward_Ms = 1500
-Nav_Post_Turn_Forward_Speed = 13.0
+Nav_Post_Turn_Forward_Speed = 18.0
 Nav_Object_Total = 2
-Nav_Return_Left_Speed = 22.0
+Nav_Return_Left_Speed = 26.0
 Nav_Return_Left_Start_Yaw = 10.0
 Nav_Return_Left_Max_Ms = 10000
 Nav_Return_Back_Speed = 16.0
@@ -1311,13 +1314,13 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         nav_ready_for_push = True
         if push_dir_code == Push_Dir_Up:
             cam_target_vx = (
-                Nav_Push_Execute_Forward_Speed * Nav_Ball_Field_Vx_Scale
+                Nav_Ball_Push_Execute_Forward_Speed * Nav_Ball_Field_Vx_Scale
             )
             cam_target_vy = (
-                Nav_Push_Execute_Forward_Speed * Nav_Ball_Field_Vy_Scale
+                Nav_Ball_Push_Execute_Forward_Speed * Nav_Ball_Field_Vy_Scale
             )
             yaw_ref_deg = push_yaw_target
-            if utime.ticks_diff(now, nav_transition_ms) >= 800:
+            if utime.ticks_diff(now, nav_transition_ms) >= Nav_Ball_Push_Ms:
                 nav_set_state(NAV_STATE_PUSH_BACK)
             return
         if push_dir_code == Push_Dir_Right:
@@ -1621,18 +1624,16 @@ def set_three_pwm_smooth(u_fl, u_fr, u_b):
 # ====================== 初始化 LED 显示 ======================
 update_nav_led_display()
 gc.collect()
-coop_master.init()
+tune_log.init(cfg.COOP_WIRELESS_BAUD)
 gc.collect()
 
 # ---------------------- Ticker ----------------------
 pit_flag = False
-pit_count = 0
 
 # 定时中断回调：置位标志，通知主循环执行控制
 def time_pit_handler(_):
-    global pit_flag, pit_count
+    global pit_flag
     pit_flag = True
-    pit_count = (pit_count + 1) & 3
 
 pit1 = ticker(1)
 pit1.capture_list(enc_fl, enc_fr, enc_b)
@@ -1706,8 +1707,6 @@ def calc_speed_closed_loop():
     e_fl = int(raw_fl) * ENCODER_SPEED_SCALE
     e_fr = int(raw_fr) * ENCODER_SPEED_SCALE
     e_b = int(raw_b) * ENCODER_SPEED_SCALE
-    if (pit_count & 3) == 0:
-        coop_master.update_state(e_fl, e_fr, e_b, gyro_z)
     low_speed = abs(e_fl) <= Nav_Low_Speed_Th and abs(e_fr) <= Nav_Low_Speed_Th and abs(e_b) <= Nav_Low_Speed_Th
     update_nav_state_and_targets(yaw_deg, low_speed, gyro_z)
 
@@ -1839,6 +1838,18 @@ def calc_speed_closed_loop():
     t_fl = move_cmd.speed_fl
     t_fr = move_cmd.speed_fr
     t_b = move_cmd.speed_b
+    wheel_limited = False
+    wheel_abs_max = abs(t_fl)
+    if abs(t_fr) > wheel_abs_max:
+        wheel_abs_max = abs(t_fr)
+    if abs(t_b) > wheel_abs_max:
+        wheel_abs_max = abs(t_b)
+    if wheel_abs_max > Nav_Wheel_Target_Limit:
+        wheel_scale = Nav_Wheel_Target_Limit / wheel_abs_max
+        t_fl *= wheel_scale
+        t_fr *= wheel_scale
+        t_b *= wheel_scale
+        wheel_limited = True
 
     # 速度 PID 输出
     u_fl = speed_ctrl(pid_fl, e_fl, t_fl)
@@ -1863,6 +1874,26 @@ def calc_speed_closed_loop():
 
     # PWM 平滑输出
     set_three_pwm_smooth(u_fl, u_fr, u_b)
+
+    tune_log.send(
+        encoder_ms, nav_state_code(nav_state),
+        cam_has_target
+        | (line_crossed << 1)
+        | (push_dir_code << 2)
+        | (pushed_object_count << 5)
+        | (push_orbit_reached << 8)
+        | (push_turn_settle << 9)
+        | (low_speed << 10)
+        | (nav_ready_for_push << 11)
+        | (push_line_seen_once << 12)
+        | (wheel_limited << 13),
+        utime.ticks_diff(encoder_ms, nav_transition_ms),
+        yaw_ref_deg, yaw_deg, yaw_err_deg, gyro_z,
+        cam_target_vx, cam_target_vy, turn_rate_cmd, vz_cmd,
+        cam_error_x, cam_error_y, encoder_dt_ms, push_orbit_progress_deg,
+        t_fl, t_fr, t_b, e_fl, e_fr, e_b,
+        last_pwm_fl, last_pwm_fr, last_pwm_b,
+    )
 
     return None
 
@@ -1895,17 +1926,6 @@ try:
         if pit_flag:
             pit_flag = False
             calc_speed_closed_loop()
-
-        coop_master.send_if_due(
-            now,
-            car_started,
-            nav_state_code(nav_state),
-            cam_target_seen(),
-            imu_runtime.read_yaw(),
-            cam_target_vx,
-            cam_target_vy,
-            last_turn_rate_cmd,
-        )
 
         if utime.ticks_diff(now, last_status_ms) >= 1000:
             led.toggle()

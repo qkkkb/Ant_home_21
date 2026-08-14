@@ -397,11 +397,18 @@ def update_spin_feedforward_latch(now, fresh_motion, explicit_spin, ff_wz, seen,
     return ff_wz
 
 
-def update_filtered_ff_wz(ff_wz, fresh_motion):
+def update_filtered_ff_wz(ff_wz, fresh_motion, reverse_follow):
     global filtered_ff_wz
 
     target = ff_wz if fresh_motion else 0.0
-    filtered_ff_wz += (target - filtered_ff_wz) * Follow_Orbit_Mode_FfWz_Filter
+    if reverse_follow:
+        filtered_ff_wz += clamp(
+            (target - filtered_ff_wz) * 0.08, -0.35, 0.35
+        )
+    else:
+        filtered_ff_wz += (
+            target - filtered_ff_wz
+        ) * Follow_Orbit_Mode_FfWz_Filter
     if -0.05 < filtered_ff_wz < 0.05:
         filtered_ff_wz = 0.0
     return filtered_ff_wz
@@ -999,7 +1006,7 @@ def calc_follow_yaw_output(
     ):
         last_angle_priority_active = True
     if turn_rate_cmd:
-        gyro_pid.gyro_kp = GYRO_KP
+        gyro_pid.gyro_kp = 0.02 if reverse_follow else GYRO_KP
         if reverse_follow:
             gyro_pid.gyro_ki = GYRO_TURN_KI
             gyro_pid.gyro_output_limit = Follow_Normal_Allocation_Reserve
@@ -1022,7 +1029,7 @@ def calc_follow_yaw_output(
             gyro_pid.gyro_ki = GYRO_KI
             gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
     elif gyro_brake_active and (orbit_settling or not mode_key):
-        gyro_pid.gyro_kp = GYRO_KP
+        gyro_pid.gyro_kp = 0.02 if reverse_follow else GYRO_KP
         gyro_pid.gyro_ki = 0.0
         if reverse_follow:
             gyro_pid.gyro_output_limit = Follow_Normal_Allocation_Reserve
@@ -1160,6 +1167,7 @@ def update_follow_targets(gyro_z):
             else ff_wz
         ),
         fresh_motion,
+        reverse_follow,
     )
     orbit_mode_active = update_orbit_follow_mode(
         now,
@@ -1625,7 +1633,7 @@ def update_follow_targets(gyro_z):
         reverse_follow,
     )
     if reverse_follow:
-        vz_cmd = ramp_value(vz_cmd, previous_vz_cmd, 1.0)
+        vz_cmd = ramp_value(vz_cmd, previous_vz_cmd, 0.35)
     _pid_mod.limit_pose_twist_for_wheels(
         control_buf,
         cam_target_vx,

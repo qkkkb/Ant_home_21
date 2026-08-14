@@ -104,17 +104,27 @@ class OrbitProtocolTest(unittest.TestCase):
             source,
         )
 
-    def test_search_orbit_keeps_fresh_feedforward_without_vision(self):
+    def test_search_spin_uses_the_direct_wheel_entry(self):
         with open(FOLLOWER_MAIN_PATH, "r", encoding="utf-8") as source_file:
             source = source_file.read()
 
         self.assertIn(
+            "if master_state_code == 16:\n"
+            "        return update_spin_wheel_targets",
+            source,
+        )
+        self.assertIn(
+            "if not fresh_motion:\n"
+            "        reset_speed_outputs()",
+            source,
+        )
+        self.assertNotIn(
             "master_state_code == 16\n"
             "                or utime.ticks_diff(now, target_lost_since_ms)",
             source,
         )
         self.assertIn("def update_spin_wheel_targets", source)
-        self.assertIn("follower front-right wheel follows the leader front-left", source)
+        self.assertIn("State 16 stays in wheel space", source)
         self.assertIn("base_fr = anchor_speed + pivot_offset * spin_wheel_rate", source)
         self.assertIn("base_fl = (", source)
         self.assertIn("if not direct_wheel_mode:", source)

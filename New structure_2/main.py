@@ -1136,17 +1136,9 @@ def update_spin_wheel_targets(now, seen, fresh_motion):
     spin_wheel_rate = (
         master_wheel_fl + master_wheel_fr + master_wheel_b
     ) * 0.3333333
-    anchor_speed = master_wheel_fl + clamp(
-        master_wheel_fl * (Follow_Spin_Anchor_Gain - 1.0),
-        -0.8,
-        0.8,
-    )
+    anchor_speed = master_wheel_fl + clamp(master_wheel_fl * (Follow_Spin_Anchor_Gain - 1.0), -0.8, 0.8)
     if last_control_master_state == 16:
-        anchor_speed += clamp(
-            (master_wheel_fl - last_enc_fr) * 0.60,
-            -2.5,
-            2.5,
-        )
+        anchor_speed += clamp((master_wheel_fl - last_enc_fr) * 0.60, -2.5, 2.5)
 
     # Keep FR on the leader-FL anchor.  FL/B use an equal-and-opposite
     # differential so the mean wheel rate stays equal to the leader while the

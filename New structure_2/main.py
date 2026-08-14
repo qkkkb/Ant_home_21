@@ -46,6 +46,7 @@ WHEEL_TARGET_IDLE_EPS = 1.2
 WHEEL_TARGET_NORMAL_IDLE_EPS = 0.35
 _FOLLOW_STATIC_LOCK_PWM_LIMIT = const(12000)
 _FOLLOW_RUN_PWM_LIMIT = const(60000)
+_DEBUG_LOG_MIN_FREE = const(512)
 _pid_mod.PWM_MAX = _FOLLOW_RUN_PWM_LIMIT
 
 
@@ -109,14 +110,14 @@ Follow_Spin_Target_Point_Wz_To_Vy = -0.08
 Follow_Spin_Wz_Feedforward_Gain = 0.95
 Follow_Spin_Wz_Feedforward_Limit = 120.0
 Follow_Spin_Turn_Rate_Limit = 128.0
-# State 16 uses wheel-space orbit feedforward.  The follower front-right
-# wheel is the anchor corresponding to the leader front-left wheel.
-Follow_Spin_Anchor_Gain = 1.05
-Follow_Spin_Orbit_Drive_Gain = 2.0
-Follow_Spin_Visual_Wheel_Limit = 8.0
-Follow_Spin_Anchor_Correction_Limit = 0.35
-Follow_Spin_Visual_Yaw_Limit = 2.0
-Follow_Spin_Wheel_Ramp = 1.20
+# State 16 wheel-space parameters: anchor gain, drive gain, wheel limit,
+# anchor correction limit, yaw limit, and wheel ramp.
+_S_AG = 1.05
+_S_DG = 2.0
+_S_WL = 8.0
+_S_AL = 0.35
+_S_YL = 2.0
+_S_R = 1.20
 _Follow_Pose_Angle_Deadband = const(4)
 _Follow_Pose_Angle_Active_Error = const(6)
 Follow_Normal_Allocation_Reserve = 8.0
@@ -179,9 +180,6 @@ master_vx = 0.0
 master_vy = 0.0
 master_wz = 0.0
 master_orbit_wz = 0.0
-master_wheel_fl = 0.0
-master_wheel_fr = 0.0
-master_wheel_b = 0.0
 master_preview_vx = 0.0
 master_preview_vy = 0.0
 master_flags = 0
@@ -214,7 +212,6 @@ orbit_follow_exit_since_ms = 0
 orbit_follow_settle_since_ms = 0
 orbit_follow_entry_until_ms = 0
 filtered_ff_wz = 0.0
-direct_wheel_mode = False
 _orbit = False
 spin_latched_wz = 0.0
 spin_latch_until_ms = 0
@@ -835,21 +832,25 @@ def poll_art_uart():
 
 def handle_coop_frame(msg_type, seq, payload, payload_len):
     global master_vx, master_vy, master_wz, master_orbit_wz
-    global master_wheel_fl, master_wheel_fr, master_wheel_b
     global master_preview_vx, master_preview_vy
     global master_flags, master_state_code, master_last_rx_ms
 
     if msg_type != MSG_MASTER_MOTION or payload_len < 9:
         return
-    measured_vx = decode_i16(payload, 0) / 10.0
-    measured_vy = decode_i16(payload, 2) / 10.0
-    master_vx = measured_vx * 0.5 + measured_vy * 0.8660254
-    master_vy = measured_vy * 0.5 - measured_vx * 0.8660254
-    master_wz = decode_i16(payload, 4) / 10.0
     master_state_code = payload[9] if payload_len >= 10 else -1
     master_preview_vx = master_preview_vy = 0.0
     master_orbit_wz = 0.0
-    master_wheel_fl = master_wheel_fr = master_wheel_b = 0.0
+    if master_state_code == 16:
+        master_vx = decode_i16(payload, 0) / 10.0
+        master_vy = decode_i16(payload, 2) / 10.0
+        master_orbit_wz = decode_i16(payload, 4) / 10.0
+        master_wz = decode_i16(payload, 6) / 10.0
+    else:
+        measured_vx = decode_i16(payload, 0) / 10.0
+        measured_vy = decode_i16(payload, 2) / 10.0
+        master_vx = measured_vx * 0.5 + measured_vy * 0.8660254
+        master_vy = measured_vy * 0.5 - measured_vx * 0.8660254
+        master_wz = decode_i16(payload, 4) / 10.0
     if master_state_code >= _Master_State_Preview_Flag:
         preview_vx = payload[6]
         preview_vy = payload[7]
@@ -864,13 +865,6 @@ def handle_coop_frame(msg_type, seq, payload, payload_len):
             preview_vy * 0.25 - preview_vx * 0.4330127
         )
         master_state_code -= _Master_State_Preview_Flag
-    elif master_state_code == 16:
-        master_vx = 0.0
-        master_vy = 0.0
-        master_wheel_fl = decode_i16(payload, 0) / 10.0
-        master_wheel_fr = decode_i16(payload, 2) / 10.0
-        master_wheel_b = decode_i16(payload, 4) / 10.0
-        master_wz = decode_i16(payload, 6) / 10.0
     elif master_state_code == 5:
         master_orbit_wz = decode_i16(payload, 6) / 10.0
     master_flags = payload[8]
@@ -1074,9 +1068,8 @@ def lost_follow_translation(
 
 
 def update_spin_wheel_targets(now, seen, fresh_motion):
-    # State 16 stays in wheel space: FR is the anchor and vision only adds
-    # bounded corrections to the generated orbit targets.
-    global direct_wheel_mode, target_lost_since_ms
+    # State 16 stays in wheel space with FR anchored to the leader FL wheel.
+    global target_lost_since_ms
     global cam_target_vx, cam_target_vy
     global last_turn_rate_cmd, last_follow_seen
     global last_ff_vx, last_ff_vy, last_ff_wz
@@ -1094,16 +1087,19 @@ def update_spin_wheel_targets(now, seen, fresh_motion):
         cam_target_vy = 0.0
         return 0.0
 
-    follow_output_limit = _FOLLOW_RUN_PWM_LIMIT
-    if last_control_master_state != 16:
+    was_spin = last_control_master_state == 16
+    if not was_spin:
         reset_speed_outputs(True)
         reset_turn_loop_state()
-    direct_wheel_mode = True
-    _orbit = True
-    orbit_follow_active = True
-    orbit_follow_exit_since_ms = 0
-    orbit_follow_settle_since_ms = 0
-    orbit_follow_entry_until_ms = 0
+        follow_output_limit = _FOLLOW_RUN_PWM_LIMIT
+        _orbit = orbit_follow_active = True
+        orbit_follow_exit_since_ms = orbit_follow_settle_since_ms = 0
+        orbit_follow_entry_until_ms = 0
+        cam_target_vx = cam_target_vy = last_turn_rate_cmd = 0.0
+        last_cmd_vx = last_cmd_vy = last_cmd_wz = 0.0
+        last_follow_mode_key = 1
+        last_control_master_state = 16
+        last_alloc_scale = 100
 
     if seen:
         target_lost_since_ms = 0
@@ -1133,88 +1129,63 @@ def update_spin_wheel_targets(now, seen, fresh_motion):
         control_buf[1] = 0.0
         control_buf[2] = 0.0
 
-    spin_wheel_rate = (
-        master_wheel_fl + master_wheel_fr + master_wheel_b
+    wheel_rate = (
+        master_vx + master_vy + master_orbit_wz
     ) * 0.3333333
-    anchor_speed = master_wheel_fl + clamp(master_wheel_fl * (Follow_Spin_Anchor_Gain - 1.0), -0.8, 0.8)
-    if last_control_master_state == 16:
-        anchor_speed += clamp((master_wheel_fl - last_enc_fr) * 0.60, -2.5, 2.5)
-
-    # Keep FR on the leader-FL anchor.  FL/B use an equal-and-opposite
-    # differential so the mean wheel rate stays equal to the leader while the
-    # follower translates around the anchor instead of spinning in place.
-    base_fr = anchor_speed
-    pair_center = (3.0 * spin_wheel_rate - base_fr) * 0.5
-    orbit_drive = spin_wheel_rate * Follow_Spin_Orbit_Drive_Gain
-    base_fl = pair_center + orbit_drive
-    base_b = pair_center - orbit_drive
-
-    # Position corrections are made zero-mean; only a small bounded part of
-    # the visual yaw correction may change the common wheel rate.
-    visual_mean = (
+    anchor = master_vx + clamp(master_vx * (_S_AG - 1.0), -0.8, 0.8)
+    if was_spin:
+        anchor += clamp((master_vx - last_enc_fr) * 0.60, -2.5, 2.5)
+    mean = (
         control_buf[0] + control_buf[1] + control_buf[2]
     ) * 0.3333333
-    visual_yaw = clamp(
-        visual_mean,
-        -Follow_Spin_Visual_Yaw_Limit,
-        Follow_Spin_Visual_Yaw_Limit,
+    yaw = clamp(
+        mean,
+        -_S_YL,
+        _S_YL,
     )
-    visual_fl = control_buf[0] - visual_mean
-    visual_fr = control_buf[1] - visual_mean
-    visual_b = control_buf[2] - visual_mean
-
-    target_fl = base_fl + clamp(
-        visual_fl,
-        -Follow_Spin_Visual_Wheel_Limit,
-        Follow_Spin_Visual_Wheel_Limit,
-    ) + visual_yaw
-    target_fr = base_fr + clamp(
-        visual_fr + visual_yaw,
-        -Follow_Spin_Anchor_Correction_Limit,
-        Follow_Spin_Anchor_Correction_Limit,
+    center = (3.0 * wheel_rate - anchor) * 0.5
+    drive = wheel_rate * _S_DG
+    control_buf[0] = clamp(
+        center + drive + clamp(
+            control_buf[0] - mean,
+            -_S_WL,
+            _S_WL,
+        ) + yaw,
+        -Follow_Forward_Limit,
+        Follow_Forward_Limit,
     )
-    target_b = base_b + clamp(
-        visual_b,
-        -Follow_Spin_Visual_Wheel_Limit,
-        Follow_Spin_Visual_Wheel_Limit,
-    ) + visual_yaw
-    target_fl = clamp(target_fl, -Follow_Forward_Limit, Follow_Forward_Limit)
-    target_fr = clamp(target_fr, -Follow_Forward_Limit, Follow_Forward_Limit)
-    target_b = clamp(target_b, -Follow_Forward_Limit, Follow_Forward_Limit)
-
-    control_buf[0] = ramp_value(
-        target_fl,
-        follow_state[0],
-        Follow_Spin_Wheel_Ramp,
+    control_buf[1] = clamp(
+        anchor + clamp(
+            control_buf[1] - mean + yaw,
+            -_S_AL,
+            _S_AL,
+        ),
+        -Follow_Forward_Limit,
+        Follow_Forward_Limit,
     )
-    control_buf[1] = ramp_value(
-        target_fr,
-        follow_state[1],
-        Follow_Spin_Wheel_Ramp,
+    control_buf[2] = clamp(
+        center - drive + clamp(
+            control_buf[2] - mean,
+            -_S_WL,
+            _S_WL,
+        ) + yaw,
+        -Follow_Forward_Limit,
+        Follow_Forward_Limit,
     )
-    control_buf[2] = ramp_value(
-        target_b,
-        follow_state[2],
-        Follow_Spin_Wheel_Ramp,
+    follow_state[0] = control_buf[0] = ramp_value(
+        control_buf[0], follow_state[0], _S_R,
     )
-    follow_state[0] = control_buf[0]
-    follow_state[1] = control_buf[1]
-    follow_state[2] = control_buf[2]
-
-    cam_target_vx = 0.0
-    cam_target_vy = 0.0
-    last_turn_rate_cmd = 0.0
-    last_cmd_vx = 0.0
-    last_cmd_vy = 0.0
-    last_cmd_wz = 0.0
-    last_ff_vx = master_wheel_fl
-    last_ff_vy = master_wheel_fr
+    follow_state[1] = control_buf[1] = ramp_value(
+        control_buf[1], follow_state[1], _S_R,
+    )
+    follow_state[2] = control_buf[2] = ramp_value(
+        control_buf[2], follow_state[2], _S_R,
+    )
+    last_ff_vx = master_vx
+    last_ff_vy = master_vy
     last_ff_wz = master_wz
     last_follow_seen = seen
-    last_follow_mode_key = 1
-    last_control_master_state = 16
-    last_alloc_scale = 100
-    return 0.0
+    return None
 
 
 def update_follow_targets(gyro_z):
@@ -1232,7 +1203,6 @@ def update_follow_targets(gyro_z):
     global master_edge_until_ms
     global orbit_follow_entry_until_ms
     global last_alloc_scale
-    global direct_wheel_mode
 
     now = utime.ticks_ms()
     target_state = cam_target_state()
@@ -1251,7 +1221,6 @@ def update_follow_targets(gyro_z):
         speed_reset(pid_fr)
         speed_reset(pid_b)
         reset_turn_loop_state()
-    direct_wheel_mode = False
     if fresh_motion:
         measured_ff_vx = master_vx
         measured_ff_vy = master_vy
@@ -1764,7 +1733,6 @@ def reset_speed_outputs(keep_orbit_state=False):
     global last_control_master_state
     global master_edge_until_ms
     global last_alloc_scale
-    global direct_wheel_mode
 
     speed_reset(pid_fl)
     speed_reset(pid_fr)
@@ -1779,7 +1747,6 @@ def reset_speed_outputs(keep_orbit_state=False):
     last_cmd_wz = 0.0
     last_angle_priority_active = False
     last_alloc_scale = 100
-    direct_wheel_mode = False
     follow_state[0] = 0.0
     follow_state[1] = 0.0
     follow_state[2] = 0.0
@@ -1985,7 +1952,7 @@ def calc_speed_closed_loop():
     gyro_z = imu_runtime.read_gyro_z()
 
     vz_cmd = update_follow_targets(gyro_z)
-    if not direct_wheel_mode:
+    if vz_cmd is not None:
         calc_wheel_spd_into(control_buf, cam_target_vx, cam_target_vy, vz_cmd)
 
     e_fl = enc_fl.get() * ENC_SCALE
@@ -2029,8 +1996,8 @@ def calc_speed_closed_loop():
     now_log = utime.ticks_ms()
     if utime.ticks_diff(now_log, debug_log_last_ms) >= 100:
         debug_log_last_ms = now_log
-        log_id = now_log & 0x7FFF
-        debug_send_state(log_id, gyro_z)
+        if gc.mem_free() >= _DEBUG_LOG_MIN_FREE:
+            debug_send_state(now_log & 0x7FFF, gyro_z)
 
 key_exit = Pin(cfg.BTN_EXIT_PIN, Pin.IN, Pin.PULL_UP)
 key_start = Pin(cfg.BTN_START_PIN, Pin.IN, Pin.PULL_UP)

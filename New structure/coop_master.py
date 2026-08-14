@@ -24,6 +24,7 @@ _wireless = None
 _tx_buf = None
 _seq = 0
 _last_tx_ms = 0
+_last_state_code = -1
 _motion_est = None
 _vx = 0.0
 _vy = 0.0
@@ -99,10 +100,13 @@ def _put_i8(idx, value):
 
 
 def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_vy, cmd_wz):
-    global _last_tx_ms
+    global _last_tx_ms, _last_state_code
     if _wireless is None:
         return
-    if utime.ticks_diff(now, _last_tx_ms) < _TX_PERIOD_MS:
+    if (
+        (state_code != 8 or _last_state_code == 8)
+        and utime.ticks_diff(now, _last_tx_ms) < _TX_PERIOD_MS
+    ):
         return
     flags = 0
     vx = 0.0
@@ -220,5 +224,6 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
     try:
         _wireless.send_bytearray(_tx_buf, _FRAME_LEN)
         _last_tx_ms = now
+        _last_state_code = state_code & 0x7F
     except Exception:
         pass

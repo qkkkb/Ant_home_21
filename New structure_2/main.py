@@ -559,8 +559,8 @@ def solve_follow_pose_twist(
     cam_vx = error_x
     cam_vy = error_y
     if push_mode:
-        cam_vx += 4
-        cam_vy += 4
+        cam_vx += 6
+        cam_vy += 6
     if orbit_mode or spin_mode:
         position_priority = (
             (angle_active and (not spin_mode))
@@ -1800,12 +1800,19 @@ def speed_ctrl_follow(pid, motor, actual_speed, target_speed):
                     6000.0,
                 )
             return 0.0
-    return _pid_mod.speed_ctrl(
+    cmd = _pid_mod.speed_ctrl(
         pid,
         actual_speed,
         target_speed,
         motor.direction_waiting(target_speed),
     )
+    if (
+        (master_flags & MASTER_MOTION_FLAG_BACK)
+        and pid is pid_b
+        and pid.err * target_speed > 0.0
+    ):
+        cmd += clamp(pid.err * 300.0, -3600.0, 3600.0)
+    return cmd
 
 
 def start_follow():

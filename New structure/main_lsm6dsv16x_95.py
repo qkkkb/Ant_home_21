@@ -98,17 +98,17 @@ Push_Dir_Right = 1
 Push_Dir_Up = 2
 Push_Dir_Left = 3
 Push_Dir_Down = 4
-Nav_Detect_Ms = 200
 Nav_Target_Lost_Ms = 500
 Nav_Search_Forward_Ms = 1000
 Nav_Coarse_Exit_Y = 100
 Nav_Coarse_Ok_Ms = 80
-Nav_Fine_Classify_Ok_X = 30
-Nav_Fine_Classify_Ok_Y_Min = -35
-Nav_Fine_Classify_Ok_Y_Max = 30
-Nav_Fine_Push_Ok_X = 5
-Nav_Fine_Push_Ok_Y_Min = -12
-Nav_Fine_Push_Ok_Y_Max = 24
+Nav_Fine_Classify_Ok_X = 40
+Nav_Fine_Classify_Ok_Y_Min = -45
+Nav_Fine_Classify_Ok_Y_Max = 40
+Nav_Fine_Push_Ok_X = 30
+Nav_Fine_Push_Ok_Y_Min = -30
+Nav_Fine_Push_Ok_Y_Max = 30
+Nav_Fine_Push_Ok_Yaw = 12.0
 Nav_Transition_Grace_Ms = 200
 Nav_Low_Speed_Th = 6
 Nav_Normal_Follow_Scale = 1.00
@@ -173,19 +173,19 @@ Nav_Push_Prepare_Ok_Y_Min = -8
 Nav_Push_Prepare_Ok_Y_Max = 8  #准备阶段横移误差小于该值即认为前进准备就绪
 Nav_Push_Prepare_Ok_Yaw = 6   #准备阶段定向误差小于该值即认为定向准备就绪
 Nav_Ball_Push_Yaw_Offset = 30.0
-Nav_Bear_Push_Execute_Forward_Speed = 24.0
-Nav_Bear_Push_Ms = 2000
-Nav_Ball_Push_Execute_Forward_Speed = 24.0
-Nav_Ball_Push_Ms = 670
+Nav_Bear_Push_Execute_Forward_Speed = 28.0
+Nav_Bear_Push_Ms = 1700
+Nav_Ball_Push_Execute_Forward_Speed = 28.0
+Nav_Ball_Push_Ms = 570
 Nav_Ball_Field_Vx_Scale = 0.8660254
 Nav_Ball_Field_Vy_Scale = 0.5
-Nav_Push_Execute_Forward_Speed = 20.0    #执行阶段前进速度
+Nav_Push_Execute_Forward_Speed = 24.0    #执行阶段前进速度
 Nav_Push_Execute_Gyro_Limit = 16.0
 Nav_Ball_Push_Gyro_Limit = 22.0
 Nav_Push_Line_Lost_Ms = 150
 Nav_Push_Line_Extra_Ms = 100
-Nav_Push_Back_Speed = 24.0
-Nav_Push_Back_Ms = 700
+Nav_Push_Back_Speed = 28.0
+Nav_Push_Back_Ms = 600
 Nav_Push_Turn_Slow_Yaw = 95.0
 Nav_Push_Turn_Fast_Rate = 165.0
 Nav_Push_Turn_Slow_Rate = 35.0
@@ -201,9 +201,9 @@ Nav_Push_Turn_Correct_Rate = 35.0       # 越过目标后按连续运动下限�
 Nav_Push_Turn_Max_Ms = 6000             # 推后回转超时直接停车
 Nav_Post_Turn_No_Target_Ms = 100
 Nav_Post_Turn_Forward_Ms = 1500
-Nav_Post_Turn_Forward_Speed = 18.0
+Nav_Post_Turn_Forward_Speed = 22.0
 Nav_Object_Total = 2
-Nav_Return_Left_Speed = 26.0
+Nav_Return_Left_Speed = 30.0
 Nav_Return_Left_Start_Yaw = 10.0
 Nav_Return_Left_Max_Ms = 10000
 Nav_Return_Back_Speed = 16.0
@@ -211,7 +211,7 @@ Nav_Return_Back_Ms = 250
 Nav_Return_Shift_Hold_Ms = 600
 Nav_Return_Turn_Dir = 1
 Nav_Search_Spin_Dir = 1
-Nav_Return_Final_Back_Speed = 14.0
+Nav_Return_Final_Back_Speed = 24.0
 Nav_Return_Final_Line_Extra_Ms = 60
 Nav_Return_Turn_Ok_Yaw = 2
 Nav_Return_Turn_Ok_Ms = 700
@@ -859,7 +859,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         if seen:
             nav_target_lost_since_ms = 0
             if nav_detect_since_ms == 0:
-                nav_detect_since_ms = now
+                nav_detect_since_ms = cam_last_rx_ms
         else:
             nav_detect_since_ms = 0
             if nav_target_lost_since_ms == 0:
@@ -886,7 +886,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         cam_target_vx = 0.0
         cam_target_vy = 0.0
         if seen and nav_detect_since_ms > 0:
-            if utime.ticks_diff(now, nav_detect_since_ms) >= Nav_Detect_Ms:
+            if cam_last_rx_ms != nav_detect_since_ms:
                 yaw_ref_deg = yaw_deg
                 nav_set_state(NAV_STATE_COARSE)
                 return
@@ -914,7 +914,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                     push_orbit_blocked = False
             return
         if seen and nav_detect_since_ms > 0:
-            if utime.ticks_diff(now, nav_detect_since_ms) >= Nav_Detect_Ms:
+            if cam_last_rx_ms != nav_detect_since_ms:
                 yaw_ref_deg = yaw_deg
                 nav_set_state(NAV_STATE_COARSE)
         return
@@ -931,7 +931,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         if seen:
             cam_target_vx = 0.0
             if nav_detect_since_ms > 0:
-                if utime.ticks_diff(now, nav_detect_since_ms) >= Nav_Detect_Ms:
+                if cam_last_rx_ms != nav_detect_since_ms:
                     yaw_ref_deg = yaw_deg
                     nav_set_state(NAV_STATE_COARSE)
             return
@@ -1103,8 +1103,9 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 cam_target_vy = -current_x_sign * Nav_Push_Prepare_Kick_Vy
         fine_yaw_ok = (
             (not push_orbit_done)
-            or (abs(push_yaw_error_deg(yaw_deg)) <= Nav_Push_Prepare_Reorient_Yaw)
+            or (abs(push_yaw_error_deg(yaw_deg)) <= Nav_Fine_Push_Ok_Yaw)
         )
+        fine_motion_ok = push_orbit_done or low_speed
         if push_orbit_done:
             fine_ok_x = Nav_Fine_Push_Ok_X
             fine_ok_y_min = Nav_Fine_Push_Ok_Y_Min
@@ -1118,7 +1119,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             and cam_error_y >= fine_ok_y_min
             and cam_error_y <= fine_ok_y_max
             and fine_yaw_ok
-            and low_speed
+            and fine_motion_ok
             and (not fine_braking)
         ):
             if nav_fine_ok_since_ms == 0:

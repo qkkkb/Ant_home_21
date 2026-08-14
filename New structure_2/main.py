@@ -936,6 +936,7 @@ def calc_follow_yaw_output(
     explicit_orbit,
     orbit_rate_base,
     push_mode_active,
+    reverse_follow,
 ):
     global last_cmd_wz, last_angle_priority_active
 
@@ -999,7 +1000,10 @@ def calc_follow_yaw_output(
         last_angle_priority_active = True
     if turn_rate_cmd:
         gyro_pid.gyro_kp = GYRO_KP
-        if orbit_settling:
+        if reverse_follow:
+            gyro_pid.gyro_ki = GYRO_TURN_KI
+            gyro_pid.gyro_output_limit = Follow_Normal_Allocation_Reserve
+        elif orbit_settling:
             gyro_pid.gyro_ki = GYRO_TURN_KI
             gyro_pid.gyro_output_limit = GYRO_ORBIT_OUTPUT_LIMIT
         elif spin_mode_active:
@@ -1020,11 +1024,14 @@ def calc_follow_yaw_output(
     elif gyro_brake_active and (orbit_settling or not mode_key):
         gyro_pid.gyro_kp = GYRO_KP
         gyro_pid.gyro_ki = 0.0
-        gyro_pid.gyro_output_limit = (
-            GYRO_ORBIT_OUTPUT_LIMIT
-            if orbit_settling
-            else GYRO_OUTPUT_LIMIT
-        )
+        if reverse_follow:
+            gyro_pid.gyro_output_limit = Follow_Normal_Allocation_Reserve
+        else:
+            gyro_pid.gyro_output_limit = (
+                GYRO_ORBIT_OUTPUT_LIMIT
+                if orbit_settling
+                else GYRO_OUTPUT_LIMIT
+            )
     if turn_rate_cmd or gyro_brake_active:
         gyro_error = turn_rate_cmd - gyro_z
         if (
@@ -1368,7 +1375,7 @@ def update_follow_targets(gyro_z):
             damp_vy = control_buf[1]
             body_vx += damp_vx
             body_vy += damp_vy
-            if back_follow:
+            if reverse_follow:
                 body_vx = clamp(
                     body_vx,
                     -Follow_Normal_Allocation_Reserve,
@@ -1508,7 +1515,7 @@ def update_follow_targets(gyro_z):
             body_vx = ramp_value(
                 vx - alloc_base_vx,
                 last_cmd_vx - last_ff_vx,
-                0.4 if back_follow else vx_ramp,
+                0.4 if reverse_follow else vx_ramp,
             )
             body_vy = ramp_value(
                 vy - alloc_base_vy,
@@ -1597,6 +1604,7 @@ def update_follow_targets(gyro_z):
         else:
             turn_rate_cmd = follow_ff_wz * Follow_Normal_Wz_Feedforward_Gain
             turn_rate_cmd *= lost_scale
+    previous_vz_cmd = gyro_pid.output
     vz_cmd = calc_follow_yaw_output(
         gyro_z,
         turn_rate_cmd,
@@ -1614,7 +1622,10 @@ def update_follow_targets(gyro_z):
             Follow_Orbit_Wz_Feedforward_Limit,
         ) if explicit_orbit else 0.0,
         push_follow_active,
+        reverse_follow,
     )
+    if reverse_follow:
+        vz_cmd = ramp_value(vz_cmd, previous_vz_cmd, 1.0)
     _pid_mod.limit_pose_twist_for_wheels(
         control_buf,
         cam_target_vx,

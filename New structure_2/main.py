@@ -114,7 +114,12 @@ Follow_Spin_Turn_Rate_Limit = 128.0
 Follow_Spin_Anchor_Gain = 1.05
 Follow_Spin_Orbit_Drive_Gain = 2.0
 Follow_Spin_Visual_Wheel_Limit = 8.0
-Follow_Spin_Anchor_Correction_Limit = 1.0
+# Keep camera correction from pulling the front-right anchor away from the
+# leader front-left wheel.  Relative anchor tracking has its own larger limit.
+Follow_Spin_Anchor_Correction_Limit = 0.35
+Follow_Spin_Anchor_Track_Gain = 0.60
+Follow_Spin_Anchor_Track_Limit = 2.5
+Follow_Spin_Anchor_Bias_Limit = 0.8
 Follow_Spin_Visual_Yaw_Limit = 2.0
 Follow_Spin_Wheel_Ramp = 1.20
 _Follow_Pose_Angle_Deadband = const(4)
@@ -1136,7 +1141,21 @@ def update_spin_wheel_targets(now, seen, fresh_motion):
     spin_wheel_rate = (
         master_wheel_fl + master_wheel_fr + master_wheel_b
     ) * 0.3333333
-    anchor_speed = master_wheel_fl * Follow_Spin_Anchor_Gain
+    anchor_speed = master_wheel_fl + clamp(
+        master_wheel_fl * (Follow_Spin_Anchor_Gain - 1.0),
+        -Follow_Spin_Anchor_Bias_Limit,
+        Follow_Spin_Anchor_Bias_Limit,
+    )
+    # The inner speed PID only tracks the local FR target.  Close the outer
+    # relative-speed loop against the leader FL encoder value so the follower
+    # cannot settle into a self-FR pivot when that wheel is loaded.
+    if last_control_master_state == 16:
+        anchor_error = master_wheel_fl - last_enc_fr
+        anchor_speed += clamp(
+            anchor_error * Follow_Spin_Anchor_Track_Gain,
+            -Follow_Spin_Anchor_Track_Limit,
+            Follow_Spin_Anchor_Track_Limit,
+        )
 
     # Keep FR on the leader-FL anchor.  FL/B use an equal-and-opposite
     # differential so the mean wheel rate stays equal to the leader while the

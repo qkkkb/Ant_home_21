@@ -1149,7 +1149,13 @@ def update_follow_targets(gyro_z):
         explicit_orbit,
         strict_follow_active,
         spin_mode_active,
-        fresh_motion and (master_flags & MASTER_MOTION_FLAG_BACK),
+        fresh_motion and (
+            (master_flags & MASTER_MOTION_FLAG_BACK)
+            or (
+                (master_flags & MASTER_MOTION_FLAG_RETURN)
+                and master_state_code == 14
+            )
+        ),
     )
     orbit_settling = orbit_mode_active and orbit_follow_exit_since_ms != 0
     if orbit_mode_active:
@@ -1350,8 +1356,16 @@ def update_follow_targets(gyro_z):
             body_vx += damp_vx
             body_vy += damp_vy
             if back_follow:
-                body_vx = clamp(body_vx, -16.0, 16.0)
-                body_vy = clamp(body_vy, -16.0, 16.0)
+                body_vx = clamp(
+                    body_vx,
+                    -Follow_Normal_Allocation_Reserve,
+                    Follow_Normal_Allocation_Reserve,
+                )
+                body_vy = clamp(
+                    body_vy,
+                    -Follow_Normal_Allocation_Reserve,
+                    Follow_Normal_Allocation_Reserve,
+                )
             # Do not open the distance loop during a fast turn.  The final
             # command ramp already limits how quickly this correction changes;
             # suppressing it here lets a real close-distance error accumulate.
@@ -1479,8 +1493,24 @@ def update_follow_targets(gyro_z):
         last_cmd_vx = alloc_base_vx + follow_state[4]
         last_cmd_vy = alloc_base_vy + follow_state[5]
     if not (classification_exit and not mode_key):
-        vx = ramp_value(vx, last_cmd_vx, vx_ramp)
-        vy = ramp_value(vy, last_cmd_vy, vy_ramp)
+        if recovery_follow and not mode_key:
+            # Apply the leader motion immediately.  Ramp only relative-pose
+            # correction so reverse starts together without a later chase.
+            body_vx = ramp_value(
+                vx - alloc_base_vx,
+                last_cmd_vx - last_ff_vx,
+                0.4 if back_follow else vx_ramp,
+            )
+            body_vy = ramp_value(
+                vy - alloc_base_vy,
+                last_cmd_vy - last_ff_vy,
+                0.6 if back_follow else vy_ramp,
+            )
+            vx = alloc_base_vx + body_vx
+            vy = alloc_base_vy + body_vy
+        else:
+            vx = ramp_value(vx, last_cmd_vx, vx_ramp)
+            vy = ramp_value(vy, last_cmd_vy, vy_ramp)
     if explicit_orbit:
         if not orbit_settling:
             follow_state[4] = vx - alloc_base_vx

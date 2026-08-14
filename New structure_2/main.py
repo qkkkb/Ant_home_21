@@ -109,12 +109,11 @@ Follow_Spin_Target_Point_Wz_To_Vy = -0.08
 Follow_Spin_Wz_Feedforward_Gain = 0.95
 Follow_Spin_Wz_Feedforward_Limit = 120.0
 Follow_Spin_Turn_Rate_Limit = 128.0
-# State 16 uses wheel-space orbit feedforward.  The offset is expressed in
-# the normalized wheel geometry used by move_base.py.
-Follow_Spin_Anchor_Gain = 1.00
-Follow_Spin_Pivot_Offset = 0.08
+# State 16 uses wheel-space orbit feedforward.  The follower front-right
+# wheel is the anchor corresponding to the leader front-left wheel.
+Follow_Spin_Anchor_Gain = 1.05
 Follow_Spin_Visual_Wheel_Limit = 8.0
-Follow_Spin_Anchor_Correction_Limit = 4.0
+Follow_Spin_Anchor_Correction_Limit = 1.0
 Follow_Spin_Wheel_Ramp = 1.20
 _Follow_Pose_Angle_Deadband = const(4)
 _Follow_Pose_Angle_Active_Error = const(6)
@@ -1136,15 +1135,12 @@ def update_spin_wheel_targets(now, seen, fresh_motion):
         master_wheel_fl + master_wheel_fr + master_wheel_b
     ) * 0.3333333
     anchor_speed = master_wheel_fl * Follow_Spin_Anchor_Gain
-    pivot_offset = Follow_Spin_Pivot_Offset
 
-    # FR is the anchor.  FL and B are the two wheel-space components required
-    # by the same nearby-pivot orbit in the symmetric three-wheel geometry.
-    base_fr = anchor_speed + pivot_offset * spin_wheel_rate
-    base_fl = (
-        -0.5 * anchor_speed
-        + (1.5 - 0.5 * pivot_offset) * spin_wheel_rate
-    )
+    # Keep FR on the leader-FL anchor.  The mean of the three wheel rates is
+    # the rotational component of the symmetric wheel mapping, so derive FL/B
+    # from that same component instead of adding an independent yaw boost.
+    base_fr = anchor_speed
+    base_fl = (3.0 * spin_wheel_rate - base_fr) * 0.5
     base_b = base_fl
 
     target_fl = base_fl + clamp(

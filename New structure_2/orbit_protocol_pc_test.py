@@ -94,7 +94,7 @@ class OrbitProtocolTest(unittest.TestCase):
         with open(MASTER_MAIN_PATH, "r", encoding="utf-8") as source_file:
             source = source_file.read()
 
-        self.assertIn("Nav_Search_Spin_Dir = -1", source)
+        self.assertIn("Nav_Search_Spin_Dir = 1", source)
         self.assertIn(
             "spin_step = Nav_Search_Spin_Dir * gyro_z * spin_dt_ms * 0.001",
             source,
@@ -125,7 +125,12 @@ class OrbitProtocolTest(unittest.TestCase):
         )
         self.assertIn("def update_spin_wheel_targets", source)
         self.assertIn("State 16 stays in wheel space", source)
-        self.assertIn("base_fr = anchor_speed + pivot_offset * spin_wheel_rate", source)
+        self.assertIn("base_fr = anchor_speed", source)
+        self.assertIn(
+            "base_fl = (3.0 * spin_wheel_rate - base_fr) * 0.5",
+            source,
+        )
+        self.assertNotIn("Follow_Spin_Pivot_Offset", source)
         self.assertIn("base_fl = (", source)
         self.assertIn("if not direct_wheel_mode:", source)
 

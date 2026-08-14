@@ -113,9 +113,9 @@ Nav_Transition_Grace_Ms = 200
 Nav_Low_Speed_Th = 6
 Nav_Normal_Follow_Scale = 1.00
 Nav_Coarse_Forward_Gain = 0.220
-Nav_Coarse_Lateral_Gain = 0.085		#COARSE 横移系数
+Nav_Coarse_Lateral_Gain = 0.110		#COARSE 横移系数
 Nav_Coarse_Forward_Limit = 28.0
-Nav_Coarse_Lateral_Limit = 13.0
+Nav_Coarse_Lateral_Limit = 18.0
 Nav_Fine_Forward_Gain = 0.110
 Nav_Fine_Classify_Lateral_Gain = 0.155
 Nav_Fine_Lateral_Gain = 0.250        #FINE 横移系数
@@ -192,8 +192,8 @@ Nav_Push_Turn_Slow_Rate = 35.0
 Nav_Push_Turn_Gyro_Limit = 18.0
 Nav_Push_Turn_Gyro_Kp = 0.04
 Nav_Push_Turn_Gyro_Ki = 0.002
-Nav_Push_Turn_Ok_Yaw = 6.0
-Nav_Push_Turn_Recover_Yaw = 12.0
+Nav_Push_Turn_Ok_Yaw = 3.0
+Nav_Push_Turn_Recover_Yaw = 6.0
 Nav_Push_Turn_Ok_Ms = 150
 Nav_Push_Turn_Forced_Dir = 1
 Nav_Push_Turn_Force_Window_Yaw = 170.0  # 接近180度时保留指定首转方向
@@ -204,7 +204,7 @@ Nav_Post_Turn_Forward_Ms = 1500
 Nav_Post_Turn_Forward_Speed = 22.0
 Nav_Object_Total = 2
 Nav_Return_Left_Speed = 30.0
-Nav_Return_Left_Start_Yaw = 10.0
+Nav_Return_Left_Start_Yaw = 4.0
 Nav_Return_Left_Max_Ms = 10000
 Nav_Return_Back_Speed = 16.0
 Nav_Return_Back_Ms = 250
@@ -648,6 +648,7 @@ def nav_set_state(new_state, force=False):
             NAV_STATE_PUSH_ORIENT,
             NAV_STATE_PUSH_PREPARE,
             NAV_STATE_PUSH,
+            NAV_STATE_PUSH_BACK,
             NAV_STATE_PUSH_TURN,
             NAV_STATE_SEARCH_SPIN,
             NAV_STATE_POST_TURN_FORWARD,
@@ -1819,6 +1820,8 @@ def calc_speed_closed_loop():
             gyro_pid.gyro_output_limit = Nav_Ball_Push_Gyro_Limit
         else:
             gyro_pid.gyro_output_limit = Nav_Push_Execute_Gyro_Limit
+    elif nav_state == NAV_STATE_PUSH_BACK:
+        gyro_pid.gyro_output_limit = Nav_Push_Execute_Gyro_Limit
     elif nav_state in _NAV_TURN_STATES:
         gyro_pid.gyro_output_limit = Nav_Push_Turn_Gyro_Limit
     elif nav_state in _NAV_TRACK_STATES:

@@ -1367,7 +1367,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
         cam_target_vy = 0.0
         yaw_ref_deg = push_yaw_target
         if final_return_mode == 2 and line_crossed:
-            nav_set_state(NAV_STATE_RETURN_BACK)
+            nav_set_state(NAV_STATE_RETURN_TURN)
             return
         if utime.ticks_diff(now, nav_transition_ms) >= Nav_Push_Back_Ms:
             nav_set_state(NAV_STATE_PUSH_TURN)

@@ -1149,8 +1149,8 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 push_orbit_radius_ratio = Nav_Push_Orbit_Quarter_Radius
             elif push_orbit_target_delta >= Nav_Push_Orbit_Opposite_Yaw:
                 push_orbit_radius_ratio += Nav_Push_Orbit_Opposite_Radius_Add
-                if push_orbit_radius_ratio > 3.1:
-                    push_orbit_radius_ratio = 3.1
+                if push_orbit_radius_ratio > 2.7:
+                    push_orbit_radius_ratio = 2.7
             if push_orbit_target_delta <= Nav_Push_Orbit_Skip_Yaw:
                 push_orbit_dir = 0
                 push_orbit_vy_sign = 0

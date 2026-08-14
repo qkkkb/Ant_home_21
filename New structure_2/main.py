@@ -397,18 +397,13 @@ def update_spin_feedforward_latch(now, fresh_motion, explicit_spin, ff_wz, seen,
     return ff_wz
 
 
-def update_filtered_ff_wz(ff_wz, fresh_motion, reverse_follow):
+def update_filtered_ff_wz(ff_wz, fresh_motion):
     global filtered_ff_wz
 
     target = ff_wz if fresh_motion else 0.0
-    if reverse_follow:
-        filtered_ff_wz += clamp(
-            (target - filtered_ff_wz) * 0.08, -0.35, 0.35
-        )
-    else:
-        filtered_ff_wz += (
-            target - filtered_ff_wz
-        ) * Follow_Orbit_Mode_FfWz_Filter
+    filtered_ff_wz += (
+        target - filtered_ff_wz
+    ) * Follow_Orbit_Mode_FfWz_Filter
     if -0.05 < filtered_ff_wz < 0.05:
         filtered_ff_wz = 0.0
     return filtered_ff_wz
@@ -943,7 +938,6 @@ def calc_follow_yaw_output(
     explicit_orbit,
     orbit_rate_base,
     push_mode_active,
-    reverse_follow,
 ):
     global last_cmd_wz, last_angle_priority_active
 
@@ -1006,11 +1000,8 @@ def calc_follow_yaw_output(
     ):
         last_angle_priority_active = True
     if turn_rate_cmd:
-        gyro_pid.gyro_kp = 0.02 if reverse_follow else GYRO_KP
-        if reverse_follow:
-            gyro_pid.gyro_ki = GYRO_TURN_KI
-            gyro_pid.gyro_output_limit = Follow_Normal_Allocation_Reserve
-        elif orbit_settling:
+        gyro_pid.gyro_kp = GYRO_KP
+        if orbit_settling:
             gyro_pid.gyro_ki = GYRO_TURN_KI
             gyro_pid.gyro_output_limit = GYRO_ORBIT_OUTPUT_LIMIT
         elif spin_mode_active:
@@ -1029,16 +1020,13 @@ def calc_follow_yaw_output(
             gyro_pid.gyro_ki = GYRO_KI
             gyro_pid.gyro_output_limit = GYRO_OUTPUT_LIMIT
     elif gyro_brake_active and (orbit_settling or not mode_key):
-        gyro_pid.gyro_kp = 0.02 if reverse_follow else GYRO_KP
+        gyro_pid.gyro_kp = GYRO_KP
         gyro_pid.gyro_ki = 0.0
-        if reverse_follow:
-            gyro_pid.gyro_output_limit = Follow_Normal_Allocation_Reserve
-        else:
-            gyro_pid.gyro_output_limit = (
-                GYRO_ORBIT_OUTPUT_LIMIT
-                if orbit_settling
-                else GYRO_OUTPUT_LIMIT
-            )
+        gyro_pid.gyro_output_limit = (
+            GYRO_ORBIT_OUTPUT_LIMIT
+            if orbit_settling
+            else GYRO_OUTPUT_LIMIT
+        )
     if turn_rate_cmd or gyro_brake_active:
         gyro_error = turn_rate_cmd - gyro_z
         if (
@@ -1167,7 +1155,6 @@ def update_follow_targets(gyro_z):
             else ff_wz
         ),
         fresh_motion,
-        reverse_follow,
     )
     orbit_mode_active = update_orbit_follow_mode(
         now,
@@ -1344,10 +1331,10 @@ def update_follow_targets(gyro_z):
         )
         orbit_damping_active = explicit_orbit and not explicit_push
         if normal_damping_active:
-            # Reverse is one transformed 2-D vector.  Preserve both preview
-            # components before ramping only the relative-pose correction.
-            alloc_base_vx = ff_vx if reverse_follow else measured_ff_vx
-            alloc_base_vy = ff_vy if reverse_follow else measured_ff_vy
+            # Damping follows motion the leader has physically reached.
+            # Preview remains an anticipatory correction, not a rigid base.
+            alloc_base_vx = measured_ff_vx
+            alloc_base_vy = measured_ff_vy
             body_vx = vx - alloc_base_vx
             body_vy = vy - alloc_base_vy
         else:
@@ -1452,6 +1439,9 @@ def update_follow_targets(gyro_z):
             vy = control_buf[1]
             alloc_base_vx = control_buf[3]
             alloc_base_vy = control_buf[4]
+            if reverse_follow and not mode_key:
+                alloc_base_vx = measured_ff_vx
+                alloc_base_vy = measured_ff_vy
         else:
             vx = 0.0
             vy = 0.0
@@ -1517,20 +1507,25 @@ def update_follow_targets(gyro_z):
         last_cmd_vx = alloc_base_vx + follow_state[4]
         last_cmd_vy = alloc_base_vy + follow_state[5]
     if not (classification_exit and not mode_key):
-        if recovery_follow and not mode_key:
+        if reverse_follow and not mode_key:
+            # Start on the first preview frame, but limit chassis acceleration
+            # instead of stepping directly to the combined reverse target.
+            vx = ramp_value(vx, last_cmd_vx, 0.4)
+            vy = ramp_value(vy, last_cmd_vy, 0.6)
+            body_vx = vx - alloc_base_vx
+            body_vy = vy - alloc_base_vy
+        elif recovery_follow and not mode_key:
             # Apply the leader motion immediately.  Ramp only relative-pose
             # correction so reverse starts together without a later chase.
             body_vx = ramp_value(
                 vx - alloc_base_vx,
                 last_cmd_vx - last_ff_vx,
-                0.4 if reverse_follow else vx_ramp,
+                vx_ramp,
             )
             body_vy = ramp_value(
                 vy - alloc_base_vy,
                 last_cmd_vy - last_ff_vy,
-                Follow_Command_Ramp_Vy
-                if reverse_follow
-                else vy_ramp,
+                vy_ramp,
             )
             vx = alloc_base_vx + body_vx
             vy = alloc_base_vy + body_vy
@@ -1612,7 +1607,6 @@ def update_follow_targets(gyro_z):
         else:
             turn_rate_cmd = follow_ff_wz * Follow_Normal_Wz_Feedforward_Gain
             turn_rate_cmd *= lost_scale
-    previous_vz_cmd = gyro_pid.output
     vz_cmd = calc_follow_yaw_output(
         gyro_z,
         turn_rate_cmd,
@@ -1630,10 +1624,7 @@ def update_follow_targets(gyro_z):
             Follow_Orbit_Wz_Feedforward_Limit,
         ) if explicit_orbit else 0.0,
         push_follow_active,
-        reverse_follow,
     )
-    if reverse_follow:
-        vz_cmd = ramp_value(vz_cmd, previous_vz_cmd, 0.35)
     _pid_mod.limit_pose_twist_for_wheels(
         control_buf,
         cam_target_vx,
@@ -1644,12 +1635,8 @@ def update_follow_targets(gyro_z):
         body_vx,
         body_vy,
         safety_vx,
-        master_preview_vx
-        if seen and fresh_motion and not mode_key and not reverse_follow
-        else 0.0,
-        master_preview_vy
-        if seen and fresh_motion and not mode_key and not reverse_follow
-        else 0.0,
+        master_preview_vx if seen and fresh_motion and not mode_key else 0.0,
+        master_preview_vy if seen and fresh_motion and not mode_key else 0.0,
         fresh_motion
         and (
             (0 < master_flags < 8 and not mode_key)

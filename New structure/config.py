@@ -23,9 +23,9 @@ MAX_PWM_CHANGE    = 4800
 # Camera UART
 CAM_UART_ID   = 0
 CAM_UART_BAUD = 9600
-# Single-car tuning mode uses wireless UART for compact control logs.
+# Master broadcasts motion state to the slave over wireless UART.
 COOP_ROLE = "MASTER"
-COOP_ENABLE = False
+COOP_ENABLE = True
 COOP_WIRELESS_BAUD = 460800
 COOP_TX_PERIOD_MS = 80
 MASTER_MOTION_TX_PERIOD_MS = 20

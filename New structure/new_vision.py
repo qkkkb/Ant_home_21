@@ -942,7 +942,6 @@ while True:
         if not classify_sent:
             target = find_nearest_target(img, False)
             if target is None:
-                uart.write(bytearray([UART_FRAME_HEAD, 0xFB, 255]))
                 print_state_log("CLASSIFY", "NO_TARGET", coarse_frame_count, freeze_count, verbose = True)
             else:
                 x1, y1, x2, y2, _, _ = target
@@ -950,10 +949,6 @@ while True:
                 if DEBUG_DRAW_BOX:
                     draw_target_overlay(img, x1, y1, x2, y2)
                 if dir_code is None:
-                    uart.write(bytearray([
-                        UART_FRAME_HEAD, 0xFB,
-                        clamp(int(class_score * 100), 0, 100),
-                    ]))
                     print_state_log(
                         "CLASSIFY", "UNSURE", coarse_frame_count, freeze_count,
                         score = class_score, label = class_label, verbose = True

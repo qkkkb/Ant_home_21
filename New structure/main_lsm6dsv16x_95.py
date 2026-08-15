@@ -168,8 +168,8 @@ Nav_Push_Prepare_Min_Vy = 6.2
 Nav_Push_Prepare_Kick_X = 18
 Nav_Push_Prepare_Kick_Vy = 6.2
 Nav_Push_Prepare_Kick_Ms = 80
-Nav_Push_Prepare_Back_Ms = 90
-Nav_Push_Prepare_Back_Speed = 6.2
+Nav_Push_Prepare_Back_Ms = 50
+Nav_Push_Prepare_Back_Speed = 4.5
 Nav_Push_Prepare_Ok_X = 7    #准备阶段前进误差小于该值即认为横移准备就绪
 Nav_Push_Prepare_Ok_Y_Min = -8
 Nav_Push_Prepare_Ok_Y_Max = 8  #准备阶段横移误差小于该值即认为前进准备就绪
@@ -1279,7 +1279,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, prepare_low_speed, gyro_z):
                 vx_cmd = cam_error_y * Nav_Push_Prepare_Forward_Gain
                 if 0.0 < vx_cmd < Nav_Push_Prepare_Min_Vx:
                     vx_cmd = Nav_Push_Prepare_Min_Vx
-                elif -Nav_Push_Prepare_Min_Vx < vx_cmd < 0.0:
+                elif vx_cmd < 0.0:
                     vx_cmd = -Nav_Push_Prepare_Min_Vx
             if -Nav_Push_Prepare_Ok_X <= prepare_error_x <= Nav_Push_Prepare_Ok_X:
                 vy_cmd = 0.0
@@ -1435,7 +1435,9 @@ def poll_art_uart():
                     continue
                 if not cam_rx_started:
                     cam_rx_started = True
-                if cam_rx_buf[1] == Classify_Packet_Tag:
+                if cam_rx_buf[1] == 0xFB:
+                    cam_error_y = int(cam_rx_buf[2])
+                elif cam_rx_buf[1] == Classify_Packet_Tag:
                     new_dir = int(cam_rx_buf[2])
                     if new_dir != push_dir_code:
                         push_dir_code = new_dir

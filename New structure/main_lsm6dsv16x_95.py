@@ -170,6 +170,7 @@ Nav_Push_Prepare_Kick_Vy = 6.2
 Nav_Push_Prepare_Kick_Ms = 80
 Nav_Push_Prepare_Back_Ms = 50
 Nav_Push_Prepare_Back_Speed = 4.5
+Nav_Push_Prepare_Target_X = -16
 Nav_Push_Prepare_Ok_X = 7    #准备阶段前进误差小于该值即认为横移准备就绪
 Nav_Push_Prepare_Ok_Y_Min = -8
 Nav_Push_Prepare_Ok_Y_Max = 8  #准备阶段横移误差小于该值即认为前进准备就绪
@@ -1255,7 +1256,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, prepare_low_speed, gyro_z):
             return
         if nav_push_prepare_ok_since_ms < 0:
             nav_push_prepare_ok_since_ms = 0
-        prepare_error_x = cam_error_x
+        prepare_error_x = cam_error_x - Nav_Push_Prepare_Target_X
         close_lateral = abs(prepare_error_x) <= Nav_Push_Prepare_Kick_X
         prepare_braking = False
         current_prepare_x_sign = 0

@@ -192,7 +192,7 @@ MM_PER_PIX_X = 3.134328
 MM_PER_PIX_Y = 3.093750
 BEV_CENTER_X = (IPM_MATRIX_DST_W // 2) + 8   # 96
 BEV_CENTER_Y = IPM_MATRIX_DST_H // 2   # 96
-BEV_TARGET_Y = 175    # pre-push target line in BEV
+BEV_TARGET_Y = 179    # pre-push target line in BEV
 BEV_FLIP_X = True
 BEV_FLIP_Y = False
 

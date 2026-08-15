@@ -911,43 +911,22 @@ while True:
         uart_data = uart.read()
         if uart_data:
             uart_rx_buf += uart_data
-            mode_pos = uart_rx_buf.rfind(SEARCH_TRIGGER)
-            mode_code = 1 if mode_pos >= 0 else 0
-            uart_data = uart_rx_buf.rfind(COARSE_TRIGGER)
-            if uart_data > mode_pos:
-                mode_pos = uart_data
-                mode_code = 2
-            uart_data = uart_rx_buf.rfind(FINE_TRIGGER)
-            if uart_data > mode_pos:
-                mode_pos = uart_data
-                mode_code = 3
-            uart_data = uart_rx_buf.rfind(CLASSIFY_TRIGGER)
-            if uart_data > mode_pos:
-                mode_pos = uart_data
-                mode_code = 4
-            uart_data = uart_rx_buf.rfind(LINE_TRIGGER)
-            if uart_data > mode_pos:
-                mode_pos = uart_data
-                mode_code = 5
-            uart_data = uart_rx_buf.rfind(IDLE_TRIGGER)
-            if uart_data > mode_pos:
-                mode_code = 6
-            if mode_code == 1:
+            if uart_rx_buf.endswith(SEARCH_TRIGGER):
                 set_detect_mode("SEARCH", "TRIGGER->SEARCH")
                 uart_rx_buf = bytearray()
-            elif mode_code == 2:
+            elif uart_rx_buf.endswith(COARSE_TRIGGER):
                 set_detect_mode("COARSE", "TRIGGER->COARSE")
                 uart_rx_buf = bytearray()
-            elif mode_code == 3:
+            elif uart_rx_buf.endswith(FINE_TRIGGER):
                 set_detect_mode("FINE", "TRIGGER->FINE")
                 uart_rx_buf = bytearray()
-            elif mode_code == 4:
+            elif uart_rx_buf.endswith(CLASSIFY_TRIGGER):
                 set_detect_mode("CLASSIFY", "TRIGGER->CLASSIFY")
                 uart_rx_buf = bytearray()
-            elif mode_code == 5:
+            elif uart_rx_buf.endswith(LINE_TRIGGER):
                 set_detect_mode("LINE", "TRIGGER->LINE")
                 uart_rx_buf = bytearray()
-            elif mode_code == 6:
+            elif uart_rx_buf.endswith(IDLE_TRIGGER):
                 set_detect_mode("IDLE", "TRIGGER->IDLE")
                 uart_rx_buf = bytearray()
             elif len(uart_rx_buf) > 20:

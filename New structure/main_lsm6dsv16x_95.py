@@ -27,7 +27,7 @@ MOTOR_DUTY_MIN = cfg.MOTOR_DUTY_MIN
 PWM_SMOOTH_FACTOR = cfg.PWM_SMOOTH_FACTOR
 # PWM 单次最大变化量（防冲击）
 MAX_PWM_CHANGE = cfg.MAX_PWM_CHANGE
-Nav_Wheel_Target_Limit = 38.0
+Nav_Wheel_Target_Limit = 42.0
 
 GYRO_SIGN = 1.0
 

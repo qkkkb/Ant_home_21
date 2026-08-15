@@ -955,6 +955,9 @@ while True:
                     )
                 else:
                     send_classify_dir(dir_code)
+                    bev_x, bev_y = ipm_transform((x1 + x2) // 2, y2)
+                    bev_x, bev_y = normalize_bev_point(bev_x, bev_y)
+                    send_error(int(bev_x) - BEV_CENTER_X, BEV_TARGET_Y - int(bev_y))
                     line_ball_slant_state = 1 if dir_code == CLASSIFY_DIR_UP else 0
                     whitebear_line_confirm_enabled = class_label == "whitebear"
                     classify_sent = True

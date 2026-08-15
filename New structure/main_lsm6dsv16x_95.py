@@ -159,9 +159,9 @@ Nav_Push_Orbit_Brake_Max_Ms = 1000
 Nav_Push_Prepare_Reorient_Yaw = 10.0
 Nav_Push_Prepare_Hard_Reorient_Yaw = 24.0
 Nav_Push_Prepare_Soft_Scale = 0.45
-Nav_Push_Prepare_Forward_Gain = 0.038
+Nav_Push_Prepare_Forward_Gain = 0.45
 Nav_Push_Prepare_Lateral_Gain = 0.115
-Nav_Push_Prepare_Forward_Limit = 5.8
+Nav_Push_Prepare_Forward_Limit = 8.0
 Nav_Push_Prepare_Lateral_Limit = 8.0
 Nav_Push_Prepare_Min_Vx = 4.0
 Nav_Push_Prepare_Min_Vy = 6.2
@@ -490,7 +490,8 @@ def send_art_mode_command(new_state):
     elif new_state == NAV_STATE_PUSH_ORIENT:
         cam_uart.write(ART_MODE_IDLE_CMD)
     elif new_state == NAV_STATE_PUSH_PREPARE:
-        cam_uart.write(ART_MODE_FINE_CMD)
+        if not push_orbit_reached:
+            cam_uart.write(ART_MODE_FINE_CMD)
     elif new_state == NAV_STATE_PUSH:
         cam_uart.write(ART_MODE_LINE_CMD)
     elif new_state == NAV_STATE_PUSH_BACK:
@@ -566,7 +567,6 @@ def nav_set_state(new_state, force=False):
         NAV_STATE_COARSE,
         NAV_STATE_FINE,
         NAV_STATE_PUSH_CLASSIFY,
-        NAV_STATE_PUSH_PREPARE,
         NAV_STATE_PUSH,
         NAV_STATE_RETURN_LEFT,
         NAV_STATE_RETURN_FINAL,
@@ -1204,6 +1204,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, prepare_low_speed, gyro_z):
         if push_orbit_progress_deg >= orbit_stop_delta or yaw_err_abs <= Nav_Push_Orient_Ok_Yaw:
             if not push_orbit_reached:
                 reset_speed_pid_state()
+                cam_uart.write(ART_MODE_FINE_CMD)
             if push_orbit_progress_deg > orbit_stop_delta:
                 push_orbit_progress_deg = orbit_stop_delta
             push_orbit_reached = True

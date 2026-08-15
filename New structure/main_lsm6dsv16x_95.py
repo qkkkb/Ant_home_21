@@ -141,7 +141,7 @@ Nav_Classify_Timeout_Ms = 1500
 Nav_Push_Orient_Ok_Yaw = 5.0    #orbit 目标角度误差小于该值即认为定向完成
 Nav_Push_Orbit_Skip_Yaw = 15.0
 Nav_Push_Orbit_Opposite_Yaw = 115.0
-Nav_Push_Orbit_Opposite_Radius_Add = 0.8
+Nav_Push_Orbit_Opposite_Radius_Add = 0.5
 Nav_Push_Orient_Max_Ms = 15000
 Nav_Push_Orbit_Slow_Yaw = 70.0
 Nav_Push_Orbit_Fast_Vy = 7.3
@@ -153,7 +153,7 @@ Nav_Push_Orbit_Gyro_Limit = 28.0
 Nav_Push_Turn_Rate_Scale = 1.35
 Nav_Push_Orbit_Radius_Base = 2.0   #orbit 基础半径系数，实际轨迹半径=该系数 * 车轮轴距；如果轨迹过大或过小可以调整该值
 Nav_Push_Orbit_Radius_Gain = 0.010
-Nav_Push_Orbit_Quarter_Radius = 2.4
+Nav_Push_Orbit_Quarter_Radius = 2.2
 Nav_Push_Orbit_Stop_Gyro_Th = 3.0   #orbit 过程中如果陀螺仪读数小于该值则认为已经接近目标角度，可以停止转向加速前进
 Nav_Push_Orbit_Brake_Max_Ms = 1000
 Nav_Push_Prepare_Reorient_Yaw = 10.0
@@ -213,7 +213,7 @@ Nav_Return_Back_Ms = 250
 Nav_Return_Shift_Hold_Ms = 600
 Nav_Return_Turn_Dir = 1
 Nav_Search_Spin_Dir = 1
-Nav_Return_Final_Back_Speed = 34.0
+Nav_Return_Final_Back_Speed = 38.0
 Nav_Return_Final_Line_Extra_Ms = 50
 Nav_Return_Turn_Ok_Yaw = 2
 Nav_Return_Turn_Ok_Ms = 200
@@ -1166,8 +1166,8 @@ def update_nav_state_and_targets(yaw_deg, low_speed, prepare_low_speed, gyro_z):
                 push_orbit_radius_ratio = Nav_Push_Orbit_Quarter_Radius
             elif push_orbit_target_delta >= Nav_Push_Orbit_Opposite_Yaw:
                 push_orbit_radius_ratio += Nav_Push_Orbit_Opposite_Radius_Add
-                if push_orbit_radius_ratio > 2.7:
-                    push_orbit_radius_ratio = 2.7
+                if push_orbit_radius_ratio > 2.5:
+                    push_orbit_radius_ratio = 2.5
             if push_orbit_target_delta <= Nav_Push_Orbit_Skip_Yaw:
                 push_orbit_dir = 0
                 push_orbit_vy_sign = 0
@@ -1806,6 +1806,8 @@ def calc_speed_closed_loop():
                 Nav_Return_Turn_Dir,
                 push_turn_reached_once,
             )
+            if not push_turn_reached_once:
+                turn_rate_cmd = turn_rate_cmd * Nav_Push_Turn_Rate_Scale
             if turn_rate_cmd == 0.0:
                 if abs(yaw_err_deg) > Nav_Return_Turn_Ok_Yaw:
                     turn_rate_cmd = (

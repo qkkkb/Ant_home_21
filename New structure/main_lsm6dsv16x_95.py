@@ -111,6 +111,7 @@ Nav_Fine_Push_Ok_Y_Max = 30
 Nav_Fine_Push_Ok_Yaw = 12.0
 Nav_Transition_Grace_Ms = 200
 Nav_Low_Speed_Th = 6
+Nav_Push_Prepare_Low_Speed_Th = 8
 Nav_Normal_Follow_Scale = 1.00
 Nav_Coarse_Forward_Gain = 0.220
 Nav_Coarse_Lateral_Gain = 0.110		#COARSE 横移系数
@@ -818,7 +819,7 @@ def update_return_home(now, yaw_deg, low_speed, gyro_z):
     move_cmd.tar_spd_z = 0.0
 
 
-def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
+def update_nav_state_and_targets(yaw_deg, low_speed, prepare_low_speed, gyro_z):
     global nav_detect_since_ms, nav_target_lost_since_ms
     global nav_coarse_ok_since_ms, nav_fine_ok_since_ms
     global nav_fine_last_x_sign, nav_fine_last_y_sign
@@ -1300,7 +1301,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             and cam_error_y >= Nav_Push_Prepare_Ok_Y_Min
             and cam_error_y <= Nav_Push_Prepare_Ok_Y_Max
             and yaw_prepare_err_abs <= Nav_Push_Prepare_Ok_Yaw
-            and low_speed
+            and prepare_low_speed
             and (not prepare_braking)
         ):
             if nav_push_prepare_ok_since_ms == 0:
@@ -1711,7 +1712,12 @@ def calc_speed_closed_loop():
     e_fr = int(raw_fr) * ENCODER_SPEED_SCALE
     e_b = int(raw_b) * ENCODER_SPEED_SCALE
     low_speed = abs(e_fl) <= Nav_Low_Speed_Th and abs(e_fr) <= Nav_Low_Speed_Th and abs(e_b) <= Nav_Low_Speed_Th
-    update_nav_state_and_targets(yaw_deg, low_speed, gyro_z)
+    prepare_low_speed = (
+        abs(e_fl) <= Nav_Push_Prepare_Low_Speed_Th
+        and abs(e_fr) <= Nav_Push_Prepare_Low_Speed_Th
+        and abs(e_b) <= Nav_Push_Prepare_Low_Speed_Th
+    )
+    update_nav_state_and_targets(yaw_deg, low_speed, prepare_low_speed, gyro_z)
 
     if nav_state == NAV_STATE_SEARCH:
         reset_speed_pid_state()

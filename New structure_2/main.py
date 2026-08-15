@@ -88,7 +88,9 @@ Follow_Static_Visual_Scale = 0.60
 Follow_Hold_Feedforward_Gain = 1.70
 Follow_Normal_Wz_Feedforward_Gain = 1.00
 Follow_Orbit_Wz_Feedforward_Gain = 1.00
-Follow_Orbit_Wz_Feedforward_Limit = 150.0
+# State 5 normal orbit: the faster leader now reaches about 165 deg/s.
+# Keep one bounded ceiling for both the feedforward and final command.
+Follow_Orbit_Wz_Feedforward_Limit = 180.0
 Follow_Orbit_Turn_Rate_Limit = 180.0
 Follow_Target_Point_Wz_To_Vx = -0.18
 Follow_Target_Point_Wz_To_Vy = -0.45
@@ -107,9 +109,11 @@ Follow_Orbit_Pose_Angle_Limit = 32.0
 _Follow_Normal_Pose_Angle_Deadband = const(8)
 _Follow_Normal_Pose_Angle_Active_Error = const(18)
 Follow_Spin_Target_Point_Wz_To_Vy = -0.08
-Follow_Spin_Wz_Feedforward_Gain = 0.80
-Follow_Spin_Wz_Feedforward_Limit = 100.0
-Follow_Spin_Turn_Rate_Limit = 108.0
+# State 9 push-turn publishes the leader command directly (up to 222 deg/s).
+# This branch is separate from state 16 search-spin, which is decoded as orbit.
+Follow_Spin_Wz_Feedforward_Gain = 1.00
+Follow_Spin_Wz_Feedforward_Limit = 222.0
+Follow_Spin_Turn_Rate_Limit = 222.0
 _Follow_Pose_Angle_Deadband = const(4)
 _Follow_Pose_Angle_Active_Error = const(6)
 Follow_Normal_Allocation_Reserve = 8.0
@@ -1510,8 +1514,13 @@ def update_follow_targets(gyro_z):
         if reverse_follow and not mode_key:
             # Start on the first preview frame, but limit chassis acceleration
             # instead of stepping directly to the combined reverse target.
-            vx = ramp_value(vx, last_cmd_vx, 0.4)
-            vy = ramp_value(vy, last_cmd_vy, 0.6)
+            # PUSH_BACK changes direction in about 200 ms.  Give that state
+            # enough response to stay with the measured leader motion; keep
+            # the slower, previously validated ramp for return-back states.
+            reverse_vx_ramp = 0.65 if back_follow else 0.4
+            reverse_vy_ramp = 0.85 if back_follow else 0.6
+            vx = ramp_value(vx, last_cmd_vx, reverse_vx_ramp)
+            vy = ramp_value(vy, last_cmd_vy, reverse_vy_ramp)
             body_vx = vx - alloc_base_vx
             body_vy = vy - alloc_base_vy
         elif recovery_follow and not mode_key:

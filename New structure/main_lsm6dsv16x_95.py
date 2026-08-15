@@ -115,7 +115,7 @@ Nav_Push_Prepare_Low_Speed_Th = 8
 Nav_Normal_Follow_Scale = 1.00
 Nav_Coarse_Forward_Gain = 0.220
 Nav_Coarse_Lateral_Gain = 0.110		#COARSE 横移系数
-Nav_Coarse_Forward_Limit = 28.0
+Nav_Coarse_Forward_Limit = 32.0
 Nav_Coarse_Lateral_Limit = 18.0
 Nav_Fine_Forward_Gain = 0.110
 Nav_Fine_Classify_Lateral_Gain = 0.155
@@ -150,7 +150,7 @@ Nav_Push_Orbit_Fast_Rate = 165.0
 Nav_Push_Orbit_Slow_Rate = 105.0
 Nav_Push_Orbit_End_Rate = 28
 Nav_Push_Orbit_Gyro_Limit = 28.0
-Nav_Push_Turn_Rate_Scale = 1.25
+Nav_Push_Turn_Rate_Scale = 1.35
 Nav_Push_Orbit_Radius_Base = 2.0   #orbit 基础半径系数，实际轨迹半径=该系数 * 车轮轴距；如果轨迹过大或过小可以调整该值
 Nav_Push_Orbit_Radius_Gain = 0.010
 Nav_Push_Orbit_Quarter_Radius = 2.4
@@ -181,7 +181,7 @@ Nav_Ball_Push_Execute_Forward_Speed = 32.0
 Nav_Ball_Push_Ms = 500
 Nav_Ball_Field_Vx_Scale = 0.8660254
 Nav_Ball_Field_Vy_Scale = 0.5
-Nav_Push_Execute_Forward_Speed = 28.0    #执行阶段前进速度
+Nav_Push_Execute_Forward_Speed = 32.0    #执行阶段前进速度
 Nav_Push_Execute_Gyro_Limit = 16.0
 Nav_Ball_Push_Gyro_Limit = 22.0
 Nav_Push_Line_Lost_Ms = 150
@@ -213,7 +213,7 @@ Nav_Return_Back_Ms = 250
 Nav_Return_Shift_Hold_Ms = 600
 Nav_Return_Turn_Dir = 1
 Nav_Search_Spin_Dir = 1
-Nav_Return_Final_Back_Speed = 28.0
+Nav_Return_Final_Back_Speed = 34.0
 Nav_Return_Final_Line_Extra_Ms = 50
 Nav_Return_Turn_Ok_Yaw = 2
 Nav_Return_Turn_Ok_Ms = 200
@@ -1244,9 +1244,16 @@ def update_nav_state_and_targets(yaw_deg, low_speed, prepare_low_speed, gyro_z):
         if not seen:
             cam_target_vx = 0.0
             cam_target_vy = 0.0
-            nav_push_prepare_ok_since_ms = 0
+            if (
+                nav_push_prepare_ok_since_ms == 0
+                and utime.ticks_diff(now, nav_transition_ms) >= Nav_Transition_Grace_Ms
+            ):
+                cam_uart.write(ART_MODE_FINE_CMD)
+                nav_push_prepare_ok_since_ms = -1
             nav_push_prepare_back_since_ms = 0
             return
+        if nav_push_prepare_ok_since_ms < 0:
+            nav_push_prepare_ok_since_ms = 0
         prepare_error_x = cam_error_x
         close_lateral = abs(prepare_error_x) <= Nav_Push_Prepare_Kick_X
         prepare_braking = False

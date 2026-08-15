@@ -27,7 +27,7 @@ MOTOR_DUTY_MIN = cfg.MOTOR_DUTY_MIN
 PWM_SMOOTH_FACTOR = cfg.PWM_SMOOTH_FACTOR
 # PWM 单次最大变化量（防冲击）
 MAX_PWM_CHANGE = cfg.MAX_PWM_CHANGE
-Nav_Wheel_Target_Limit = 34.0
+Nav_Wheel_Target_Limit = 38.0
 
 GYRO_SIGN = 1.0
 
@@ -149,7 +149,7 @@ Nav_Push_Orbit_Fast_Rate = 165.0
 Nav_Push_Orbit_Slow_Rate = 105.0
 Nav_Push_Orbit_End_Rate = 28
 Nav_Push_Orbit_Gyro_Limit = 28.0
-Nav_Push_Turn_Rate_Scale = 1.15
+Nav_Push_Turn_Rate_Scale = 1.25
 Nav_Push_Orbit_Radius_Base = 2.0   #orbit 基础半径系数，实际轨迹半径=该系数 * 车轮轴距；如果轨迹过大或过小可以调整该值
 Nav_Push_Orbit_Radius_Gain = 0.010
 Nav_Push_Orbit_Quarter_Radius = 2.4
@@ -169,7 +169,7 @@ Nav_Push_Prepare_Kick_Vy = 6.2
 Nav_Push_Prepare_Kick_Ms = 80
 Nav_Push_Prepare_Back_Ms = 90
 Nav_Push_Prepare_Back_Speed = 6.2
-Nav_Push_Prepare_Ok_X = 5    #准备阶段前进误差小于该值即认为横移准备就绪
+Nav_Push_Prepare_Ok_X = 7    #准备阶段前进误差小于该值即认为横移准备就绪
 Nav_Push_Prepare_Ok_Y_Min = -8
 Nav_Push_Prepare_Ok_Y_Max = 8  #准备阶段横移误差小于该值即认为前进准备就绪
 Nav_Push_Prepare_Ok_Yaw = 6   #准备阶段定向误差小于该值即认为定向准备就绪
@@ -189,7 +189,7 @@ Nav_Push_Back_Speed = 28.0
 Nav_Push_Back_Ms = 600
 Nav_Push_Turn_Slow_Yaw = 95.0
 Nav_Push_Turn_Fast_Rate = 165.0
-Nav_Push_Turn_Slow_Rate = 35.0
+Nav_Push_Turn_Slow_Rate = 50.0
 Nav_Push_Turn_Gyro_Limit = 18.0
 Nav_Push_Turn_Gyro_Kp = 0.04
 Nav_Push_Turn_Gyro_Ki = 0.002
@@ -204,7 +204,7 @@ Nav_Post_Turn_No_Target_Ms = 100
 Nav_Post_Turn_Forward_Ms = 1500
 Nav_Post_Turn_Forward_Speed = 22.0
 Nav_Object_Total = 2
-Nav_Return_Left_Speed = 30.0
+Nav_Return_Left_Speed = 36.0
 Nav_Return_Left_Start_Yaw = 4.0
 Nav_Return_Left_Max_Ms = 10000
 Nav_Return_Back_Speed = 16.0
@@ -212,10 +212,10 @@ Nav_Return_Back_Ms = 250
 Nav_Return_Shift_Hold_Ms = 600
 Nav_Return_Turn_Dir = 1
 Nav_Search_Spin_Dir = 1
-Nav_Return_Final_Back_Speed = 24.0
-Nav_Return_Final_Line_Extra_Ms = 60
+Nav_Return_Final_Back_Speed = 28.0
+Nav_Return_Final_Line_Extra_Ms = 50
 Nav_Return_Turn_Ok_Yaw = 2
-Nav_Return_Turn_Ok_Ms = 700
+Nav_Return_Turn_Ok_Ms = 200
 Nav_Return_Max_Ms = 6000
 
 # ====================== 全局状态变量 ======================

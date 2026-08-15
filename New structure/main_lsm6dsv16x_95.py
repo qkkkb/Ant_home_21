@@ -149,6 +149,7 @@ Nav_Push_Orbit_Fast_Rate = 165.0
 Nav_Push_Orbit_Slow_Rate = 105.0
 Nav_Push_Orbit_End_Rate = 28
 Nav_Push_Orbit_Gyro_Limit = 28.0
+Nav_Push_Turn_Rate_Scale = 1.15
 Nav_Push_Orbit_Radius_Base = 2.0   #orbit 基础半径系数，实际轨迹半径=该系数 * 车轮轴距；如果轨迹过大或过小可以调整该值
 Nav_Push_Orbit_Radius_Gain = 0.010
 Nav_Push_Orbit_Quarter_Radius = 2.4
@@ -161,11 +162,11 @@ Nav_Push_Prepare_Forward_Gain = 0.038
 Nav_Push_Prepare_Lateral_Gain = 0.115
 Nav_Push_Prepare_Forward_Limit = 5.8
 Nav_Push_Prepare_Lateral_Limit = 8.0
-Nav_Push_Prepare_Min_Vx = 2.4
-Nav_Push_Prepare_Min_Vy = 4.8
+Nav_Push_Prepare_Min_Vx = 4.0
+Nav_Push_Prepare_Min_Vy = 6.2
 Nav_Push_Prepare_Kick_X = 18
 Nav_Push_Prepare_Kick_Vy = 6.2
-Nav_Push_Prepare_Kick_Ms = 40
+Nav_Push_Prepare_Kick_Ms = 80
 Nav_Push_Prepare_Back_Ms = 90
 Nav_Push_Prepare_Back_Speed = 6.2
 Nav_Push_Prepare_Ok_X = 5    #准备阶段前进误差小于该值即认为横移准备就绪
@@ -173,13 +174,13 @@ Nav_Push_Prepare_Ok_Y_Min = -8
 Nav_Push_Prepare_Ok_Y_Max = 8  #准备阶段横移误差小于该值即认为前进准备就绪
 Nav_Push_Prepare_Ok_Yaw = 6   #准备阶段定向误差小于该值即认为定向准备就绪
 Nav_Ball_Push_Yaw_Offset = 30.0
-Nav_Bear_Push_Execute_Forward_Speed = 28.0
-Nav_Bear_Push_Ms = 1700
-Nav_Ball_Push_Execute_Forward_Speed = 28.0
-Nav_Ball_Push_Ms = 570
+Nav_Bear_Push_Execute_Forward_Speed = 32.0
+Nav_Bear_Push_Ms = 1500
+Nav_Ball_Push_Execute_Forward_Speed = 32.0
+Nav_Ball_Push_Ms = 500
 Nav_Ball_Field_Vx_Scale = 0.8660254
 Nav_Ball_Field_Vy_Scale = 0.5
-Nav_Push_Execute_Forward_Speed = 24.0    #执行阶段前进速度
+Nav_Push_Execute_Forward_Speed = 28.0    #执行阶段前进速度
 Nav_Push_Execute_Gyro_Limit = 16.0
 Nav_Ball_Push_Gyro_Limit = 22.0
 Nav_Push_Line_Lost_Ms = 150
@@ -1180,7 +1181,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
             push_orbit_brake_since_ms = 0
             if push_orbit_dir == 0:
                 push_orbit_done = True
-                nav_set_state(NAV_STATE_FINE)
+                nav_set_state(NAV_STATE_PUSH_PREPARE)
             else:
                 nav_set_state(NAV_STATE_PUSH_ORIENT)
         elif utime.ticks_diff(now, nav_transition_ms) >= Nav_Classify_Timeout_Ms:
@@ -1219,7 +1220,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, gyro_z):
                 brake_elapsed = utime.ticks_diff(now, push_orbit_brake_since_ms)
             if abs(gyro_z) <= Nav_Push_Orbit_Stop_Gyro_Th or brake_elapsed >= Nav_Push_Orbit_Brake_Max_Ms:
                 push_orbit_done = True
-                nav_set_state(NAV_STATE_FINE)
+                nav_set_state(NAV_STATE_PUSH_PREPARE)
         else:
             push_orbit_brake_since_ms = 0
         if utime.ticks_diff(now, nav_transition_ms) >= Nav_Push_Orient_Max_Ms:
@@ -1776,6 +1777,8 @@ def calc_speed_closed_loop():
                 turn_dir,
                 push_turn_reached_once,
             )
+            if not push_turn_reached_once:
+                turn_rate_cmd = turn_rate_cmd * Nav_Push_Turn_Rate_Scale
         gyro_rate_mode = True
     elif nav_state == NAV_STATE_RETURN_TURN:
         if push_turn_settle:

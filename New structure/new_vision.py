@@ -911,22 +911,22 @@ while True:
         uart_data = uart.read()
         if uart_data:
             uart_rx_buf += uart_data
-            if uart_rx_buf.endswith(SEARCH_TRIGGER):
+            if SEARCH_TRIGGER in uart_rx_buf:
                 set_detect_mode("SEARCH", "TRIGGER->SEARCH")
                 uart_rx_buf = bytearray()
-            elif uart_rx_buf.endswith(COARSE_TRIGGER):
+            elif COARSE_TRIGGER in uart_rx_buf:
                 set_detect_mode("COARSE", "TRIGGER->COARSE")
                 uart_rx_buf = bytearray()
-            elif uart_rx_buf.endswith(FINE_TRIGGER):
+            elif FINE_TRIGGER in uart_rx_buf:
                 set_detect_mode("FINE", "TRIGGER->FINE")
                 uart_rx_buf = bytearray()
-            elif uart_rx_buf.endswith(CLASSIFY_TRIGGER):
+            elif CLASSIFY_TRIGGER in uart_rx_buf:
                 set_detect_mode("CLASSIFY", "TRIGGER->CLASSIFY")
                 uart_rx_buf = bytearray()
-            elif uart_rx_buf.endswith(LINE_TRIGGER):
+            elif LINE_TRIGGER in uart_rx_buf:
                 set_detect_mode("LINE", "TRIGGER->LINE")
                 uart_rx_buf = bytearray()
-            elif uart_rx_buf.endswith(IDLE_TRIGGER):
+            elif IDLE_TRIGGER in uart_rx_buf:
                 set_detect_mode("IDLE", "TRIGGER->IDLE")
                 uart_rx_buf = bytearray()
             elif len(uart_rx_buf) > 20:

@@ -6,6 +6,10 @@ from seekfree import WIRELESS_UART
 
 _FRAME_LEN = 16
 _TX_PERIOD_MS = cfg.MASTER_MOTION_TX_PERIOD_MS
+_DIAG_ENABLE = cfg.MASTER_MOTION_DIAG_ENABLE
+_DIAG_PERIOD_MS = cfg.MASTER_MOTION_DIAG_PERIOD_MS
+_DIAG_BUF_SIZE = 68
+_HEX = b"0123456789ABCDEF"
 _PREVIEW_SCALE = 2.0
 _STATE_PREVIEW = 0x80
 _FLAG_STARTED = 0x01
@@ -22,8 +26,10 @@ _WZ_DEADBAND = 0.8
 
 _wireless = None
 _tx_buf = None
+_diag_buf = None
 _seq = 0
 _last_tx_ms = 0
+_last_diag_ms = 0
 _last_state_code = -1
 _motion_est = None
 _vx = 0.0
@@ -35,8 +41,9 @@ _wheel_b = 0.0
 
 
 def init():
-    global _wireless, _tx_buf, _motion_est
+    global _wireless, _tx_buf, _diag_buf, _motion_est
     _tx_buf = bytearray(16)
+    _diag_buf = bytearray(_DIAG_BUF_SIZE) if _DIAG_ENABLE else None
     _motion_est = MoveBase()
     try:
         _wireless = WIRELESS_UART(cfg.COOP_WIRELESS_BAUD)
@@ -97,6 +104,56 @@ def _put_i8(idx, value):
     elif value < -128:
         value = -128
     _tx_buf[idx] = value & 0xFF
+
+
+def _diag_hex8(buf, pos, value):
+    buf[pos] = _HEX[(value >> 4) & 15]
+    buf[pos + 1] = _HEX[value & 15]
+    return pos + 2
+
+
+def _diag_hex16(buf, pos, value):
+    value = int(value) & 0xFFFF
+    pos = _diag_hex8(buf, pos, value >> 8)
+    return _diag_hex8(buf, pos, value)
+
+
+def _send_diag(now, cmd_vx, cmd_vy, cmd_wz):
+    global _last_diag_ms
+    if (
+        _diag_buf is None
+        or utime.ticks_diff(now, _last_diag_ms) < _DIAG_PERIOD_MS
+    ):
+        return
+    _last_diag_ms = now
+    try:
+        buf = _diag_buf
+        buf[0] = 77
+        buf[1] = 32
+        pos = 2
+        pos = _diag_hex16(buf, pos, now)
+        buf[pos] = 32
+        pos += 1
+        i = 0
+        while i < _FRAME_LEN:
+            pos = _diag_hex8(buf, pos, _tx_buf[i])
+            i += 1
+        buf[pos] = 32
+        pos += 1
+        pos = _diag_hex16(buf, pos, _vx * 10.0)
+        pos = _diag_hex16(buf, pos, _vy * 10.0)
+        pos = _diag_hex16(buf, pos, _wz * 10.0)
+        buf[pos] = 32
+        pos += 1
+        pos = _diag_hex16(buf, pos, cmd_vx * 10.0)
+        pos = _diag_hex16(buf, pos, cmd_vy * 10.0)
+        pos = _diag_hex16(buf, pos, cmd_wz * 10.0)
+        buf[pos] = 13
+        pos += 1
+        buf[pos] = 10
+        _wireless.send_bytearray(buf, pos + 1)
+    except Exception:
+        pass
 
 
 def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_vy, cmd_wz):
@@ -236,4 +293,5 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
         _last_tx_ms = now
         _last_state_code = state_code & 0x7F
     except Exception:
-        pass
+        return
+    _send_diag(now, cmd_vx, cmd_vy, cmd_wz)

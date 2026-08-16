@@ -1011,6 +1011,9 @@ def calc_follow_yaw_output(
         elif spin_mode_active:
             gyro_pid.gyro_ki = GYRO_TURN_KI
             gyro_pid.gyro_output_limit = 18.0
+        elif orbit_entry_active:
+            gyro_pid.gyro_ki = GYRO_KI
+            gyro_pid.gyro_output_limit = 32.0
         elif orbit_mode_active:
             gyro_pid.gyro_ki = GYRO_TURN_KI
             gyro_pid.gyro_output_limit = GYRO_ORBIT_OUTPUT_LIMIT
@@ -1517,8 +1520,8 @@ def update_follow_targets(gyro_z):
             # PUSH_BACK changes direction in about 200 ms.  Give that state
             # enough response to stay with the measured leader motion; keep
             # the slower, previously validated ramp for return-back states.
-            reverse_vx_ramp = 0.65 if back_follow else 0.4
-            reverse_vy_ramp = 0.85 if back_follow else 0.6
+            reverse_vx_ramp = 2.0 if back_follow else 0.4
+            reverse_vy_ramp = 2.5 if back_follow else 0.6
             vx = ramp_value(vx, last_cmd_vx, reverse_vx_ramp)
             vy = ramp_value(vy, last_cmd_vy, reverse_vy_ramp)
             body_vx = vx - alloc_base_vx

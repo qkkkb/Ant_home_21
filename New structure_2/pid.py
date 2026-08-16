@@ -196,7 +196,7 @@ def push_correction_envelope(out, state, error_x, error_y, base_vx, moving_push)
     if error_x:
         state[2] = error_x
 
-    target = _clamp((abs(error_y) - 6.0) / 24.0, 0.0, 1.0)
+    target = _clamp((abs(error_y) - 4.0) / 20.0, 0.0, 1.0)
     if state[3] * error_y < 0:
         state[1] = 0.0
     elif state[1] < target:

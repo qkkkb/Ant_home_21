@@ -1556,7 +1556,7 @@ def update_follow_targets(gyro_z):
         vy = clamp(vy, -vy_limit, vy_limit)
     elif push_follow_active:
         _pid_mod.push_correction_envelope(
-            control_buf, follow_state, cam_error_x, cam_error_y,
+            control_buf, follow_state, cam_error_x, cam_error_y + 6,
             alloc_base_vx, explicit_push,
         )
         push_catchup_limit = control_buf[0]

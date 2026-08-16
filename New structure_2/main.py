@@ -603,7 +603,8 @@ def solve_follow_pose_twist(
             -Follow_Distance_Close_Limit,
             0.0,
         )
-    body_vx = -body_vx
+    if not push_mode:
+        body_vx = -body_vx
     deadband = (
         _Follow_Orbit_Lateral_Deadband
         if position_priority
@@ -1513,17 +1514,19 @@ def update_follow_targets(gyro_z):
         last_cmd_vy = alloc_base_vy + follow_state[5]
     if not (classification_exit and not mode_key):
         if reverse_follow and not mode_key:
-            # Start on the first preview frame, but limit chassis acceleration
-            # instead of stepping directly to the combined reverse target.
-            # PUSH_BACK changes direction in about 100 ms.  Give that state
-            # enough response to stay with the measured leader motion; keep
-            # the slower, previously validated ramp for return-back states.
-            reverse_vx_ramp = 4.0 if back_follow else 0.4
-            reverse_vy_ramp = 5.0 if back_follow else 0.6
-            vx = ramp_value(vx, last_cmd_vx, reverse_vx_ramp)
-            vy = ramp_value(vy, last_cmd_vy, reverse_vy_ramp)
-            body_vx = vx - alloc_base_vx
-            body_vy = vy - alloc_base_vy
+            if back_follow:
+                # State 8 is already a coordinated reversal.  The motor
+                # layer handles its direction dead-time; do not add a
+                # second chassis-level delay here.
+                body_vx = vx - alloc_base_vx
+                body_vy = vy - alloc_base_vy
+            else:
+                reverse_vx_ramp = 0.4
+                reverse_vy_ramp = 0.6
+                vx = ramp_value(vx, last_cmd_vx, reverse_vx_ramp)
+                vy = ramp_value(vy, last_cmd_vy, reverse_vy_ramp)
+                body_vx = vx - alloc_base_vx
+                body_vy = vy - alloc_base_vy
         elif recovery_follow and not mode_key:
             # Apply the leader motion immediately.  Ramp only relative-pose
             # correction so reverse starts together without a later chase.

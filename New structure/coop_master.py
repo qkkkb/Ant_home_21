@@ -184,7 +184,6 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
         elif (
             state_code == 2
             or state_code == 3
-            or state_code == 8
             or state_code == 12
             or state_code == 14
         ):
@@ -196,6 +195,12 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             preview_frame = True
             vx = _vx
             vy = _vy
+            wz = _wz
+        elif state_code == 8:
+            # Push-back is an intentional reversal.  Publish the command
+            # immediately so the follower changes direction with the leader.
+            vx = cmd_vx
+            vy = cmd_vy
             wz = _wz
         elif state_code == 6:
             # Push preparation is strict following: publish measured motion as

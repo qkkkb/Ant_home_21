@@ -372,8 +372,6 @@ def update_spin_feedforward_latch(now, fresh_motion, explicit_spin, ff_wz, seen,
         ff_wz >= Follow_Spin_Latch_Min_Wz
         or ff_wz <= -Follow_Spin_Latch_Min_Wz
     ):
-        if last_follow_mode_key == 0:
-            reset_speed_outputs(True)
         spin_latched_wz = ff_wz
         spin_latch_until_ms = utime.ticks_add(now, _Follow_Spin_Command_Hold_Ms)
         return ff_wz
@@ -1517,11 +1515,11 @@ def update_follow_targets(gyro_z):
         if reverse_follow and not mode_key:
             # Start on the first preview frame, but limit chassis acceleration
             # instead of stepping directly to the combined reverse target.
-            # PUSH_BACK changes direction in about 200 ms.  Give that state
+            # PUSH_BACK changes direction in about 100 ms.  Give that state
             # enough response to stay with the measured leader motion; keep
             # the slower, previously validated ramp for return-back states.
-            reverse_vx_ramp = 2.0 if back_follow else 0.4
-            reverse_vy_ramp = 2.5 if back_follow else 0.6
+            reverse_vx_ramp = 4.0 if back_follow else 0.4
+            reverse_vy_ramp = 5.0 if back_follow else 0.6
             vx = ramp_value(vx, last_cmd_vx, reverse_vx_ramp)
             vy = ramp_value(vy, last_cmd_vy, reverse_vy_ramp)
             body_vx = vx - alloc_base_vx
@@ -1574,11 +1572,15 @@ def update_follow_targets(gyro_z):
             -push_brake_limit,
             push_catchup_limit,
         )
-        body_vy = clamp(
-            vy - alloc_base_vy,
-            -push_lateral_limit,
-            push_lateral_limit,
-        )
+        if explicit_push and seen:
+            body_vy = (
+                soft_deadband(cam_error_y + 6, 1, 2) * Follow_Lateral_Gain
+                - (actual_body_vy - alloc_base_vy)
+                * Follow_Push_Velocity_Damping
+            )
+        else:
+            body_vy = vy - alloc_base_vy
+        body_vy = clamp(body_vy, -push_lateral_limit, push_lateral_limit)
         vx = alloc_base_vx + body_vx
         vy = alloc_base_vy + body_vy
     if not fresh_motion and recovery_follow:

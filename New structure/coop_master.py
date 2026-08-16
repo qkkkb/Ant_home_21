@@ -244,8 +244,10 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             wz = cmd_wz
         elif state_code == 9:
             flags |= _FLAG_SPIN
-            vx = cmd_vx
-            vy = cmd_vy
+            # Preserve the measured reverse tail while push-back transitions
+            # into spin; the command has already stepped to zero here.
+            vx = _vx
+            vy = _vy
             wz = cmd_wz
         elif state_code == 13:
             flags |= _FLAG_ORBIT

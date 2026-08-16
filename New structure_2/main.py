@@ -123,7 +123,7 @@ Follow_Normal_Conflict_Stop_Error = 16
 Follow_Normal_Preview_Gain = 0.50
 Follow_Normal_Velocity_Damping = 0.42
 Follow_Push_Velocity_Damping = 0.75
-Follow_Push_Lateral_Feedforward_Scale = 0.50
+Follow_Push_Lateral_Feedforward_Scale = 0.60
 _Follow_Push_Emergency_Error = const(48)
 Follow_Safety_Speed_Margin = 0.12
 _Master_State_Preview_Flag = const(0x80)
@@ -1535,9 +1535,12 @@ def update_follow_targets(gyro_z):
                 vy = ramp_value(vy, last_cmd_vy, reverse_vy_ramp)
                 body_vx = vx - alloc_base_vx
                 body_vy = vy - alloc_base_vy
-        elif recovery_follow and not mode_key:
-            # Apply the leader motion immediately.  Ramp only relative-pose
-            # correction so reverse starts together without a later chase.
+        elif (
+            recovery_follow
+            or (fresh_motion and master_state_code == 10)
+        ) and not mode_key:
+            # Apply leader motion immediately after recovery or turn exit.
+            # Ramp only relative-pose correction to avoid a later chase.
             body_vx = ramp_value(
                 vx - alloc_base_vx,
                 last_cmd_vx - last_ff_vx,

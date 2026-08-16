@@ -1564,7 +1564,7 @@ def update_follow_targets(gyro_z):
     elif push_follow_active:
         _pid_mod.push_correction_envelope(
             control_buf, follow_state, cam_error_x,
-            cam_error_y + (10 if explicit_push else 6),
+            cam_error_y + (13 if explicit_push else 6),
             alloc_base_vx, explicit_push,
         )
         push_catchup_limit = control_buf[0]
@@ -1584,7 +1584,7 @@ def update_follow_targets(gyro_z):
         )
         if explicit_push and seen:
             body_vy = (
-                soft_deadband(cam_error_y + 10, 1, 2) * Follow_Lateral_Gain
+                soft_deadband(cam_error_y + 13, 1, 2) * Follow_Lateral_Gain
                 - (actual_body_vy - alloc_base_vy)
                 * Follow_Push_Velocity_Damping
             )

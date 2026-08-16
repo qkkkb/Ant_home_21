@@ -562,8 +562,6 @@ def solve_follow_pose_twist(
     # Vision already reports independent position and heading errors.
     cam_vx = error_x
     cam_vy = error_y
-    if push_mode:
-        cam_vx += 6
     if orbit_mode or spin_mode:
         position_priority = (
             (angle_active and (not spin_mode))

@@ -208,8 +208,8 @@ def push_correction_envelope(out, state, error_x, error_y, base_vx, moving_push)
     if error_y:
         state[3] = error_y
 
-    out[0] = 8.0 + 10.0 * state[0]
-    brake_limit = 6.0 + 6.0 * state[0]
+    out[0] = 4.0 + 2.0 * state[0]
+    brake_limit = 4.0 + 5.0 * state[0]
     if moving_push and base_vx > 0.0:
         moving_limit = base_vx - 1.0 if base_vx > 1.0 else 0.0
         if brake_limit > moving_limit:

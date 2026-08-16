@@ -603,8 +603,7 @@ def solve_follow_pose_twist(
             -Follow_Distance_Close_Limit,
             0.0,
         )
-    if not push_mode:
-        body_vx = -body_vx
+    body_vx = -body_vx
     deadband = (
         _Follow_Orbit_Lateral_Deadband
         if position_priority

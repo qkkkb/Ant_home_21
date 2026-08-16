@@ -679,6 +679,11 @@ def solve_follow_pose_twist(
             )
             target_ff_vx = ff_vx + ff_wz * 0.08
             target_ff_vy = ff_vy + ff_wz * Follow_Spin_Target_Point_Wz_To_Vy
+            ff_scale = (
+                clamp(error_y / 48.0, 0.15, 0.75)
+                if master_state_code == 9
+                else 0.15
+            )
             vx = add_feedforward_direct(
                 target_ff_vx,
                 vx,
@@ -691,7 +696,7 @@ def solve_follow_pose_twist(
                 vy,
                 1.0,
                 Follow_Lateral_Limit,
-                0.15,
+                ff_scale,
             )
             wz = add_feedforward_direct(
                 wz,
@@ -1461,6 +1466,8 @@ def update_follow_targets(gyro_z):
     )
     if master_flags & MASTER_MOTION_FLAG_RETURN:
         vy_limit = Follow_Return_Lateral_Limit
+    elif back_follow:
+        vy_limit = 38.0
     elif push_follow_active:
         vy_limit = 27.0
     else:
@@ -1556,7 +1563,8 @@ def update_follow_targets(gyro_z):
         vy = clamp(vy, -vy_limit, vy_limit)
     elif push_follow_active:
         _pid_mod.push_correction_envelope(
-            control_buf, follow_state, cam_error_x, cam_error_y + 6,
+            control_buf, follow_state, cam_error_x,
+            cam_error_y + (10 if explicit_push else 6),
             alloc_base_vx, explicit_push,
         )
         push_catchup_limit = control_buf[0]
@@ -1576,7 +1584,7 @@ def update_follow_targets(gyro_z):
         )
         if explicit_push and seen:
             body_vy = (
-                soft_deadband(cam_error_y + 6, 1, 2) * Follow_Lateral_Gain
+                soft_deadband(cam_error_y + 10, 1, 2) * Follow_Lateral_Gain
                 - (actual_body_vy - alloc_base_vy)
                 * Follow_Push_Velocity_Damping
             )

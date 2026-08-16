@@ -237,9 +237,7 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             wz = cmd_wz
         elif state_code == 7:
             flags |= _FLAG_PUSH
-            preview_vx = cmd_vx - _vx
-            preview_vy = cmd_vy - _vy
-            preview_frame = True
+            # PUSH broadcasts measured translation only; do not send command preview.
             vx = _vx
             vy = _vy
             wz = cmd_wz

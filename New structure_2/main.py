@@ -123,6 +123,7 @@ Follow_Normal_Conflict_Stop_Error = 16
 Follow_Normal_Preview_Gain = 0.50
 Follow_Normal_Velocity_Damping = 0.42
 Follow_Push_Velocity_Damping = 0.75
+Follow_Push_Lateral_Feedforward_Scale = 0.90
 _Follow_Push_Emergency_Error = const(48)
 Follow_Safety_Speed_Margin = 0.12
 _Master_State_Preview_Flag = const(0x80)
@@ -1126,10 +1127,14 @@ def update_follow_targets(gyro_z):
         measured_ff_vy = 0.0
         ff_vx = 0.0
         ff_vy = 0.0
+    raw_ff_vy = ff_vy
     ff_wz = master_wz if fresh_motion else 0.0
     explicit_orbit = fresh_motion and (master_flags & MASTER_MOTION_FLAG_ORBIT)
     explicit_push = fresh_motion and (master_flags & MASTER_MOTION_FLAG_PUSH)
     explicit_spin = fresh_motion and (master_flags & MASTER_MOTION_FLAG_SPIN)
+    if explicit_push:
+        measured_ff_vy *= Follow_Push_Lateral_Feedforward_Scale
+        ff_vy *= Follow_Push_Lateral_Feedforward_Scale
     back_follow = master_flags & MASTER_MOTION_FLAG_BACK
     return_follow = master_flags & MASTER_MOTION_FLAG_RETURN
     recovery_follow = back_follow or return_follow
@@ -1690,7 +1695,7 @@ def update_follow_targets(gyro_z):
     last_turn_rate_cmd = turn_rate_cmd
     last_follow_seen = seen
     last_ff_vx = ff_vx
-    last_ff_vy = ff_vy
+    last_ff_vy = raw_ff_vy
     last_ff_wz = follow_ff_wz
     last_control_master_state = master_state_code
     return vz_cmd

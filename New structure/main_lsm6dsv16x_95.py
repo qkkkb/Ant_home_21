@@ -1325,7 +1325,7 @@ def update_nav_state_and_targets(yaw_deg, low_speed, prepare_low_speed, gyro_z):
                 Nav_Push_Execute_Forward_Speed * Nav_Ball_Field_Vy_Scale
             )
             yaw_ref_deg = push_yaw_target
-            if utime.ticks_diff(now, nav_transition_ms) >= 800:
+            if utime.ticks_diff(now, nav_transition_ms) >= 1100:
                 nav_set_state(NAV_STATE_PUSH_BACK)
             return
         if push_dir_code == Push_Dir_Right:

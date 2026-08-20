@@ -48,7 +48,7 @@ class Capture:
 
 
 class OrbitProtocolTest(unittest.TestCase):
-    def test_normal_orbit_keeps_body_motion_and_search_sends_wheels(self):
+    def test_normal_orbit_and_search_spin_keep_body_motion(self):
         module = load_coop_master()
         capture = Capture()
         module._wireless = capture
@@ -67,21 +67,22 @@ class OrbitProtocolTest(unittest.TestCase):
         self.assertEqual(normal[14], 5)
         self.assertEqual(search[14], 16)
         self.assertTrue(normal[13] & 0x08)
-        self.assertTrue(search[13] & 0x08)
-        self.assertNotEqual(normal[5:13], search[5:13])
+        self.assertFalse(search[13] & 0x08)
+        self.assertTrue(search[13] & 0x10)
+        self.assertEqual(normal[5:13], search[5:13])
         self.assertAlmostEqual(
             int.from_bytes(search[5:7], "little", signed=True) / 10.0,
-            11.1,
+            12.3,
             places=1,
         )
         self.assertAlmostEqual(
             int.from_bytes(search[7:9], "little", signed=True) / 10.0,
-            22.2,
+            -4.5,
             places=1,
         )
         self.assertAlmostEqual(
             int.from_bytes(search[9:11], "little", signed=True) / 10.0,
-            33.3,
+            70.0,
             places=1,
         )
         self.assertAlmostEqual(
@@ -104,45 +105,21 @@ class OrbitProtocolTest(unittest.TestCase):
             source,
         )
 
-    def test_search_spin_uses_the_direct_wheel_entry(self):
+    def test_search_spin_uses_body_twist_spin_entry(self):
         with open(FOLLOWER_MAIN_PATH, "r", encoding="utf-8") as source_file:
             source = source_file.read()
 
+        self.assertNotIn("if raw_state_code == 16:", source)
         self.assertIn(
-            "if master_state_code == 16:\n"
-            "        return update_spin_wheel_targets",
-            source,
-        )
-        self.assertIn(
-            "if not fresh_motion:\n"
-            "        reset_speed_outputs()",
-            source,
-        )
-        self.assertNotIn(
-            "master_state_code == 16\n"
-            "                or utime.ticks_diff(now, target_lost_since_ms)",
-            source,
-        )
-        self.assertIn("def update_spin_wheel_targets", source)
-        self.assertIn("State 16 stays in wheel space", source)
-        self.assertIn("base_fr = anchor_speed", source)
-        self.assertIn(
-            "pair_center = (3.0 * spin_wheel_rate - base_fr) * 0.5",
+            "explicit_spin and master_state_code != 16",
             source,
         )
         self.assertIn(
-            "orbit_drive = spin_wheel_rate * Follow_Spin_Orbit_Drive_Gain",
+            "elif last_follow_mode_key == 0 and mode_key == 3:",
             source,
         )
-        self.assertIn("base_fl = pair_center + orbit_drive", source)
-        self.assertIn("base_b = pair_center - orbit_drive", source)
-        self.assertIn(
-            "visual_mean = (",
-            source,
-        )
-        self.assertNotIn("Follow_Spin_Pivot_Offset", source)
-        self.assertIn("base_fl = pair_center + orbit_drive", source)
-        self.assertIn("if not direct_wheel_mode:", source)
+        self.assertIn("if master_state_code == 16:", source)
+        self.assertIn("ff_wz = clamp(ff_wz, -160.0, 160.0)", source)
 
 
 if __name__ == "__main__":

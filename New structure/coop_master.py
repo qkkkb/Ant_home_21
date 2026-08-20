@@ -160,13 +160,12 @@ def send_if_due(now, car_started, state_code, target_seen, yaw_deg, cmd_vx, cmd_
             vy = 0.0
             wz = cmd_wz
         elif state_code == 16:
-            flags |= _FLAG_ORBIT
-            # Search spin publishes measured wheel speeds.  The follower
-            # keeps its front-right wheel anchored to the leader front-left
-            # wheel instead of copying the leader body twist.
-            vx = _wheel_fl
-            vy = _wheel_fr
-            wz = _wheel_b
+            flags |= _FLAG_SPIN
+            # Search spin uses the same body-twist contract as the current
+            # controller: measured translation plus commanded yaw rate.
+            vx = _vx
+            vy = _vy
+            wz = cmd_wz
         elif state_code == 5:
             flags |= _FLAG_ORBIT
             # Normal orbit keeps the existing body-twist contract.

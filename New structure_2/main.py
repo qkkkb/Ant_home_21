@@ -68,7 +68,7 @@ Follow_Orbit_Forward_Gain = 1.00
 Follow_Orbit_Lateral_Gain = 0.92
 Follow_Forward_Limit = 38.0
 Follow_Lateral_Limit = 30.0
-Follow_Return_Lateral_Limit = 32.0
+Follow_Return_Lateral_Limit = 36.0
 _Follow_Forward_Deadband = const(2)
 _Follow_Lateral_Deadband = const(2)
 _Follow_Orbit_Forward_Deadband = const(2)
@@ -622,7 +622,11 @@ def solve_follow_pose_twist(
             Follow_Lateral_Limit,
         )
     if (not orbit_mode) and (not spin_mode):
-        body_vx *= Follow_Normal_Visual_Forward_Scale
+        body_vx *= (
+            0.90
+            if master_state_code == 11
+            else Follow_Normal_Visual_Forward_Scale
+        )
     if (
         use_ff
         and not spin_mode
@@ -670,11 +674,14 @@ def solve_follow_pose_twist(
                 Follow_Orbit_Wz_Feedforward_Limit,
             )
         elif spin_mode:
-            ff_wz = clamp(
-                ff_wz * Follow_Spin_Wz_Feedforward_Gain,
-                -Follow_Spin_Wz_Feedforward_Limit,
-                Follow_Spin_Wz_Feedforward_Limit,
-            )
+            if master_state_code == 16:
+                ff_wz = clamp(ff_wz, -160.0, 160.0)
+            else:
+                ff_wz = clamp(
+                    ff_wz * Follow_Spin_Wz_Feedforward_Gain,
+                    -Follow_Spin_Wz_Feedforward_Limit,
+                    Follow_Spin_Wz_Feedforward_Limit,
+                )
             target_ff_vx = ff_vx + ff_wz * 0.08
             target_ff_vy = ff_vy + ff_wz * Follow_Spin_Target_Point_Wz_To_Vy
             vx = add_feedforward_direct(
@@ -684,18 +691,25 @@ def solve_follow_pose_twist(
                 Follow_Forward_Limit,
                 0.15,
             )
+            ff_scale = (
+                clamp(error_y / 48.0, 0.15, 0.75)
+                if master_state_code == 16
+                else 0.15
+            )
             vy = add_feedforward_direct(
                 target_ff_vy * 1.05,
                 vy,
                 1.0,
                 Follow_Lateral_Limit,
-                0.15,
+                ff_scale,
             )
             wz = add_feedforward_direct(
                 wz,
                 ff_wz,
                 1.0,
-                Follow_Spin_Wz_Feedforward_Limit,
+                160.0
+                if master_state_code == 16
+                else Follow_Spin_Wz_Feedforward_Limit,
             )
         else:
             point_wz = clamp(
@@ -762,10 +776,15 @@ def solve_follow_pose_twist(
             Follow_Orbit_Turn_Rate_Limit,
         )
     elif spin_mode and Follow_Spin_Turn_Rate_Limit > 0.0:
+        spin_limit = (
+            160.0
+            if master_state_code == 16
+            else Follow_Spin_Turn_Rate_Limit
+        )
         wz = clamp(
             wz,
-            -Follow_Spin_Turn_Rate_Limit,
-            Follow_Spin_Turn_Rate_Limit,
+            -spin_limit,
+            spin_limit,
         )
     out[0] = vx
     out[1] = vy
@@ -849,23 +868,11 @@ def handle_coop_frame(msg_type, seq, payload, payload_len):
     master_state_code = raw_state_code
     master_preview_vx = master_preview_vy = 0.0
     master_orbit_wz = 0.0
-    if raw_state_code == 16:
-        # Search-spin frames carry wheel speeds.  Convert them once at the
-        # protocol boundary, then reuse the normal orbit controller below.
-        wheel_fl = decode_i16(payload, 0) / 10.0
-        wheel_fr = decode_i16(payload, 2) / 10.0
-        wheel_b = decode_i16(payload, 4) / 10.0
-        master_vx = (wheel_fl - wheel_fr) * 0.5773503
-        master_vy = (wheel_fl + wheel_fr - 2.0 * wheel_b) * 0.3333333
-        master_wz = (wheel_fl + wheel_fr + wheel_b) * 0.3333333
-        master_orbit_wz = master_wz
-        master_state_code = 5
-    else:
-        measured_vx = decode_i16(payload, 0) / 10.0
-        measured_vy = decode_i16(payload, 2) / 10.0
-        master_vx = measured_vx * 0.5 + measured_vy * 0.8660254
-        master_vy = measured_vy * 0.5 - measured_vx * 0.8660254
-        master_wz = decode_i16(payload, 4) / 10.0
+    measured_vx = decode_i16(payload, 0) / 10.0
+    measured_vy = decode_i16(payload, 2) / 10.0
+    master_vx = measured_vx * 0.5 + measured_vy * 0.8660254
+    master_vy = measured_vy * 0.5 - measured_vx * 0.8660254
+    master_wz = decode_i16(payload, 4) / 10.0
     if master_state_code >= _Master_State_Preview_Flag:
         preview_vx = payload[6]
         preview_vy = payload[7]
@@ -880,7 +887,7 @@ def handle_coop_frame(msg_type, seq, payload, payload_len):
             preview_vy * 0.25 - preview_vx * 0.4330127
         )
         master_state_code -= _Master_State_Preview_Flag
-    elif master_state_code == 5 and raw_state_code != 16:
+    elif master_state_code == 5:
         master_orbit_wz = decode_i16(payload, 6) / 10.0
     master_flags = payload[8]
     master_last_rx_ms = utime.ticks_ms()
@@ -1137,7 +1144,7 @@ def update_follow_targets(gyro_z):
     spin_ff_wz = update_spin_feedforward_latch(
         now,
         fresh_motion,
-        explicit_spin,
+        explicit_spin and master_state_code != 16,
         ff_wz,
         seen,
         cam_error_angle,
@@ -1203,6 +1210,11 @@ def update_follow_targets(gyro_z):
             reset_speed_outputs()
             follow_ff_wz = 0.0
         elif last_follow_mode_key == 0 and mode_key == 1:
+            speed_reset(pid_fl)
+            speed_reset(pid_fr)
+            speed_reset(pid_b)
+            reset_turn_loop_state()
+        elif last_follow_mode_key == 0 and mode_key == 3:
             speed_reset(pid_fl)
             speed_reset(pid_fr)
             speed_reset(pid_b)
@@ -1501,7 +1513,11 @@ def update_follow_targets(gyro_z):
         vx_ramp = Follow_Command_Ramp_Vx
         vy_ramp = Follow_Command_Ramp_Vy
     if recovery_follow and not orbit_settling and not orbit_entry_active:
-        vx_ramp = Follow_Return_Command_Ramp_Vx
+        vx_ramp = (
+            2.4
+            if master_state_code == 11
+            else Follow_Return_Command_Ramp_Vx
+        )
         vy_ramp = Follow_Return_Command_Ramp_Vy
     if explicit_orbit and not orbit_settling:
         last_cmd_vx = alloc_base_vx + follow_state[4]
@@ -1599,11 +1615,14 @@ def update_follow_targets(gyro_z):
                 Follow_Orbit_Wz_Feedforward_Limit,
             )
         elif spin_mode_active:
-            turn_rate_cmd = clamp(
-                follow_ff_wz * Follow_Spin_Wz_Feedforward_Gain,
-                -Follow_Spin_Wz_Feedforward_Limit,
-                Follow_Spin_Wz_Feedforward_Limit,
-            )
+            if master_state_code == 16:
+                turn_rate_cmd = clamp(follow_ff_wz, -160.0, 160.0)
+            else:
+                turn_rate_cmd = clamp(
+                    follow_ff_wz * Follow_Spin_Wz_Feedforward_Gain,
+                    -Follow_Spin_Wz_Feedforward_Limit,
+                    Follow_Spin_Wz_Feedforward_Limit,
+                )
         else:
             turn_rate_cmd = follow_ff_wz * Follow_Normal_Wz_Feedforward_Gain
             turn_rate_cmd *= lost_scale

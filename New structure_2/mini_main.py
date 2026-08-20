@@ -11,8 +11,8 @@ EXPOSURE_US = 1200
 sensor.reset()
 sensor.set_pixformat(sensor.GRAYSCALE)
 sensor.set_framesize(sensor.QQVGA)
-sensor.set_vflip(True)
-sensor.set_hmirror(True)
+sensor.set_vflip(False)
+sensor.set_hmirror(False)
 sensor.set_auto_gain(False)
 sensor.set_auto_exposure(False, exposure_us=EXPOSURE_US)
 try:
@@ -23,7 +23,7 @@ sensor.skip_frames(time=800)
 
 
 # ================= UART =================
-uart = UART(2, 9600)
+uart = UART(12, 9600)
 uart.init(9600, timeout_char=1000)
 
 TRACK_TRIGGER = b"TRACK\n"
@@ -52,11 +52,11 @@ MAX_LAMP_H = 14
 MAX_PAIR_DY = 36
 MIN_PAIR_DX = 4
 MAX_PAIR_DX = 90
-TARGET_PAIR_DX = 26
-TARGET_PAIR_DY = -13
-TARGET_PAIR_LEN = 29
-TARGET_CENTER_X_OFFSET = 6
-TARGET_CENTER_Y = 70
+TARGET_PAIR_DX = 33
+TARGET_PAIR_DY = 12
+TARGET_PAIR_LEN = 35
+TARGET_CENTER_X_OFFSET = 5
+TARGET_CENTER_Y = 50
 ERROR_OUTPUT_SCALE = 2
 DIST_PAIR_LEN_WEIGHT = 4
 DIST_CENTER_Y_WEIGHT = 4
@@ -369,13 +369,15 @@ def process_frame(img):
     err_x = (center_x - (IMG_CENTER_X + TARGET_CENTER_X_OFFSET)) * ERROR_OUTPUT_SCALE
     len_err_y = (TARGET_PAIR_LEN - pair_len) * ERROR_OUTPUT_SCALE
     center_err_y = -(TARGET_CENTER_Y - center_y) * ERROR_OUTPUT_SCALE
-    err_y = (
-        len_err_y * DIST_PAIR_LEN_WEIGHT
-        + center_err_y * DIST_CENTER_Y_WEIGHT
-    ) // (DIST_PAIR_LEN_WEIGHT + DIST_CENTER_Y_WEIGHT)
+    err_y = -(
+        (
+            len_err_y * DIST_PAIR_LEN_WEIGHT
+            + center_err_y * DIST_CENTER_Y_WEIGHT
+        ) // (DIST_PAIR_LEN_WEIGHT + DIST_CENTER_Y_WEIGHT)
+    )
     angle_raw = pair_angle_error_num(pair_dy, span_x)
     if pair_len > 0:
-        err_angle = (angle_raw * ERROR_OUTPUT_SCALE) // pair_len
+        err_angle = -((angle_raw * ERROR_OUTPUT_SCALE) // pair_len)
     else:
         err_angle = 0
     err_x, err_y, err_angle = update_ema(int(err_x), int(err_y), int(err_angle))
